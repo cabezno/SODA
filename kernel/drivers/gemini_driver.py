@@ -13,10 +13,7 @@ class GeminiDriver:
         # Usamos versiones "frozen" de 2026 y finales de 2025
         # Estos IDs son mucho más estables que los alias dinámicos
         self.candidate_models = [
-            "gemini-1.5-pro-002",
-            "gemini-1.5-flash-002",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
+           
             "gemini-2.5-pro",
             "gemini-2.5-flash",
             "gemini-3.0-pro",

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from kernel.code_generator import CodeGenerator
 from kernel.dependency_graph import DependencyGraph, ExecutionPlan
 from kernel.drivers.claude_driver import ClaudeDriver
 from kernel.drivers.gemini_driver import GeminiDriver
@@ -51,6 +52,7 @@ class SodaOrchestrator:
         self.claude = ClaudeDriver()
         self.gemini = GeminiDriver()
         self.ollama = OllamaDriver(model_name="qwen2.5-coder:7b")
+        self.code_gen = CodeGenerator(self.ollama, self.claude)
 
     # --- Utilidades ---
 
@@ -123,7 +125,7 @@ class SodaOrchestrator:
                 return result
             print(f"  [!] Fallo en intento {attempt}: {result[:80]}")
 
-        print("  [↑] Escalando a Claude Sonnet...")
+        print("  [^^] Escalando a Claude Sonnet...")
         result = await self._call_claude(role, task)
         if "Error" not in result:
             return result
@@ -145,7 +147,7 @@ class SodaOrchestrator:
 
         out = project.workspace / "blueprint.json"
         out.write_text(json.dumps(project.blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [✓] Blueprint → {out}")
+        print(f"  [OK] Blueprint → {out}")
         self._save_state(project)
 
     async def _phase_architecture(self, project: Project) -> None:
@@ -159,7 +161,40 @@ class SodaOrchestrator:
 
         out = project.workspace / "architecture.json"
         out.write_text(json.dumps(project.architecture, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [✓] Arquitectura → {out}")
+        print(f"  [OK] Arquitectura → {out}")
+        self._save_state(project)
+
+    async def _phase_development(self, project: Project, plan: ExecutionPlan) -> None:
+        print("\n[FASE 4] Desarrollo — generando código...")
+        project.state = ProjectState.DEVELOPMENT
+
+        modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
+        source_dir = project.workspace / "source"
+        source_dir.mkdir(exist_ok=True)
+
+        for i, level in enumerate(plan.levels):
+            tag = f"[paralelo x{len(level)}]" if len(level) > 1 else "[secuencial]"
+            print(f"\n  Nivel {i} {tag}: {' | '.join(level)}")
+
+            # Lanzar módulos del nivel en paralelo
+            tasks = [
+                self.code_gen.generate_module(
+                    modulos_by_name[nombre],
+                    project.blueprint,
+                    project.architecture,
+                )
+                for nombre in level
+                if nombre in modulos_by_name
+            ]
+            results_per_module = await asyncio.gather(*tasks)
+
+            for generated_files in results_per_module:
+                for gf in generated_files:
+                    out = source_dir / gf.filepath
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_text(gf.content, encoding="utf-8")
+
+        print(f"\n  [OK] Código generado → {source_dir}")
         self._save_state(project)
 
     async def _phase_planning(self, project: Project) -> ExecutionPlan:
@@ -182,7 +217,7 @@ class SodaOrchestrator:
         out.write_text(json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8")
 
         print(graph.summary())
-        print(f"  [✓] Plan → {out}")
+        print(f"  [OK] Plan → {out}")
         self._save_state(project)
         return plan
 
@@ -206,11 +241,14 @@ class SodaOrchestrator:
         print(f"\n[CHECKPOINT 2] Arquitectura lista.")
         print(f"  Revisar en: {project.workspace / 'architecture.json'}")
 
-        await self._phase_planning(project)
+        plan = await self._phase_planning(project)
+
+        print("\n[CHECKPOINT 3] Plan listo. Iniciando desarrollo...")
+        await self._phase_development(project, plan)
 
         project.state = ProjectState.DONE
         self._save_state(project)
-        print(f"\n[✓] Pipeline completado. Workspace: {project.workspace}")
+        print(f"\n[OK] Pipeline completado. Workspace: {project.workspace}")
         return project
 
 
