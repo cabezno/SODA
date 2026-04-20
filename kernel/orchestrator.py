@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from kernel.dependency_graph import DependencyGraph, ExecutionPlan
 from kernel.drivers.claude_driver import ClaudeDriver
 from kernel.drivers.gemini_driver import GeminiDriver
 from kernel.drivers.ollama_driver import OllamaDriver
@@ -161,6 +162,30 @@ class SodaOrchestrator:
         print(f"  [✓] Arquitectura → {out}")
         self._save_state(project)
 
+    async def _phase_planning(self, project: Project) -> ExecutionPlan:
+        print("\n[FASE 3] Planificación — construyendo DAG de módulos...")
+        project.state = ProjectState.PLANNING
+
+        modulos = project.architecture.get("modulos", [])
+        if not modulos:
+            raise ValueError("La arquitectura no tiene módulos definidos.")
+
+        graph = DependencyGraph(modulos)
+        plan = graph.build_execution_plan()
+
+        plan_data = {
+            "levels": plan.levels,
+            "order": plan.order,
+            "parallelizable": plan.parallelizable,
+        }
+        out = project.workspace / "execution_plan.json"
+        out.write_text(json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        print(graph.summary())
+        print(f"  [✓] Plan → {out}")
+        self._save_state(project)
+        return plan
+
     # --- Entry point ---
 
     async def run(self, description: str) -> Project:
@@ -180,6 +205,8 @@ class SodaOrchestrator:
 
         print(f"\n[CHECKPOINT 2] Arquitectura lista.")
         print(f"  Revisar en: {project.workspace / 'architecture.json'}")
+
+        await self._phase_planning(project)
 
         project.state = ProjectState.DONE
         self._save_state(project)
