@@ -15,12 +15,16 @@ async def get_index():
 
 @app.get("/api/stats")
 async def get_stats():
-    # Devuelve VRAM, CPU y RAM en tiempo real
     return {
         "vram": monitor.get_vram_info(),
         "system": monitor.get_system_stats(),
         "recommendation": monitor.get_best_model()
     }
+
+@app.get("/api/ram_total")
+async def get_ram_total():
+    import psutil
+    return {"ram_total_gb": psutil.virtual_memory().total / (1024 ** 3)}
 
 @app.post("/api/event")
 async def receive_event(request: Request):

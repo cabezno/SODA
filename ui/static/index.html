@@ -1,112 +1,306 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>SODA Mission Control</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs/loader.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 0; display: flex; height: 100vh; overflow: hidden; }
-        #sidebar { width: 280px; border-right: 1px solid #333; background: #252526; display: flex; flex-direction: column; }
-        #main-view { flex: 1; display: flex; flex-direction: column; }
-        #editor-container { flex: 1; background: #1e1e1e; }
-        #console { height: 180px; background: #000; border-top: 2px solid #333; padding: 10px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
-        
-        .header { padding: 10px; background: #333; font-size: 11px; font-weight: bold; color: #888; border-bottom: 1px solid #222; }
-        
-        /* Dashboard de Hardware */
-        .hw-panel { padding: 15px; background: #2d2d2d; border-bottom: 1px solid #444; }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* Top bar */
+        #topbar {
+            display: flex; align-items: center; gap: 16px;
+            padding: 0 16px; height: 42px; min-height: 42px;
+            background: #2d2d2d; border-bottom: 1px solid #3c3c3c;
+            font-size: 12px;
+        }
+        #topbar .brand { font-weight: 700; font-size: 13px; color: #fff; letter-spacing: 1px; }
+        #topbar .model-badge {
+            padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;
+            background: #0e4a72; color: #4ec9b0; border: 1px solid #007acc;
+        }
+        #phase-track { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .phase-step {
+            padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 600;
+            background: #3c3c3c; color: #666; border: 1px solid #444;
+            transition: all 0.3s ease;
+        }
+        .phase-step.active { background: #0e4a72; color: #fff; border-color: #007acc; }
+        .phase-step.done { background: #1e4620; color: #89d185; border-color: #4ec9b0; }
+        .phase-sep { color: #444; font-size: 10px; }
+        #status-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #444;
+            margin-left: 8px; transition: background 0.3s;
+        }
+        #status-dot.running { background: #cca700; animation: pulse 1.2s infinite; }
+        #status-dot.done { background: #4ec9b0; animation: none; }
+        #status-dot.failed { background: #f44747; animation: none; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        /* Body layout */
+        #body { display: flex; flex: 1; overflow: hidden; }
+
+        /* Sidebar */
+        #sidebar { width: 260px; min-width: 260px; background: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; }
+
+        .panel-header { padding: 6px 12px; background: #2d2d2d; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; border-bottom: 1px solid #222; }
+
+        /* Hardware panel */
+        #hw-panel { padding: 12px; border-bottom: 1px solid #333; }
         .hw-metric { margin-bottom: 10px; }
+        .hw-metric:last-child { margin-bottom: 0; }
         .hw-label { font-size: 10px; color: #aaa; margin-bottom: 4px; display: flex; justify-content: space-between; }
-        .bar-bg { width: 100%; height: 6px; background: #444; border-radius: 3px; overflow: hidden; }
-        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; }
+        .bar-bg { width: 100%; height: 5px; background: #3c3c3c; border-radius: 3px; overflow: hidden; }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 3px; }
         .vram-fill { background: #007acc; }
         .cpu-fill { background: #4ec9b0; }
         .ram-fill { background: #ce9178; }
-        
-        .file-item { padding: 8px 15px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2d2d2d; }
+
+        /* File list */
+        #file-list { flex: 1; overflow-y: auto; }
+        .file-item {
+            padding: 6px 12px; cursor: pointer; font-size: 12px;
+            display: flex; align-items: center; gap: 6px;
+            border-bottom: 1px solid #2d2d2d; color: #ccc;
+        }
         .file-item:hover { background: #2a2d2e; }
-        .log-entry { margin-bottom: 4px; border-left: 2px solid #444; padding-left: 8px; }
+        .file-item.active { background: #094771; color: #fff; }
+        .file-icon { font-size: 11px; opacity: 0.7; }
+        .file-validated { margin-left: auto; font-size: 10px; }
+        .file-validated.ok { color: #4ec9b0; }
+        .file-validated.fail { color: #f44747; }
+
+        /* Main area */
+        #main-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        #editor-container { flex: 1; min-height: 0; }
+
+        /* Console */
+        #console-wrap { height: 190px; min-height: 190px; border-top: 2px solid #333; display: flex; flex-direction: column; }
+        #console-header { display: flex; align-items: center; padding: 0 10px; height: 26px; background: #2d2d2d; border-bottom: 1px solid #222; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; }
+        #console-clear { margin-left: auto; cursor: pointer; color: #555; font-size: 11px; padding: 2px 6px; }
+        #console-clear:hover { color: #ccc; }
+        #console { flex: 1; background: #0d0d0d; padding: 8px 10px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
+        .log-entry { margin-bottom: 3px; display: flex; gap: 8px; line-height: 1.5; }
+        .log-time { color: #555; flex-shrink: 0; }
+        .log-msg { word-break: break-all; }
+        .log-entry.START .log-msg    { color: #dcdcaa; }
+        .log-entry.DONE .log-msg     { color: #4ec9b0; font-weight: 600; }
+        .log-entry.FAILED .log-msg   { color: #f44747; font-weight: 600; }
+        .log-entry.PHASE_START .log-msg  { color: #9cdcfe; }
+        .log-entry.CHECKPOINT .log-msg   { color: #cca700; }
+        .log-entry.FILE_GENERATED .log-msg { color: #b5cea8; }
+        .log-entry.LOG .log-msg      { color: #888; }
     </style>
 </head>
 <body>
-    <div id="sidebar">
-        <div class="header">HARDWARE TELEMETRY</div>
-        <div class="hw-panel">
-            <div class="hw-metric">
-                <div class="hw-label"><span>GPU VRAM (5070 Ti)</span> <span id="vram-text">0%</span></div>
-                <div class="bar-bg"><div id="vram-bar" class="bar-fill vram-fill"></div></div>
+    <div id="topbar">
+        <span class="brand">SODA</span>
+        <span id="model-badge" class="model-badge">--</span>
+        <div id="phase-track">
+            <span class="phase-step" id="ph-requirements">REQ</span>
+            <span class="phase-sep">›</span>
+            <span class="phase-step" id="ph-architecture">ARCH</span>
+            <span class="phase-sep">›</span>
+            <span class="phase-step" id="ph-planning">PLAN</span>
+            <span class="phase-sep">›</span>
+            <span class="phase-step" id="ph-development">DEV</span>
+        </div>
+        <div id="status-dot" title="Idle"></div>
+    </div>
+
+    <div id="body">
+        <div id="sidebar">
+            <div class="panel-header">HARDWARE</div>
+            <div id="hw-panel">
+                <div class="hw-metric">
+                    <div class="hw-label"><span>GPU VRAM</span><span id="vram-text">--%</span></div>
+                    <div class="bar-bg"><div id="vram-bar" class="bar-fill vram-fill"></div></div>
+                </div>
+                <div class="hw-metric">
+                    <div class="hw-label"><span>CPU</span><span id="cpu-text">--%</span></div>
+                    <div class="bar-bg"><div id="cpu-bar" class="bar-fill cpu-fill"></div></div>
+                </div>
+                <div class="hw-metric">
+                    <div class="hw-label"><span>RAM</span><span id="ram-text">--%</span></div>
+                    <div class="bar-bg"><div id="ram-bar" class="bar-fill ram-fill"></div></div>
+                </div>
             </div>
-            <div class="hw-metric">
-                <div class="hw-label"><span>CPU (i9 13900)</span> <span id="cpu-text">0%</span></div>
-                <div class="bar-bg"><div id="cpu-bar" class="bar-fill cpu-fill"></div></div>
-            </div>
-            <div class="hw-metric">
-                <div class="hw-label"><span>SYSTEM RAM</span> <span id="ram-text">0%</span></div>
-                <div class="bar-bg"><div id="ram-bar" class="bar-fill ram-fill"></div></div>
+            <div class="panel-header">FILES</div>
+            <div id="file-list"></div>
+        </div>
+
+        <div id="main-view">
+            <div id="editor-container"></div>
+            <div id="console-wrap">
+                <div id="console-header">
+                    CONSOLE
+                    <span id="console-clear" onclick="document.getElementById('console').innerHTML=''">clear</span>
+                </div>
+                <div id="console"></div>
             </div>
         </div>
-        <div class="header">EXPLORADOR DE PROYECTO</div>
-        <div id="file-list"></div>
-    </div>
-    <div id="main-view">
-        <div id="editor-container"></div>
-        <div id="console"></div>
     </div>
 
     <script>
         let editor;
         let files = {};
+        let ramTotal = null;
+        let activeFile = null;
+        let currentPhase = null;
+        const phases = ['requirements', 'architecture', 'planning', 'development'];
 
-        // Función para actualizar Hardware en tiempo real
-        async function updateStats() {
-            try {
-                const res = await fetch('/api/stats');
-                const data = await res.json();
-                
-                // VRAM calculation
-                const vramUsed = data.vram.total - data.vram.free;
-                const vramPct = (vramUsed / data.vram.total) * 100;
-                document.getElementById('vram-bar').style.width = vramPct + '%';
-                document.getElementById('vram-text').innerText = Math.round(vramPct) + '%';
-                
-                // CPU & RAM
-                document.getElementById('cpu-bar').style.width = data.system.cpu_usage + '%';
-                document.getElementById('cpu-text').innerText = Math.round(data.system.cpu_usage) + '%';
-                
-                const ramUsage = 100 - ((data.system.ram_free_gb / 64) * 100); // Asumiendo 64GB segun handoff
-                document.getElementById('ram-bar').style.width = ramUsage + '%';
-                document.getElementById('ram-text').innerText = Math.round(ramUsage) + '%';
-            } catch(e) {}
-        }
-        setInterval(updateStats, 2000); // Cada 2 segundos
-
+        // --- Monaco ---
         require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs' } });
         require(['vs/editor/editor.main'], function () {
             editor = monaco.editor.create(document.getElementById('editor-container'), {
-                value: "# SODA Mission Control Ready",
-                language: 'python', theme: 'vs-dark', automaticLayout: true
+                value: '# SODA Mission Control — waiting for pipeline...',
+                language: 'python', theme: 'vs-dark', automaticLayout: true,
+                readOnly: true, minimap: { enabled: false }
             });
         });
 
-        const ws = new WebSocket(`ws://${window.location.host}/ws`);
-        ws.onmessage = (event) => {
-            const payload = JSON.parse(event.data);
-            if (payload.event_type === 'FILE_GENERATED') {
-                const { filename, code } = payload.data;
-                files[filename] = code;
-                const item = document.createElement('div');
-                item.className = 'file-item';
-                item.innerText = `📄 ${filename}`;
-                item.onclick = () => editor.setValue(files[filename]);
-                document.getElementById('file-list').appendChild(item);
-                editor.setValue(code);
-            }
+        function langFromFilename(name) {
+            const ext = name.split('.').pop().toLowerCase();
+            const map = { py: 'python', js: 'javascript', ts: 'typescript', html: 'html', css: 'css', json: 'json', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'shell', txt: 'plaintext' };
+            return map[ext] || 'plaintext';
+        }
+
+        function iconFromFilename(name) {
+            const ext = name.split('.').pop().toLowerCase();
+            const map = { py: '[py]', js: '[js]', ts: '[ts]', html: '[html]', css: '[css]', json: '[json]', md: '[md]' };
+            return map[ext] || '[file]';
+        }
+
+        function openFile(filename) {
+            if (!editor) return;
+            document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+            const item = document.querySelector(`.file-item[data-file="${CSS.escape(filename)}"]`);
+            if (item) item.classList.add('active');
+            const model = monaco.editor.createModel(files[filename], langFromFilename(filename));
+            editor.setModel(model);
+            activeFile = filename;
+        }
+
+        // --- Hardware polling ---
+        async function updateStats() {
+            try {
+                const data = await fetch('/api/stats').then(r => r.json());
+                const vramUsedPct = data.vram.total > 0 ? ((data.vram.total - data.vram.free) / data.vram.total * 100) : 0;
+                document.getElementById('vram-bar').style.width = vramUsedPct + '%';
+                document.getElementById('vram-text').textContent = Math.round(vramUsedPct) + '%';
+
+                document.getElementById('cpu-bar').style.width = data.system.cpu_usage + '%';
+                document.getElementById('cpu-text').textContent = Math.round(data.system.cpu_usage) + '%';
+
+                if (!ramTotal) {
+                    const total = await fetch('/api/ram_total').then(r => r.json()).catch(() => null);
+                    ramTotal = total?.ram_total_gb || 64;
+                }
+                const ramUsedPct = Math.max(0, 100 - (data.system.ram_free_gb / ramTotal * 100));
+                document.getElementById('ram-bar').style.width = ramUsedPct + '%';
+                document.getElementById('ram-text').textContent = Math.round(ramUsedPct) + '%';
+
+                if (data.recommendation) {
+                    const [model, mode] = data.recommendation;
+                    document.getElementById('model-badge').textContent = `${model} [${mode}]`;
+                }
+            } catch(e) {}
+        }
+        updateStats();
+        setInterval(updateStats, 2000);
+
+        // --- Phase tracker ---
+        function setPhase(phase, done = false) {
+            phases.forEach(p => {
+                const el = document.getElementById('ph-' + p);
+                if (!el) return;
+                el.className = 'phase-step';
+                if (p === phase && !done) el.classList.add('active');
+                else if (phases.indexOf(p) < phases.indexOf(phase)) el.classList.add('done');
+            });
+            if (done) phases.forEach(p => document.getElementById('ph-' + p)?.classList.add('done'));
+        }
+
+        function setStatus(state) {
+            const dot = document.getElementById('status-dot');
+            dot.className = '';
+            dot.classList.add(state);
+        }
+
+        // --- Console ---
+        function log(message, type = 'LOG') {
             const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `> ${payload.message}`;
-            document.getElementById('console').appendChild(entry);
-            document.getElementById('console').scrollTop = document.getElementById('console').scrollHeight;
-        };
+            entry.className = `log-entry ${type}`;
+            const now = new Date();
+            const ts = now.toTimeString().slice(0, 8);
+            entry.innerHTML = `<span class="log-time">${ts}</span><span class="log-msg">${escapeHtml(message)}</span>`;
+            const console_ = document.getElementById('console');
+            console_.appendChild(entry);
+            console_.scrollTop = console_.scrollHeight;
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // --- WebSocket ---
+        function connectWS() {
+            const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+            ws.onmessage = (event) => {
+                const payload = JSON.parse(event.data);
+                const type = payload.event_type || 'LOG';
+                const msg = payload.message || '';
+                const data = payload.data || {};
+
+                log(msg, type);
+
+                switch (type) {
+                    case 'START':
+                        setStatus('running');
+                        document.getElementById('file-list').innerHTML = '';
+                        files = {};
+                        phases.forEach(p => document.getElementById('ph-' + p).className = 'phase-step');
+                        break;
+
+                    case 'PHASE_START':
+                        if (data.phase) setPhase(data.phase);
+                        break;
+
+                    case 'CHECKPOINT':
+                        break;
+
+                    case 'FILE_GENERATED': {
+                        const { filename, code, validated } = data;
+                        if (!filename || code === undefined) break;
+                        files[filename] = code;
+                        const item = document.createElement('div');
+                        item.className = 'file-item';
+                        item.dataset.file = filename;
+                        item.innerHTML = `<span class="file-icon">${iconFromFilename(filename)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(filename)}</span><span class="file-validated ${validated ? 'ok' : 'fail'}">${validated ? 'OK' : 'ERR'}</span>`;
+                        item.onclick = () => openFile(filename);
+                        document.getElementById('file-list').appendChild(item);
+                        openFile(filename);
+                        break;
+                    }
+
+                    case 'DONE':
+                        setPhase('development', true);
+                        setStatus('done');
+                        break;
+
+                    case 'FAILED':
+                        setStatus('failed');
+                        break;
+                }
+            };
+
+            ws.onclose = () => { setTimeout(connectWS, 3000); };
+            ws.onerror = () => ws.close();
+        }
+
+        connectWS();
     </script>
 </body>
 </html>
