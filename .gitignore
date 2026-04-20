@@ -1,0 +1,32 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+venv/
+.venv/
+.uv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# SODA runtime
+projects/*/chromadb/
+projects/*/logs/
+projects/*/backups/
+data/
+
+# IDEs
+.vscode/
+.idea/
+*.cursor-*
+
+# OS
+.DS_Store
+Thumbs.db
