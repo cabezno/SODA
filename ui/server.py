@@ -1,10 +1,14 @@
 import os
 import json
 import asyncio
+from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, JSONResponse
 from ui.websocket_handler import manager
 from kernel.resource_monitor import ResourceMonitor
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 app = FastAPI()
 monitor = ResourceMonitor()
