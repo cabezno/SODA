@@ -82,9 +82,7 @@ class TelegramGateway(MessagingGateway):
         t.start()
 
     def _run_bot_sync(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._run_bot())
+        asyncio.run(self._run_bot())
 
     async def _run_bot(self):
         self._app = Application.builder().token(self._token).build()
@@ -92,7 +90,10 @@ class TelegramGateway(MessagingGateway):
         self._app.add_handler(CommandHandler("pair", self._cmd_pair))
         self._app.add_handler(CommandHandler("status", self._cmd_status))
         self._app.add_handler(CommandHandler("projects", self._cmd_projects))
-        await self._app.run_polling(stop_signals=None)
+        async with self._app:
+            await self._app.start()
+            await self._app.updater.start_polling(drop_pending_updates=False)
+            await asyncio.Event().wait()  # block until thread is killed
 
     async def _cmd_start(self, update: Update, ctx: ContextTypes):
         await update.message.reply_text(
