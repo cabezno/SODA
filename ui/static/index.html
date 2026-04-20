@@ -129,8 +129,58 @@
         .log-entry.FILE_GENERATED .log-msg { color: #b5cea8; }
         .log-entry.MODULE_START .log-msg  { color: #c586c0; }
         .log-entry.MODULE_DONE .log-msg   { color: #89d185; }
-        .log-entry.CAPABILITIES .log-msg  { color: #dcdcaa; }
-        .log-entry.LOG .log-msg           { color: #666; }
+        .log-entry.CAPABILITIES .log-msg      { color: #dcdcaa; }
+        .log-entry.WISDOM .log-msg            { color: #f0a050; }
+        .log-entry.HEALTH_WARN .log-msg       { color: #f44747; font-weight: 600; }
+        .log-entry.MODIFICATION_PLAN .log-msg { color: #9cdcfe; }
+        .log-entry.IMPACT_REPORT .log-msg     { color: #c586c0; }
+        .log-entry.LOG .log-msg               { color: #666; }
+
+        /* Wisdom panel — shows before pipeline runs */
+        #wisdom-panel {
+            border-top: 1px solid #333; background: #1a1a1a; flex-shrink: 0;
+            max-height: 130px; overflow-y: auto;
+        }
+        #wisdom-panel.hidden { display: none; }
+        .wisdom-item {
+            display: flex; gap: 8px; padding: 5px 10px;
+            border-bottom: 1px solid #222; font-size: 11px; line-height: 1.4;
+        }
+        .wisdom-tag {
+            font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 2px;
+            flex-shrink: 0; margin-top: 2px; text-transform: uppercase;
+        }
+        .wisdom-tag.ambiguity       { background: #4a3000; color: #f0a050; }
+        .wisdom-tag.complexity      { background: #3a1a4a; color: #c586c0; }
+        .wisdom-tag.missing_requirement { background: #003a3a; color: #4ec9b0; }
+        .wisdom-tag.tradeoff        { background: #1a3a00; color: #89d185; }
+        .wisdom-tag.warning         { background: #4a0000; color: #f44747; }
+        .wisdom-tag.ok              { background: #1a3020; color: #89d185; }
+        .wisdom-body { flex: 1; }
+        .wisdom-msg  { color: #ccc; }
+        .wisdom-sug  { color: #666; margin-top: 2px; font-style: italic; }
+
+        /* Project chat — unlocks after DONE */
+        #chat-wrap {
+            border-top: 2px solid #333; flex-shrink: 0;
+            display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+        }
+        #chat-wrap.hidden { display: none; }
+        #chat-input {
+            flex: 1; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px;
+            color: #d4d4d4; font-size: 12px; font-family: 'Segoe UI', sans-serif;
+            padding: 5px 10px; resize: none; outline: none; height: 28px;
+            transition: border-color 0.2s, height 0.2s;
+        }
+        #chat-input:focus { border-color: #c586c0; height: 60px; }
+        #chat-input:disabled { opacity: 0.4; }
+        #chat-btn {
+            padding: 5px 14px; background: #3a1a4a; color: #c586c0; border: 1px solid #c586c0;
+            border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;
+            white-space: nowrap; transition: background 0.2s;
+        }
+        #chat-btn:hover:not(:disabled) { background: #5a2a6a; }
+        #chat-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -185,12 +235,17 @@
 
         <div id="main-view">
             <div id="editor-container"></div>
+            <div id="wisdom-panel" class="hidden"></div>
             <div id="console-wrap">
                 <div id="console-header">
                     CONSOLE
                     <span id="console-clear" onclick="document.getElementById('console').innerHTML=''">clear</span>
                 </div>
                 <div id="console"></div>
+            </div>
+            <div id="chat-wrap" class="hidden">
+                <textarea id="chat-input" placeholder="Ask to modify the project… (Ctrl+Enter to send)"></textarea>
+                <button id="chat-btn" onclick="sendModification()">Modify</button>
             </div>
         </div>
     </div>
@@ -200,6 +255,7 @@
         let files = {};
         let ramTotal = null;
         let activeFile = null;
+        let currentProjectId = null;
         const phases = ['capabilities', 'requirements', 'architecture', 'planning', 'development'];
 
         // --- Monaco ---
@@ -264,6 +320,68 @@
             if (!chip) return;
             chip.className = `mod-chip ${state}`;
         }
+
+        // --- Wisdom panel ---
+        function renderWisdom(observations) {
+            const panel = document.getElementById('wisdom-panel');
+            panel.innerHTML = '';
+            if (!observations || observations.length === 0) return;
+            panel.classList.remove('hidden');
+            observations.forEach(obs => {
+                const item = document.createElement('div');
+                item.className = 'wisdom-item';
+                item.innerHTML = `
+                    <span class="wisdom-tag ${obs.type}">${obs.type.replace('_', ' ')}</span>
+                    <div class="wisdom-body">
+                        <div class="wisdom-msg">${escapeHtml(obs.message)}</div>
+                        ${obs.suggestion ? `<div class="wisdom-sug">${escapeHtml(obs.suggestion)}</div>` : ''}
+                    </div>`;
+                panel.appendChild(item);
+            });
+        }
+
+        // --- Project Chat ---
+        async function sendModification() {
+            if (!currentProjectId) return;
+            const input = document.getElementById('chat-input');
+            const btn = document.getElementById('chat-btn');
+            const request = input.value.trim();
+            if (!request) { input.focus(); return; }
+
+            input.disabled = true;
+            btn.disabled = true;
+            btn.textContent = 'Analyzing…';
+
+            try {
+                const res = await fetch('/api/modify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({project_id: currentProjectId, request}),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    log(data.message || 'Modification failed', 'FAILED');
+                } else {
+                    input.value = '';
+                }
+            } catch(e) {
+                log('Could not reach server', 'FAILED');
+            } finally {
+                input.disabled = false;
+                btn.disabled = false;
+                btn.textContent = 'Modify';
+                input.focus();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatInput = document.getElementById('chat-input');
+            if (chatInput) {
+                chatInput.addEventListener('keydown', e => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendModification();
+                });
+            }
+        });
 
         // --- Run ---
         async function startRun() {
@@ -380,15 +498,19 @@
                 switch (type) {
                     case 'START':
                         setStatus('running');
+                        currentProjectId = data.project_id || null;
                         document.getElementById('file-list').innerHTML = '';
                         document.getElementById('tree-wrap').innerHTML = '';
                         document.getElementById('tree-section').classList.add('hidden');
+                        document.getElementById('wisdom-panel').innerHTML = '';
+                        document.getElementById('wisdom-panel').classList.add('hidden');
+                        document.getElementById('chat-wrap').classList.add('hidden');
                         files = {};
                         phases.forEach(p => { const el = document.getElementById('ph-' + p); if(el) el.className = 'phase-step'; });
                         break;
 
                     case 'PHASE_START':
-                        if (data.phase) setPhase(data.phase);
+                        if (data.phase && data.phase !== 'wisdom' && data.phase !== 'modification') setPhase(data.phase);
                         break;
 
                     case 'CAPABILITIES':
@@ -397,6 +519,15 @@
                             log(`Profile: ${data.profile} | Skills: ${skills}`, 'CAPABILITIES');
                         }
                         break;
+
+                    case 'WISDOM': {
+                        const wisdomBuf = window._wisdomBuf = window._wisdomBuf || [];
+                        if (data.type !== 'ok') {
+                            wisdomBuf.push(data);
+                            renderWisdom(wisdomBuf);
+                        }
+                        break;
+                    }
 
                     case 'CHECKPOINT':
                         if (data.number === 3 && data.levels) buildTree(data.levels);
@@ -424,10 +555,27 @@
                         break;
                     }
 
+                    case 'MODIFICATION_PLAN':
+                        log(`[${data.change_type?.toUpperCase()}] ${data.impact_summary || data.description}`, 'MODIFICATION_PLAN');
+                        break;
+
+                    case 'IMPACT_REPORT': {
+                        const affected = [...(data.directly_affected||[]), ...(data.transitively_affected||[])];
+                        log(`Impact [${data.risk_level}] — affects: ${affected.join(', ') || 'none'}. ${data.risk_reason}`, 'IMPACT_REPORT');
+                        affected.forEach(m => setModuleState(m, 'running'));
+                        break;
+                    }
+
+                    case 'HEALTH_WARN':
+                        log(`[HEALTH L${data.level}] ${data.reason}`, 'HEALTH_WARN');
+                        break;
+
                     case 'DONE':
                         setPhase(null, true);
                         setStatus('done');
                         unlockInput();
+                        window._wisdomBuf = [];
+                        document.getElementById('chat-wrap').classList.remove('hidden');
                         break;
 
                     case 'FAILED':

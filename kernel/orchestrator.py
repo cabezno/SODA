@@ -20,6 +20,10 @@ from kernel.drivers.ollama_driver import OllamaDriver
 from kernel.context.context_builder import ContextBuilder
 from kernel.capabilities.skill_matcher import SkillMatcher
 from kernel.capabilities.profile_matcher import ProfileMatcher
+from kernel.intelligence.wisdom_agent import WisdomAgent
+from kernel.intelligence.goal_interpreter import GoalInterpreter
+from kernel.intelligence.impact_analyzer import ImpactAnalyzer
+from kernel.intelligence.context_health_monitor import ContextHealthMonitor
 
 
 class ProjectState(Enum):
@@ -61,6 +65,10 @@ class SodaOrchestrator:
         self.code_gen = CodeGenerator(self.ollama, self.claude)
         self.skill_matcher = SkillMatcher(self.gemini, self.builder)
         self.profile_matcher = ProfileMatcher(self.gemini, self.builder)
+        self.wisdom_agent = WisdomAgent(self.gemini, self.builder)
+        self.goal_interpreter = GoalInterpreter(self.claude, self.builder)
+        self.impact_analyzer = ImpactAnalyzer(self.claude, self.builder)
+        self.health = ContextHealthMonitor(notify_fn=self._notify)
         self._ui_url = "http://127.0.0.1:8000/api/event"
 
     # --- UI notifications ---
@@ -124,22 +132,34 @@ class SodaOrchestrator:
     # --- Model calls ---
 
     async def _call_claude(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        import time
         sc = self.skill_matcher.load_skill_context(project.skills) if project else None
         pc = self.profile_matcher.load_profile_context(project.profile) if project else None
         payload = self.builder.build_payload("claude", role, task, skills_context=sc, profile_context=pc)
-        return await self.claude.prompt(payload["system"], payload["user"])
+        t0 = time.monotonic()
+        result = await self.claude.prompt(payload["system"], payload["user"])
+        self.health.record(role, "claude", time.monotonic() - t0, result, "Error" not in result)
+        return result
 
     async def _call_gemini(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        import time
         sc = self.skill_matcher.load_skill_context(project.skills) if project else None
         pc = self.profile_matcher.load_profile_context(project.profile) if project else None
         payload = self.builder.build_payload("gemini", role, task, skills_context=sc, profile_context=pc)
-        return await asyncio.to_thread(self.gemini.prompt, payload["system"], payload["user"])
+        t0 = time.monotonic()
+        result = await asyncio.to_thread(self.gemini.prompt, payload["system"], payload["user"])
+        self.health.record(role, "gemini", time.monotonic() - t0, result, "Error" not in result)
+        return result
 
     async def _call_ollama(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        import time
         sc = self.skill_matcher.load_skill_context(project.skills) if project else None
         pc = self.profile_matcher.load_profile_context(project.profile) if project else None
         payload = self.builder.build_payload("ollama", role, task, skills_context=sc, profile_context=pc)
-        return await self.ollama.prompt(payload["system"], payload["user"])
+        t0 = time.monotonic()
+        result = await self.ollama.prompt(payload["system"], payload["user"])
+        self.health.record(role, "ollama", time.monotonic() - t0, result, "Error" not in result)
+        return result
 
     async def _call_with_escalation(self, role: str, task: str, project: Project) -> str:
         for attempt in range(1, self.MAX_LOCAL_RETRIES + 1):
@@ -156,6 +176,24 @@ class SodaOrchestrator:
         raise RuntimeError(f"All models failed for role '{role}'. Human checkpoint required.")
 
     # --- Phases ---
+
+    async def _phase_wisdom(self, project: Project) -> None:
+        print("\n[FASE 0.5] Wisdom — analyzing description...")
+        self._notify("Wisdom Agent analyzing...", "PHASE_START", {"phase": "wisdom"})
+        observations = await self.wisdom_agent.analyze(
+            project.description, project.skills, project.profile
+        )
+        if observations:
+            for obs in observations:
+                print(f"  [{obs.type.upper()}] {obs.message}")
+                self._notify(
+                    obs.message,
+                    "WISDOM",
+                    {"type": obs.type, "suggestion": obs.suggestion},
+                )
+        else:
+            self._notify("No observations — description is clear.", "WISDOM", {"type": "ok", "suggestion": ""})
+        print(f"  [OK] {len(observations)} observation(s)")
 
     async def _phase_capabilities(self, project: Project) -> None:
         print("\n[FASE 0] Capabilities — matching skills and profile...")
@@ -269,6 +307,7 @@ class SodaOrchestrator:
         self._notify(f"Project {project.id} started.", "START", {"project_id": project.id})
 
         await self._phase_capabilities(project)
+        await self._phase_wisdom(project)
         await self._phase_requirements(project)
         print(f"\n[CHECKPOINT 1] Blueprint ready.")
         await self._phase_architecture(project)
@@ -282,6 +321,31 @@ class SodaOrchestrator:
         self._notify("Pipeline complete.", "DONE", {"project_id": project.id})
         print(f"\n[OK] Pipeline complete. Workspace: {project.workspace}")
         return project
+
+
+    async def modify(self, project: Project, user_request: str) -> dict:
+        """Interpret a post-generation change request and return impact report."""
+        self._notify(f"Interpreting: {user_request[:80]}", "PHASE_START", {"phase": "modification"})
+
+        plan = await self.goal_interpreter.interpret(
+            user_request, project.architecture, project.blueprint
+        )
+        self._notify(
+            f"Change classified as [{plan.change_type}]: {plan.impact_summary}",
+            "MODIFICATION_PLAN",
+            plan.to_dict(),
+        )
+        print(f"  [GoalInterpreter] {plan.change_type}: {plan.description}")
+
+        report = await self.impact_analyzer.analyze(plan, project.architecture)
+        self._notify(
+            f"Impact [{report.risk_level}]: {report.risk_reason}",
+            "IMPACT_REPORT",
+            report.to_dict(),
+        )
+        print(f"  [ImpactAnalyzer] Risk={report.risk_level}, affects: {report.directly_affected + report.transitively_affected}")
+
+        return {"plan": plan.to_dict(), "impact": report.to_dict()}
 
 
 if __name__ == "__main__":

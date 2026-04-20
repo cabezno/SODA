@@ -65,6 +65,47 @@ async def get_status():
     return {"running": _pipeline_running}
 
 
+@app.post("/api/modify")
+async def modify_project(request: Request):
+    if _pipeline_running:
+        return JSONResponse({"status": "busy"}, status_code=409)
+    body = await request.json()
+    project_id = (body.get("project_id") or "").strip()
+    user_request = (body.get("request") or "").strip()
+    if not user_request:
+        return JSONResponse({"status": "error", "message": "request is required"}, status_code=400)
+
+    import json
+    from pathlib import Path
+    from kernel.orchestrator import SodaOrchestrator, Project, ProjectState
+
+    projects_dir = Path(__file__).resolve().parent.parent / "projects"
+    meta_path = projects_dir / project_id / "metadata.json"
+    if not meta_path.exists():
+        return JSONResponse({"status": "error", "message": "project not found"}, status_code=404)
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    project = Project(
+        id=meta["id"],
+        description=meta["description"],
+        state=ProjectState(meta["state"]),
+        workspace=projects_dir / project_id,
+        blueprint=meta.get("blueprint", {}),
+        architecture=meta.get("architecture", {}),
+        skills=meta.get("skills", []),
+        profile=meta.get("profile", ""),
+    )
+
+    orchestrator = SodaOrchestrator()
+    result = await orchestrator.modify(project, user_request)
+    return {"status": "ok", "result": result}
+
+
+@app.get("/api/health")
+async def get_health():
+    return {"status": "ok"}
+
+
 @app.post("/api/event")
 async def receive_event(request: Request):
     payload = await request.json()
