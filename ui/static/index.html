@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>SODA Mission Control</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs/loader.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 280px; border-right: 1px solid #333; background: #252526; display: flex; flex-direction: column; }
+        #main-view { flex: 1; display: flex; flex-direction: column; }
+        #editor-container { flex: 1; background: #1e1e1e; }
+        #console { height: 180px; background: #000; border-top: 2px solid #333; padding: 10px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
+        
+        .header { padding: 10px; background: #333; font-size: 11px; font-weight: bold; color: #888; border-bottom: 1px solid #222; }
+        
+        /* Dashboard de Hardware */
+        .hw-panel { padding: 15px; background: #2d2d2d; border-bottom: 1px solid #444; }
+        .hw-metric { margin-bottom: 10px; }
+        .hw-label { font-size: 10px; color: #aaa; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .bar-bg { width: 100%; height: 6px; background: #444; border-radius: 3px; overflow: hidden; }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; }
+        .vram-fill { background: #007acc; }
+        .cpu-fill { background: #4ec9b0; }
+        .ram-fill { background: #ce9178; }
+        
+        .file-item { padding: 8px 15px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2d2d2d; }
+        .file-item:hover { background: #2a2d2e; }
+        .log-entry { margin-bottom: 4px; border-left: 2px solid #444; padding-left: 8px; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div class="header">HARDWARE TELEMETRY</div>
+        <div class="hw-panel">
+            <div class="hw-metric">
+                <div class="hw-label"><span>GPU VRAM (5070 Ti)</span> <span id="vram-text">0%</span></div>
+                <div class="bar-bg"><div id="vram-bar" class="bar-fill vram-fill"></div></div>
+            </div>
+            <div class="hw-metric">
+                <div class="hw-label"><span>CPU (i9 13900)</span> <span id="cpu-text">0%</span></div>
+                <div class="bar-bg"><div id="cpu-bar" class="bar-fill cpu-fill"></div></div>
+            </div>
+            <div class="hw-metric">
+                <div class="hw-label"><span>SYSTEM RAM</span> <span id="ram-text">0%</span></div>
+                <div class="bar-bg"><div id="ram-bar" class="bar-fill ram-fill"></div></div>
+            </div>
+        </div>
+        <div class="header">EXPLORADOR DE PROYECTO</div>
+        <div id="file-list"></div>
+    </div>
+    <div id="main-view">
+        <div id="editor-container"></div>
+        <div id="console"></div>
+    </div>
+
+    <script>
+        let editor;
+        let files = {};
+
+        // Función para actualizar Hardware en tiempo real
+        async function updateStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                
+                // VRAM calculation
+                const vramUsed = data.vram.total - data.vram.free;
+                const vramPct = (vramUsed / data.vram.total) * 100;
+                document.getElementById('vram-bar').style.width = vramPct + '%';
+                document.getElementById('vram-text').innerText = Math.round(vramPct) + '%';
+                
+                // CPU & RAM
+                document.getElementById('cpu-bar').style.width = data.system.cpu_usage + '%';
+                document.getElementById('cpu-text').innerText = Math.round(data.system.cpu_usage) + '%';
+                
+                const ramUsage = 100 - ((data.system.ram_free_gb / 64) * 100); // Asumiendo 64GB segun handoff
+                document.getElementById('ram-bar').style.width = ramUsage + '%';
+                document.getElementById('ram-text').innerText = Math.round(ramUsage) + '%';
+            } catch(e) {}
+        }
+        setInterval(updateStats, 2000); // Cada 2 segundos
+
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            editor = monaco.editor.create(document.getElementById('editor-container'), {
+                value: "# SODA Mission Control Ready",
+                language: 'python', theme: 'vs-dark', automaticLayout: true
+            });
+        });
+
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        ws.onmessage = (event) => {
+            const payload = JSON.parse(event.data);
+            if (payload.event_type === 'FILE_GENERATED') {
+                const { filename, code } = payload.data;
+                files[filename] = code;
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.innerText = `📄 ${filename}`;
+                item.onclick = () => editor.setValue(files[filename]);
+                document.getElementById('file-list').appendChild(item);
+                editor.setValue(code);
+            }
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `> ${payload.message}`;
+            document.getElementById('console').appendChild(entry);
+            document.getElementById('console').scrollTop = document.getElementById('console').scrollHeight;
+        };
+    </script>
+</body>
+</html>

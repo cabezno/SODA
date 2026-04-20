@@ -21,6 +21,9 @@ projects/*/chromadb/
 projects/*/logs/
 projects/*/backups/
 data/
+tasks.db
+.soda_memory/
+soda_config.json
 
 # IDEs
 .vscode/

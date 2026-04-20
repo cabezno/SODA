@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import requests
 from enum import Enum
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,26 +54,36 @@ class SodaOrchestrator:
         self.gemini = GeminiDriver()
         self.ollama = OllamaDriver(model_name="qwen2.5-coder:7b")
         self.code_gen = CodeGenerator(self.ollama, self.claude)
+        self._ui_url = "http://127.0.0.1:8000/api/event"
+
+    # --- Notificaciones a la UI ---
+
+    def _notify(self, message: str, event_type: str = "LOG", data: Optional[dict] = None) -> None:
+        """Fire-and-forget: envía evento a la UI si está corriendo. No bloquea si no está."""
+        try:
+            requests.post(
+                self._ui_url,
+                json={"event_type": event_type, "message": message, "data": data or {}},
+                timeout=0.05,
+            )
+        except Exception:
+            pass
 
     # --- Utilidades ---
 
     @staticmethod
     def _extract_json(text: str) -> dict:
-        """Extrae JSON de una respuesta que puede venir envuelta en markdown."""
         import re
-        # Intentar parsear directo
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
-        # Buscar bloque ```json ... ```
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
             except json.JSONDecodeError:
                 pass
-        # Buscar primer { ... } en el texto
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             try:
@@ -117,109 +128,93 @@ class SodaOrchestrator:
         return await self.ollama.prompt(payload["system"], payload["user"])
 
     async def _call_with_escalation(self, role: str, task: str, project: Project) -> str:
-        """Intenta con Qwen local hasta MAX_LOCAL_RETRIES, luego escala a Claude."""
         for attempt in range(1, self.MAX_LOCAL_RETRIES + 1):
             print(f"  [Qwen] Intento {attempt}/{self.MAX_LOCAL_RETRIES}...")
             result = await self._call_ollama(role, task)
             if "Error" not in result:
                 return result
             print(f"  [!] Fallo en intento {attempt}: {result[:80]}")
-
         print("  [^^] Escalando a Claude Sonnet...")
         result = await self._call_claude(role, task)
         if "Error" not in result:
             return result
-
         project.state = ProjectState.FAILED
-        raise RuntimeError(
-            f"Todos los modelos fallaron para el rol '{role}'. Checkpoint humano requerido."
-        )
+        raise RuntimeError(f"Todos los modelos fallaron para el rol '{role}'. Checkpoint humano requerido.")
 
     # --- Fases ---
 
     async def _phase_requirements(self, project: Project) -> None:
         print("\n[FASE 1] Requerimientos — entrevistando con Claude Sonnet...")
+        self._notify("Analizando requerimientos...", "PHASE_START", {"phase": "requirements"})
         project.state = ProjectState.REQUIREMENTS
-
         response = await self._call_claude("requirements_interviewer", project.description)
-
         project.blueprint = self._extract_json(response)
-
         out = project.workspace / "blueprint.json"
         out.write_text(json.dumps(project.blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [OK] Blueprint → {out}")
+        print(f"  [OK] Blueprint -> {out}")
+        self._notify("Blueprint generado.", "CHECKPOINT", {"number": 1})
         self._save_state(project)
 
     async def _phase_architecture(self, project: Project) -> None:
         print("\n[FASE 2] Arquitectura — diseñando con Gemini Pro...")
+        self._notify("Diseñando arquitectura...", "PHASE_START", {"phase": "architecture"})
         project.state = ProjectState.ARCHITECTURE
-
         blueprint_str = json.dumps(project.blueprint, ensure_ascii=False)
         response = await self._call_gemini("global_architect", blueprint_str)
-
         project.architecture = self._extract_json(response)
-
         out = project.workspace / "architecture.json"
         out.write_text(json.dumps(project.architecture, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [OK] Arquitectura → {out}")
+        print(f"  [OK] Arquitectura -> {out}")
+        self._notify("Arquitectura generada.", "CHECKPOINT", {"number": 2})
         self._save_state(project)
+
+    async def _phase_planning(self, project: Project) -> ExecutionPlan:
+        print("\n[FASE 3] Planificación — construyendo DAG de módulos...")
+        self._notify("Construyendo plan de ejecución...", "PHASE_START", {"phase": "planning"})
+        project.state = ProjectState.PLANNING
+        modulos = project.architecture.get("modulos", [])
+        if not modulos:
+            raise ValueError("La arquitectura no tiene módulos definidos.")
+        graph = DependencyGraph(modulos)
+        plan = graph.build_execution_plan()
+        plan_data = {"levels": plan.levels, "order": plan.order, "parallelizable": plan.parallelizable}
+        out = project.workspace / "execution_plan.json"
+        out.write_text(json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(graph.summary())
+        print(f"  [OK] Plan -> {out}")
+        self._notify("Plan listo.", "CHECKPOINT", {"number": 3, "levels": plan.levels})
+        self._save_state(project)
+        return plan
 
     async def _phase_development(self, project: Project, plan: ExecutionPlan) -> None:
         print("\n[FASE 4] Desarrollo — generando código...")
+        self._notify("Generando código...", "PHASE_START", {"phase": "development"})
         project.state = ProjectState.DEVELOPMENT
-
         modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
         source_dir = project.workspace / "source"
         source_dir.mkdir(exist_ok=True)
-
         for i, level in enumerate(plan.levels):
             tag = f"[paralelo x{len(level)}]" if len(level) > 1 else "[secuencial]"
             print(f"\n  Nivel {i} {tag}: {' | '.join(level)}")
-
-            # Lanzar módulos del nivel en paralelo
             tasks = [
                 self.code_gen.generate_module(
-                    modulos_by_name[nombre],
-                    project.blueprint,
-                    project.architecture,
+                    modulos_by_name[nombre], project.blueprint, project.architecture,
                 )
-                for nombre in level
-                if nombre in modulos_by_name
+                for nombre in level if nombre in modulos_by_name
             ]
             results_per_module = await asyncio.gather(*tasks)
-
             for generated_files in results_per_module:
                 for gf in generated_files:
                     out = source_dir / gf.filepath
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_text(gf.content, encoding="utf-8")
-
-        print(f"\n  [OK] Código generado → {source_dir}")
+                    self._notify(
+                        f"Archivo listo: {gf.filepath}",
+                        "FILE_GENERATED",
+                        {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
+                    )
+        print(f"\n  [OK] Código generado -> {source_dir}")
         self._save_state(project)
-
-    async def _phase_planning(self, project: Project) -> ExecutionPlan:
-        print("\n[FASE 3] Planificación — construyendo DAG de módulos...")
-        project.state = ProjectState.PLANNING
-
-        modulos = project.architecture.get("modulos", [])
-        if not modulos:
-            raise ValueError("La arquitectura no tiene módulos definidos.")
-
-        graph = DependencyGraph(modulos)
-        plan = graph.build_execution_plan()
-
-        plan_data = {
-            "levels": plan.levels,
-            "order": plan.order,
-            "parallelizable": plan.parallelizable,
-        }
-        out = project.workspace / "execution_plan.json"
-        out.write_text(json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-        print(graph.summary())
-        print(f"  [OK] Plan → {out}")
-        self._save_state(project)
-        return plan
 
     # --- Entry point ---
 
@@ -229,25 +224,19 @@ class SodaOrchestrator:
         print(f"SODA — Proyecto: {project.id}")
         print(f"Descripción: {description[:80]}")
         print(f"{'='*55}")
+        self._notify(f"Proyecto {project.id} iniciado.", "START", {"project_id": project.id})
 
         await self._phase_requirements(project)
-
         print(f"\n[CHECKPOINT 1] Blueprint listo.")
-        print(f"  Revisar en: {project.workspace / 'blueprint.json'}")
-        print("  Continuando a arquitectura...")
-
         await self._phase_architecture(project)
-
         print(f"\n[CHECKPOINT 2] Arquitectura lista.")
-        print(f"  Revisar en: {project.workspace / 'architecture.json'}")
-
         plan = await self._phase_planning(project)
-
         print("\n[CHECKPOINT 3] Plan listo. Iniciando desarrollo...")
         await self._phase_development(project, plan)
 
         project.state = ProjectState.DONE
         self._save_state(project)
+        self._notify("Pipeline completado.", "DONE", {"project_id": project.id})
         print(f"\n[OK] Pipeline completado. Workspace: {project.workspace}")
         return project
 
