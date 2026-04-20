@@ -134,6 +134,9 @@
         .log-entry.HEALTH_WARN .log-msg       { color: #f44747; font-weight: 600; }
         .log-entry.MODIFICATION_PLAN .log-msg { color: #9cdcfe; }
         .log-entry.IMPACT_REPORT .log-msg     { color: #c586c0; }
+        .log-entry.EVOLUTION .log-msg         { color: #4ec9b0; }
+        .log-entry.BRANCH_CREATED .log-msg    { color: #cca700; }
+        .log-entry.REFOUNDATION .log-msg      { color: #dcdcaa; font-style: italic; }
         .log-entry.LOG .log-msg               { color: #666; }
 
         /* Wisdom panel — shows before pipeline runs */
@@ -246,6 +249,7 @@
             <div id="chat-wrap" class="hidden">
                 <textarea id="chat-input" placeholder="Ask to modify the project… (Ctrl+Enter to send)"></textarea>
                 <button id="chat-btn" onclick="sendModification()">Modify</button>
+                <button id="refound-btn" onclick="sendRefound()" title="Refound project with condensed context" style="padding:5px 10px;background:#2d2010;color:#cca700;border:1px solid #cca700;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">Refound</button>
             </div>
         </div>
     </div>
@@ -371,6 +375,30 @@
                 btn.disabled = false;
                 btn.textContent = 'Modify';
                 input.focus();
+            }
+        }
+
+        async function sendRefound() {
+            if (!currentProjectId) return;
+            if (!confirm('Refound this project? SODA will summarize it and start a clean pipeline with condensed context.')) return;
+            document.getElementById('refound-btn').disabled = true;
+            document.getElementById('chat-btn').disabled = true;
+            try {
+                const res = await fetch('/api/refound', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({project_id: currentProjectId}),
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    log(err.message || 'Refoundation failed', 'FAILED');
+                    document.getElementById('refound-btn').disabled = false;
+                    document.getElementById('chat-btn').disabled = false;
+                }
+            } catch(e) {
+                log('Could not reach server', 'FAILED');
+                document.getElementById('refound-btn').disabled = false;
+                document.getElementById('chat-btn').disabled = false;
             }
         }
 
@@ -568,6 +596,18 @@
 
                     case 'HEALTH_WARN':
                         log(`[HEALTH L${data.level}] ${data.reason}`, 'HEALTH_WARN');
+                        break;
+
+                    case 'EVOLUTION':
+                        log(`Profile '${data.profile}' updated — ${data.count} learnings captured`, 'EVOLUTION');
+                        break;
+
+                    case 'BRANCH_CREATED':
+                        log(`Branch created: ${data.branch_name} (${data.branch_id})`, 'BRANCH_CREATED');
+                        break;
+
+                    case 'REFOUNDATION':
+                        log(`Refoundation initiated from project ${data.parent_id}`, 'REFOUNDATION');
                         break;
 
                     case 'DONE':

@@ -24,6 +24,10 @@ from kernel.intelligence.wisdom_agent import WisdomAgent
 from kernel.intelligence.goal_interpreter import GoalInterpreter
 from kernel.intelligence.impact_analyzer import ImpactAnalyzer
 from kernel.intelligence.context_health_monitor import ContextHealthMonitor
+from kernel.intelligence.refoundation import RefoundationEngine
+from kernel.capabilities.profile_evolution import ProfileEvolutionEngine
+from kernel.lineage.project_lineage import ProjectLineage
+from kernel.lineage.branching import BranchManager
 
 
 class ProjectState(Enum):
@@ -68,6 +72,10 @@ class SodaOrchestrator:
         self.wisdom_agent = WisdomAgent(self.gemini, self.builder)
         self.goal_interpreter = GoalInterpreter(self.claude, self.builder)
         self.impact_analyzer = ImpactAnalyzer(self.claude, self.builder)
+        self.refoundation = RefoundationEngine(self.claude, self.builder)
+        self.profile_evolution = ProfileEvolutionEngine(self.gemini, self.builder)
+        self.lineage = ProjectLineage(self.base_dir)
+        self.branch_manager = BranchManager(self.projects_dir)
         self.health = ContextHealthMonitor(notify_fn=self._notify)
         self._ui_url = "http://127.0.0.1:8000/api/event"
 
@@ -304,9 +312,11 @@ class SodaOrchestrator:
         print(f"SODA — Project: {project.id}")
         print(f"Description: {description[:80]}")
         print(f"{'='*55}")
+        self.lineage.record_start(project.id, project.description)
         self._notify(f"Project {project.id} started.", "START", {"project_id": project.id})
 
         await self._phase_capabilities(project)
+        self.lineage.record_capabilities(project.id, project.skills, project.profile)
         await self._phase_wisdom(project)
         await self._phase_requirements(project)
         print(f"\n[CHECKPOINT 1] Blueprint ready.")
@@ -318,13 +328,63 @@ class SodaOrchestrator:
 
         project.state = ProjectState.DONE
         self._save_state(project)
+        self.lineage.record_complete(project.id, "done")
+
+        await self._phase_evolution(project)
+
         self._notify("Pipeline complete.", "DONE", {"project_id": project.id})
         print(f"\n[OK] Pipeline complete. Workspace: {project.workspace}")
         return project
 
 
+    async def _phase_evolution(self, project: Project) -> None:
+        if not project.profile:
+            return
+        print("\n[POST] Profile Evolution — capturing learnings...")
+        self._notify("Capturing project learnings...", "PHASE_START", {"phase": "evolution"})
+        try:
+            learnings = await self.profile_evolution.evolve(
+                project.id, project.description,
+                project.blueprint, project.architecture,
+                project.profile, project.skills,
+            )
+            count = (
+                len(learnings.get("patterns", []))
+                + len(learnings.get("anti_patterns", []))
+                + len(learnings.get("preferences", []))
+            )
+            print(f"  [OK] {count} learning(s) written to profile '{project.profile}'")
+            self._notify(
+                f"{count} learnings captured for profile '{project.profile}'",
+                "EVOLUTION",
+                {"profile": project.profile, "count": count, "learnings": learnings},
+            )
+        except Exception as e:
+            print(f"  [!] Evolution failed (non-critical): {e}")
+
+    async def refound(self, project: Project) -> Project:
+        """Summarize current project and start a new one from the condensed description."""
+        print("\n[REFOUND] Summarizing project for refoundation...")
+        self._notify("Preparing refoundation...", "PHASE_START", {"phase": "refoundation"})
+        summary = await self.refoundation.summarize(
+            project.description, project.blueprint, project.architecture
+        )
+        new_description = summary.get("refounded_description", project.description)
+        key_decisions = summary.get("key_decisions", [])
+        if key_decisions:
+            new_description += " Key decisions: " + "; ".join(key_decisions) + "."
+
+        self._notify(
+            f"Refoundation ready. New description: {new_description[:100]}...",
+            "REFOUNDATION",
+            {"parent_id": project.id, "description": new_description},
+        )
+        new_project = await self.run(new_description)
+        self.lineage.record_start(new_project.id, new_description, parent_id=project.id)
+        return new_project
+
     async def modify(self, project: Project, user_request: str) -> dict:
-        """Interpret a post-generation change request and return impact report."""
+        """Interpret a post-generation change request, branch if structural, return plan+impact."""
         self._notify(f"Interpreting: {user_request[:80]}", "PHASE_START", {"phase": "modification"})
 
         plan = await self.goal_interpreter.interpret(
@@ -345,7 +405,19 @@ class SodaOrchestrator:
         )
         print(f"  [ImpactAnalyzer] Risk={report.risk_level}, affects: {report.directly_affected + report.transitively_affected}")
 
-        return {"plan": plan.to_dict(), "impact": report.to_dict()}
+        branch_id = None
+        if self.branch_manager.should_branch(plan.change_type, plan.requires_regeneration):
+            branch_name = plan.change_type
+            branch_id, branch_dir = self.branch_manager.create_branch(project.id, branch_name)
+            self.lineage.record_branch(project.id, branch_id, branch_name, user_request)
+            self._notify(
+                f"Branch created: {branch_id}",
+                "BRANCH_CREATED",
+                {"branch_id": branch_id, "branch_name": branch_name, "parent_id": project.id},
+            )
+            print(f"  [Branch] Created {branch_id} at {branch_dir}")
+
+        return {"plan": plan.to_dict(), "impact": report.to_dict(), "branch_id": branch_id}
 
 
 if __name__ == "__main__":

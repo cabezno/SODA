@@ -101,6 +101,66 @@ async def modify_project(request: Request):
     return {"status": "ok", "result": result}
 
 
+@app.get("/api/lineage")
+async def get_lineage():
+    from pathlib import Path
+    from kernel.lineage.project_lineage import ProjectLineage
+    lineage = ProjectLineage(Path(__file__).resolve().parent.parent)
+    return {"history": lineage.get_history()}
+
+
+@app.get("/api/lineage/{project_id}/branches")
+async def get_branches(project_id: str):
+    from pathlib import Path
+    from kernel.lineage.branching import BranchManager
+    bm = BranchManager(Path(__file__).resolve().parent.parent / "projects")
+    return {"branches": bm.list_branches(project_id)}
+
+
+@app.post("/api/refound")
+async def refound_project(request: Request):
+    if _pipeline_running:
+        return JSONResponse({"status": "busy"}, status_code=409)
+    body = await request.json()
+    project_id = (body.get("project_id") or "").strip()
+    if not project_id:
+        return JSONResponse({"status": "error", "message": "project_id required"}, status_code=400)
+
+    import json
+    from pathlib import Path
+    from kernel.orchestrator import SodaOrchestrator, Project, ProjectState
+
+    projects_dir = Path(__file__).resolve().parent.parent / "projects"
+    meta_path = projects_dir / project_id / "metadata.json"
+    if not meta_path.exists():
+        return JSONResponse({"status": "error", "message": "project not found"}, status_code=404)
+
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    project = Project(
+        id=meta["id"], description=meta["description"],
+        state=ProjectState(meta["state"]),
+        workspace=projects_dir / project_id,
+        blueprint=meta.get("blueprint", {}),
+        architecture=meta.get("architecture", {}),
+        skills=meta.get("skills", []),
+        profile=meta.get("profile", ""),
+    )
+
+    async def _run():
+        global _pipeline_running
+        _pipeline_running = True
+        try:
+            orch = SodaOrchestrator()
+            await orch.refound(project)
+        except Exception as e:
+            await manager.broadcast({"event_type": "FAILED", "message": str(e), "data": {}})
+        finally:
+            _pipeline_running = False
+
+    asyncio.create_task(_run())
+    return {"status": "started"}
+
+
 @app.get("/api/health")
 async def get_health():
     return {"status": "ok"}
