@@ -36,6 +36,28 @@
         #status-dot.failed  { background: #f44747; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
+        /* Input bar */
+        #input-bar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 6px 16px; background: #252526; border-bottom: 1px solid #3c3c3c;
+            flex-shrink: 0;
+        }
+        #description-input {
+            flex: 1; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px;
+            color: #d4d4d4; font-size: 12px; font-family: 'Segoe UI', sans-serif;
+            padding: 5px 10px; resize: none; outline: none; line-height: 1.4;
+            height: 30px; overflow: hidden; transition: height 0.2s ease, border-color 0.2s;
+        }
+        #description-input:focus { border-color: #007acc; height: 72px; overflow-y: auto; }
+        #description-input:disabled { opacity: 0.4; cursor: not-allowed; }
+        #run-btn {
+            padding: 5px 18px; background: #007acc; color: #fff; border: none;
+            border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;
+            white-space: nowrap; transition: background 0.2s, opacity 0.2s;
+        }
+        #run-btn:hover:not(:disabled) { background: #005fa3; }
+        #run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
         /* Layout */
         #body { display: flex; flex: 1; overflow: hidden; }
 
@@ -124,6 +146,11 @@
             <span class="phase-step" id="ph-development">DEV</span>
         </div>
         <div id="status-dot" title="Idle"></div>
+    </div>
+
+    <div id="input-bar">
+        <textarea id="description-input" placeholder="Describe the project to build…" rows="1"></textarea>
+        <button id="run-btn" onclick="startRun()">Run</button>
     </div>
 
     <div id="body">
@@ -234,6 +261,46 @@
             if (!chip) return;
             chip.className = `mod-chip ${state}`;
         }
+
+        // --- Run ---
+        async function startRun() {
+            const input = document.getElementById('description-input');
+            const btn = document.getElementById('run-btn');
+            const description = input.value.trim();
+            if (!description) { input.focus(); return; }
+
+            input.disabled = true;
+            btn.disabled = true;
+            btn.textContent = 'Running…';
+
+            try {
+                const res = await fetch('/api/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({description}),
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    log(err.message || 'Failed to start', 'FAILED');
+                    unlockInput();
+                }
+            } catch(e) {
+                log('Could not reach server', 'FAILED');
+                unlockInput();
+            }
+        }
+
+        function unlockInput() {
+            const input = document.getElementById('description-input');
+            const btn = document.getElementById('run-btn');
+            input.disabled = false;
+            btn.disabled = false;
+            btn.textContent = 'Run';
+        }
+
+        document.getElementById('description-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startRun();
+        });
 
         // --- Hardware polling ---
         async function updateStats() {
@@ -350,10 +417,12 @@
                     case 'DONE':
                         setPhase(null, true);
                         setStatus('done');
+                        unlockInput();
                         break;
 
                     case 'FAILED':
                         setStatus('failed');
+                        unlockInput();
                         break;
                 }
             };
@@ -363,6 +432,15 @@
         }
 
         connectWS();
+
+        // Restore locked state if server already running when UI opens
+        fetch('/api/status').then(r => r.json()).then(d => {
+            if (d.running) {
+                document.getElementById('description-input').disabled = true;
+                document.getElementById('run-btn').disabled = true;
+                document.getElementById('run-btn').textContent = 'Running…';
+            }
+        }).catch(() => {});
     </script>
 </body>
 </html>
