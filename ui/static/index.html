@@ -46,19 +46,20 @@
 
         .panel-header { padding: 6px 12px; background: #2d2d2d; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; border-bottom: 1px solid #222; }
 
-        /* Hardware panel */
-        #hw-panel { padding: 12px; border-bottom: 1px solid #333; }
-        .hw-metric { margin-bottom: 10px; }
+        /* Hardware panel — pinned to bottom of sidebar */
+        #hw-panel { padding: 8px 12px; border-top: 1px solid #333; background: #1e1e1e; }
+        .hw-metric { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
         .hw-metric:last-child { margin-bottom: 0; }
-        .hw-label { font-size: 10px; color: #aaa; margin-bottom: 4px; display: flex; justify-content: space-between; }
-        .bar-bg { width: 100%; height: 5px; background: #3c3c3c; border-radius: 3px; overflow: hidden; }
-        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 3px; }
+        .hw-label { font-size: 10px; color: #555; width: 36px; flex-shrink: 0; }
+        .hw-val { font-size: 10px; color: #666; width: 30px; text-align: right; flex-shrink: 0; }
+        .bar-bg { flex: 1; height: 3px; background: #3c3c3c; border-radius: 2px; overflow: hidden; }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 2px; }
         .vram-fill { background: #007acc; }
         .cpu-fill { background: #4ec9b0; }
         .ram-fill { background: #ce9178; }
 
         /* File list */
-        #file-list { flex: 1; overflow-y: auto; }
+        #file-list { flex: 1; overflow-y: auto; min-height: 0; }
         .file-item {
             padding: 6px 12px; cursor: pointer; font-size: 12px;
             display: flex; align-items: center; gap: 6px;
@@ -111,23 +112,25 @@
 
     <div id="body">
         <div id="sidebar">
-            <div class="panel-header">HARDWARE</div>
-            <div id="hw-panel">
-                <div class="hw-metric">
-                    <div class="hw-label"><span>GPU VRAM</span><span id="vram-text">--%</span></div>
-                    <div class="bar-bg"><div id="vram-bar" class="bar-fill vram-fill"></div></div>
-                </div>
-                <div class="hw-metric">
-                    <div class="hw-label"><span>CPU</span><span id="cpu-text">--%</span></div>
-                    <div class="bar-bg"><div id="cpu-bar" class="bar-fill cpu-fill"></div></div>
-                </div>
-                <div class="hw-metric">
-                    <div class="hw-label"><span>RAM</span><span id="ram-text">--%</span></div>
-                    <div class="bar-bg"><div id="ram-bar" class="bar-fill ram-fill"></div></div>
-                </div>
-            </div>
             <div class="panel-header">FILES</div>
             <div id="file-list"></div>
+            <div id="hw-panel">
+                <div class="hw-metric">
+                    <span class="hw-label">VRAM</span>
+                    <div class="bar-bg"><div id="vram-bar" class="bar-fill vram-fill"></div></div>
+                    <span class="hw-val" id="vram-text">--%</span>
+                </div>
+                <div class="hw-metric">
+                    <span class="hw-label">CPU</span>
+                    <div class="bar-bg"><div id="cpu-bar" class="bar-fill cpu-fill"></div></div>
+                    <span class="hw-val" id="cpu-text">--%</span>
+                </div>
+                <div class="hw-metric">
+                    <span class="hw-label">RAM</span>
+                    <div class="bar-bg"><div id="ram-bar" class="bar-fill ram-fill"></div></div>
+                    <span class="hw-val" id="ram-text">--%</span>
+                </div>
+            </div>
         </div>
 
         <div id="main-view">
