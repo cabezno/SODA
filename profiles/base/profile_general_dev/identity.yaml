@@ -1,0 +1,16 @@
+name: profile_general_dev
+display_name: General Software Developer
+description: Versatile developer for scripts, CLI tools, automation, data processing, and projects that don't fit a specific web pattern
+skills_included:
+  - skill_rest_api
+activation_signals:
+  - script
+  - cli
+  - tool
+  - automation
+  - process
+  - utility
+  - parser
+  - bot
+version: "1.0"
+experience_projects: 0

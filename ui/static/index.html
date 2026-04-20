@@ -129,6 +129,7 @@
         .log-entry.FILE_GENERATED .log-msg { color: #b5cea8; }
         .log-entry.MODULE_START .log-msg  { color: #c586c0; }
         .log-entry.MODULE_DONE .log-msg   { color: #89d185; }
+        .log-entry.CAPABILITIES .log-msg  { color: #dcdcaa; }
         .log-entry.LOG .log-msg           { color: #666; }
     </style>
 </head>
@@ -137,6 +138,8 @@
         <span class="brand">SODA</span>
         <span id="model-badge" class="model-badge">--</span>
         <div id="phase-track">
+            <span class="phase-step" id="ph-capabilities">CAP</span>
+            <span class="phase-sep">›</span>
             <span class="phase-step" id="ph-requirements">REQ</span>
             <span class="phase-sep">›</span>
             <span class="phase-step" id="ph-architecture">ARCH</span>
@@ -197,7 +200,7 @@
         let files = {};
         let ramTotal = null;
         let activeFile = null;
-        const phases = ['requirements', 'architecture', 'planning', 'development'];
+        const phases = ['capabilities', 'requirements', 'architecture', 'planning', 'development'];
 
         // --- Monaco ---
         require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs' } });
@@ -386,6 +389,13 @@
 
                     case 'PHASE_START':
                         if (data.phase) setPhase(data.phase);
+                        break;
+
+                    case 'CAPABILITIES':
+                        if (data.profile) {
+                            const skills = (data.skills || []).join(', ') || 'none';
+                            log(`Profile: ${data.profile} | Skills: ${skills}`, 'CAPABILITIES');
+                        }
                         break;
 
                     case 'CHECKPOINT':

@@ -1,0 +1,19 @@
+name: profile_web_fullstack
+display_name: Web Full-Stack Developer
+description: Builds complete web applications with Python backend (FastAPI) and React frontend, connected via REST APIs
+skills_included:
+  - skill_fastapi
+  - skill_sqlite
+  - skill_react
+  - skill_jwt_auth
+  - skill_rest_api
+activation_signals:
+  - web app
+  - full stack
+  - frontend + backend
+  - spa
+  - dashboard
+  - admin panel
+  - portal
+version: "1.0"
+experience_projects: 0

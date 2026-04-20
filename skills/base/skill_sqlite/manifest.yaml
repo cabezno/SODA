@@ -1,0 +1,17 @@
+name: skill_sqlite
+category: database
+description: SQLite database with SQLAlchemy ORM, migrations via Alembic, and async session management
+applies_to_roles:
+  - code_generator
+  - global_architect
+activation_keywords:
+  - sqlite
+  - database
+  - db
+  - sqlalchemy
+  - orm
+  - persistence
+  - storage
+  - crud
+  - models
+version: "1.0"

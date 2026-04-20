@@ -1,0 +1,19 @@
+name: profile_backend_api
+display_name: Backend API Developer
+description: Builds robust backend APIs with FastAPI and SQLite, focused on data modeling, business logic, and clean REST contracts
+skills_included:
+  - skill_fastapi
+  - skill_sqlite
+  - skill_jwt_auth
+  - skill_rest_api
+activation_signals:
+  - api
+  - backend
+  - microservice
+  - service
+  - crud
+  - rest api
+  - data model
+  - endpoints
+version: "1.0"
+experience_projects: 0

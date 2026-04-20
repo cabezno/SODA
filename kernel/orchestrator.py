@@ -18,10 +18,13 @@ from kernel.drivers.claude_driver import ClaudeDriver
 from kernel.drivers.gemini_driver import GeminiDriver
 from kernel.drivers.ollama_driver import OllamaDriver
 from kernel.context.context_builder import ContextBuilder
+from kernel.capabilities.skill_matcher import SkillMatcher
+from kernel.capabilities.profile_matcher import ProfileMatcher
 
 
 class ProjectState(Enum):
     IDLE = "idle"
+    CAPABILITIES = "capabilities"
     REQUIREMENTS = "requirements"
     ARCHITECTURE = "architecture"
     PLANNING = "planning"
@@ -40,6 +43,8 @@ class Project:
     workspace: Optional[Path] = None
     blueprint: dict = field(default_factory=dict)
     architecture: dict = field(default_factory=dict)
+    skills: list = field(default_factory=list)
+    profile: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -54,12 +59,13 @@ class SodaOrchestrator:
         self.gemini = GeminiDriver()
         self.ollama = OllamaDriver(model_name="qwen2.5-coder:7b")
         self.code_gen = CodeGenerator(self.ollama, self.claude)
+        self.skill_matcher = SkillMatcher(self.gemini, self.builder)
+        self.profile_matcher = ProfileMatcher(self.gemini, self.builder)
         self._ui_url = "http://127.0.0.1:8000/api/event"
 
-    # --- Notificaciones a la UI ---
+    # --- UI notifications ---
 
     def _notify(self, message: str, event_type: str = "LOG", data: Optional[dict] = None) -> None:
-        """Fire-and-forget: envía evento a la UI si está corriendo. No bloquea si no está."""
         try:
             requests.post(
                 self._ui_url,
@@ -69,7 +75,7 @@ class SodaOrchestrator:
         except Exception:
             pass
 
-    # --- Utilidades ---
+    # --- Utilities ---
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -92,7 +98,7 @@ class SodaOrchestrator:
                 pass
         return {"raw": text}
 
-    # --- Gestión de proyectos ---
+    # --- Project management ---
 
     def _new_project(self, description: str) -> Project:
         project_id = f"proj_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -108,73 +114,101 @@ class SodaOrchestrator:
                 "description": project.description,
                 "blueprint": project.blueprint,
                 "architecture": project.architecture,
+                "skills": project.skills,
+                "profile": project.profile,
                 "created_at": project.created_at,
             }, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
-    # --- Llamadas a modelos ---
+    # --- Model calls ---
 
-    async def _call_claude(self, role: str, task: str) -> str:
-        payload = self.builder.build_payload("claude", role, task)
+    async def _call_claude(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        sc = self.skill_matcher.load_skill_context(project.skills) if project else None
+        pc = self.profile_matcher.load_profile_context(project.profile) if project else None
+        payload = self.builder.build_payload("claude", role, task, skills_context=sc, profile_context=pc)
         return await self.claude.prompt(payload["system"], payload["user"])
 
-    async def _call_gemini(self, role: str, task: str) -> str:
-        payload = self.builder.build_payload("gemini", role, task)
+    async def _call_gemini(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        sc = self.skill_matcher.load_skill_context(project.skills) if project else None
+        pc = self.profile_matcher.load_profile_context(project.profile) if project else None
+        payload = self.builder.build_payload("gemini", role, task, skills_context=sc, profile_context=pc)
         return await asyncio.to_thread(self.gemini.prompt, payload["system"], payload["user"])
 
-    async def _call_ollama(self, role: str, task: str) -> str:
-        payload = self.builder.build_payload("ollama", role, task)
+    async def _call_ollama(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        sc = self.skill_matcher.load_skill_context(project.skills) if project else None
+        pc = self.profile_matcher.load_profile_context(project.profile) if project else None
+        payload = self.builder.build_payload("ollama", role, task, skills_context=sc, profile_context=pc)
         return await self.ollama.prompt(payload["system"], payload["user"])
 
     async def _call_with_escalation(self, role: str, task: str, project: Project) -> str:
         for attempt in range(1, self.MAX_LOCAL_RETRIES + 1):
-            print(f"  [Qwen] Intento {attempt}/{self.MAX_LOCAL_RETRIES}...")
-            result = await self._call_ollama(role, task)
+            print(f"  [Qwen] Attempt {attempt}/{self.MAX_LOCAL_RETRIES}...")
+            result = await self._call_ollama(role, task, project)
             if "Error" not in result:
                 return result
-            print(f"  [!] Fallo en intento {attempt}: {result[:80]}")
-        print("  [^^] Escalando a Claude Sonnet...")
-        result = await self._call_claude(role, task)
+            print(f"  [!] Failed attempt {attempt}: {result[:80]}")
+        print("  [^^] Escalating to Claude Sonnet...")
+        result = await self._call_claude(role, task, project)
         if "Error" not in result:
             return result
         project.state = ProjectState.FAILED
-        raise RuntimeError(f"Todos los modelos fallaron para el rol '{role}'. Checkpoint humano requerido.")
+        raise RuntimeError(f"All models failed for role '{role}'. Human checkpoint required.")
 
-    # --- Fases ---
+    # --- Phases ---
+
+    async def _phase_capabilities(self, project: Project) -> None:
+        print("\n[FASE 0] Capabilities — matching skills and profile...")
+        self._notify("Matching skills and profile...", "PHASE_START", {"phase": "capabilities"})
+        project.state = ProjectState.CAPABILITIES
+
+        skills = await self.skill_matcher.match(project.description)
+        profile = await self.profile_matcher.match(project.description, skills)
+
+        project.skills = skills
+        project.profile = profile
+
+        print(f"  [OK] Skills: {skills}")
+        print(f"  [OK] Profile: {profile}")
+        self._notify(
+            f"Profile: {profile} | Skills: {', '.join(skills) or 'none'}",
+            "CAPABILITIES",
+            {"skills": skills, "profile": profile},
+        )
+        self._save_state(project)
 
     async def _phase_requirements(self, project: Project) -> None:
-        print("\n[FASE 1] Requerimientos — entrevistando con Claude Sonnet...")
-        self._notify("Analizando requerimientos...", "PHASE_START", {"phase": "requirements"})
+        print("\n[FASE 1] Requirements — interviewing with Claude Sonnet...")
+        self._notify("Analyzing requirements...", "PHASE_START", {"phase": "requirements"})
         project.state = ProjectState.REQUIREMENTS
-        response = await self._call_claude("requirements_interviewer", project.description)
+        response = await self._call_claude("requirements_interviewer", project.description, project)
         project.blueprint = self._extract_json(response)
         out = project.workspace / "blueprint.json"
         out.write_text(json.dumps(project.blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"  [OK] Blueprint -> {out}")
-        self._notify("Blueprint generado.", "CHECKPOINT", {"number": 1})
+        self._notify("Blueprint generated.", "CHECKPOINT", {"number": 1})
         self._save_state(project)
 
     async def _phase_architecture(self, project: Project) -> None:
-        print("\n[FASE 2] Arquitectura — diseñando con Gemini Pro...")
-        self._notify("Diseñando arquitectura...", "PHASE_START", {"phase": "architecture"})
+        print("\n[FASE 2] Architecture — designing with Gemini Pro...")
+        self._notify("Designing architecture...", "PHASE_START", {"phase": "architecture"})
         project.state = ProjectState.ARCHITECTURE
         blueprint_str = json.dumps(project.blueprint, ensure_ascii=False)
-        response = await self._call_gemini("global_architect", blueprint_str)
+        response = await self._call_gemini("global_architect", blueprint_str, project)
         project.architecture = self._extract_json(response)
         out = project.workspace / "architecture.json"
         out.write_text(json.dumps(project.architecture, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [OK] Arquitectura -> {out}")
-        self._notify("Arquitectura generada.", "CHECKPOINT", {"number": 2})
+        print(f"  [OK] Architecture -> {out}")
+        self._notify("Architecture generated.", "CHECKPOINT", {"number": 2})
         self._save_state(project)
 
     async def _phase_planning(self, project: Project) -> ExecutionPlan:
-        print("\n[FASE 3] Planificación — construyendo DAG de módulos...")
-        self._notify("Construyendo plan de ejecución...", "PHASE_START", {"phase": "planning"})
+        print("\n[FASE 3] Planning — building module DAG...")
+        self._notify("Building execution plan...", "PHASE_START", {"phase": "planning"})
         project.state = ProjectState.PLANNING
         modulos = project.architecture.get("modulos", [])
         if not modulos:
-            raise ValueError("La arquitectura no tiene módulos definidos.")
+            raise ValueError("Architecture has no modules defined.")
         graph = DependencyGraph(modulos)
         plan = graph.build_execution_plan()
         plan_data = {"levels": plan.levels, "order": plan.order, "parallelizable": plan.parallelizable}
@@ -182,13 +216,13 @@ class SodaOrchestrator:
         out.write_text(json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8")
         print(graph.summary())
         print(f"  [OK] Plan -> {out}")
-        self._notify("Plan listo.", "CHECKPOINT", {"number": 3, "levels": plan.levels})
+        self._notify("Plan ready.", "CHECKPOINT", {"number": 3, "levels": plan.levels})
         self._save_state(project)
         return plan
 
     async def _phase_development(self, project: Project, plan: ExecutionPlan) -> None:
-        print("\n[FASE 4] Desarrollo — generando código...")
-        self._notify("Generando código...", "PHASE_START", {"phase": "development"})
+        print("\n[FASE 4] Development — generating code...")
+        self._notify("Generating code...", "PHASE_START", {"phase": "development"})
         project.state = ProjectState.DEVELOPMENT
         modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
         source_dir = project.workspace / "source"
@@ -199,10 +233,10 @@ class SodaOrchestrator:
         ]
         for i, level in enumerate(plan.levels):
             nombres = nombres_en_nivel[i]
-            tag = f"[paralelo x{len(nombres)}]" if len(nombres) > 1 else "[secuencial]"
-            print(f"\n  Nivel {i} {tag}: {' | '.join(nombres)}")
+            tag = f"[parallel x{len(nombres)}]" if len(nombres) > 1 else "[sequential]"
+            print(f"\n  Level {i} {tag}: {' | '.join(nombres)}")
             for nombre in nombres:
-                self._notify(f"Generando módulo: {nombre}", "MODULE_START", {"module": nombre, "level": i})
+                self._notify(f"Generating module: {nombre}", "MODULE_START", {"module": nombre, "level": i})
             tasks = [
                 self.code_gen.generate_module(
                     modulos_by_name[nombre], project.blueprint, project.architecture,
@@ -216,12 +250,12 @@ class SodaOrchestrator:
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_text(gf.content, encoding="utf-8")
                     self._notify(
-                        f"Archivo listo: {gf.filepath}",
+                        f"File ready: {gf.filepath}",
                         "FILE_GENERATED",
                         {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
                     )
-                self._notify(f"Modulo listo: {nombre}", "MODULE_DONE", {"module": nombre, "level": i})
-        print(f"\n  [OK] Código generado -> {source_dir}")
+                self._notify(f"Module done: {nombre}", "MODULE_DONE", {"module": nombre, "level": i})
+        print(f"\n  [OK] Code generated -> {source_dir}")
         self._save_state(project)
 
     # --- Entry point ---
@@ -229,23 +263,24 @@ class SodaOrchestrator:
     async def run(self, description: str) -> Project:
         project = self._new_project(description)
         print(f"\n{'='*55}")
-        print(f"SODA — Proyecto: {project.id}")
-        print(f"Descripción: {description[:80]}")
+        print(f"SODA — Project: {project.id}")
+        print(f"Description: {description[:80]}")
         print(f"{'='*55}")
-        self._notify(f"Proyecto {project.id} iniciado.", "START", {"project_id": project.id})
+        self._notify(f"Project {project.id} started.", "START", {"project_id": project.id})
 
+        await self._phase_capabilities(project)
         await self._phase_requirements(project)
-        print(f"\n[CHECKPOINT 1] Blueprint listo.")
+        print(f"\n[CHECKPOINT 1] Blueprint ready.")
         await self._phase_architecture(project)
-        print(f"\n[CHECKPOINT 2] Arquitectura lista.")
+        print(f"\n[CHECKPOINT 2] Architecture ready.")
         plan = await self._phase_planning(project)
-        print("\n[CHECKPOINT 3] Plan listo. Iniciando desarrollo...")
+        print("\n[CHECKPOINT 3] Plan ready. Starting development...")
         await self._phase_development(project, plan)
 
         project.state = ProjectState.DONE
         self._save_state(project)
-        self._notify("Pipeline completado.", "DONE", {"project_id": project.id})
-        print(f"\n[OK] Pipeline completado. Workspace: {project.workspace}")
+        self._notify("Pipeline complete.", "DONE", {"project_id": project.id})
+        print(f"\n[OK] Pipeline complete. Workspace: {project.workspace}")
         return project
 
 
@@ -253,5 +288,5 @@ if __name__ == "__main__":
     orchestrator = SodaOrchestrator()
     asyncio.run(orchestrator.run(
         "Quiero una app web CRUD simple para gestionar una lista de tareas: "
-        "crear, leer, actualizar y eliminar tareas con título, descripción y estado."
+        "crear, leer, actualizar y eliminar tareas con titulo, descripcion y estado."
     ))
