@@ -12,6 +12,12 @@ CONFIG_FILE = "soda_config.json"
 
 _pipeline_running = False
 
+# Start Telegram bot if token is configured
+from kernel.communication.telegram_gateway import TelegramGateway as _TG
+_telegram = _TG()
+if _telegram._token:
+    _telegram.start_bot()
+
 
 @app.get("/")
 async def get_index():
@@ -160,6 +166,19 @@ async def refound_project(request: Request):
     asyncio.create_task(_run())
     return {"status": "started"}
 
+
+@app.get("/api/telegram/pair")
+async def telegram_pair():
+    code = _telegram.generate_pairing_code()
+    return {"code": code, "instruction": f"Send /pair {code} to your SODA bot on Telegram"}
+
+@app.get("/api/telegram/status")
+async def telegram_status():
+    return {
+        "configured": _telegram.is_configured(),
+        "has_token": bool(_telegram._token),
+        "chat_id": _telegram._chat_id,
+    }
 
 @app.get("/api/health")
 async def get_health():

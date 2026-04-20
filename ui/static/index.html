@@ -202,6 +202,7 @@
             <span class="phase-step" id="ph-development">DEV</span>
         </div>
         <div id="status-dot" title="Idle"></div>
+        <button id="tg-btn" onclick="pairTelegram()" title="Pair Telegram" style="padding:2px 10px;background:#1a2a3a;color:#5ba3d9;border:1px solid #2a4a6a;border-radius:3px;font-size:11px;cursor:pointer;margin-left:4px;">TG</button>
     </div>
 
     <div id="input-bar">
@@ -377,6 +378,33 @@
                 input.focus();
             }
         }
+
+        // --- Telegram pairing ---
+        async function pairTelegram() {
+            try {
+                const status = await fetch('/api/telegram/status').then(r => r.json());
+                if (status.configured) {
+                    alert(`Telegram already paired (chat_id: ${status.chat_id}). To re-pair, clear soda_config.json.`);
+                    return;
+                }
+                if (!status.has_token) {
+                    alert('No TELEGRAM_BOT_TOKEN in .env. Add it and restart SODA.');
+                    return;
+                }
+                const res = await fetch('/api/telegram/pair').then(r => r.json());
+                alert(`Pairing code: ${res.code}\n\n${res.instruction}`);
+                document.getElementById('tg-btn').style.color = '#cca700';
+            } catch(e) {
+                alert('Could not generate pairing code.');
+            }
+        }
+
+        // Check Telegram status on load
+        fetch('/api/telegram/status').then(r => r.json()).then(s => {
+            const btn = document.getElementById('tg-btn');
+            if (s.configured) { btn.style.color = '#4ec9b0'; btn.title = 'Telegram paired'; }
+            else if (!s.has_token) { btn.style.opacity = '0.3'; btn.title = 'No TELEGRAM_BOT_TOKEN'; }
+        }).catch(() => {});
 
         async function sendRefound() {
             if (!currentProjectId) return;

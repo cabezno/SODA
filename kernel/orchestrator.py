@@ -28,6 +28,7 @@ from kernel.intelligence.refoundation import RefoundationEngine
 from kernel.capabilities.profile_evolution import ProfileEvolutionEngine
 from kernel.lineage.project_lineage import ProjectLineage
 from kernel.lineage.branching import BranchManager
+from kernel.communication.telegram_gateway import TelegramGateway
 
 
 class ProjectState(Enum):
@@ -77,6 +78,7 @@ class SodaOrchestrator:
         self.lineage = ProjectLineage(self.base_dir)
         self.branch_manager = BranchManager(self.projects_dir)
         self.health = ContextHealthMonitor(notify_fn=self._notify)
+        self.telegram = TelegramGateway()
         self._ui_url = "http://127.0.0.1:8000/api/event"
 
     # --- UI notifications ---
@@ -90,6 +92,18 @@ class SodaOrchestrator:
             )
         except Exception:
             pass
+        # Forward key events to Telegram (fire-and-forget)
+        if self.telegram.should_forward(event_type) and self.telegram.is_configured():
+            import asyncio as _asyncio
+            formatted = self.telegram.format_event(event_type, message, data)
+            try:
+                loop = _asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.telegram.send(formatted))
+                else:
+                    loop.run_until_complete(self.telegram.send(formatted))
+            except Exception:
+                pass
 
     # --- Utilities ---
 
