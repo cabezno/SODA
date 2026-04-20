@@ -33,7 +33,7 @@ class GeminiDriver:
                 print(f"[DEBUG] Testeando modelo estático: {model}...")
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
                 try:
-                    res = requests.post(url, json={"contents": [{"parts": [{"text": "hi"}]}]}, timeout=10)
+                    res = requests.post(url, json={"contents": [{"parts": [{"text": "hi"}]}]}, timeout=15)
                     if res.status_code == 200:
                         self.active_model = model
                         print(f"[✓] ÉXITO: Usando {model}")
@@ -52,7 +52,7 @@ class GeminiDriver:
         }
         
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response = requests.post(url, headers=headers, json=payload, timeout=120)
             res_json = response.json()
             return res_json['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
