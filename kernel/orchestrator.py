@@ -193,17 +193,24 @@ class SodaOrchestrator:
         modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
         source_dir = project.workspace / "source"
         source_dir.mkdir(exist_ok=True)
+        nombres_en_nivel = [
+            [n for n in level if n in modulos_by_name]
+            for level in plan.levels
+        ]
         for i, level in enumerate(plan.levels):
-            tag = f"[paralelo x{len(level)}]" if len(level) > 1 else "[secuencial]"
-            print(f"\n  Nivel {i} {tag}: {' | '.join(level)}")
+            nombres = nombres_en_nivel[i]
+            tag = f"[paralelo x{len(nombres)}]" if len(nombres) > 1 else "[secuencial]"
+            print(f"\n  Nivel {i} {tag}: {' | '.join(nombres)}")
+            for nombre in nombres:
+                self._notify(f"Generando módulo: {nombre}", "MODULE_START", {"module": nombre, "level": i})
             tasks = [
                 self.code_gen.generate_module(
                     modulos_by_name[nombre], project.blueprint, project.architecture,
                 )
-                for nombre in level if nombre in modulos_by_name
+                for nombre in nombres
             ]
             results_per_module = await asyncio.gather(*tasks)
-            for generated_files in results_per_module:
+            for nombre, generated_files in zip(nombres, results_per_module):
                 for gf in generated_files:
                     out = source_dir / gf.filepath
                     out.parent.mkdir(parents=True, exist_ok=True)
@@ -213,6 +220,7 @@ class SodaOrchestrator:
                         "FILE_GENERATED",
                         {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
                     )
+                self._notify(f"Modulo listo: {nombre}", "MODULE_DONE", {"module": nombre, "level": i})
         print(f"\n  [OK] Código generado -> {source_dir}")
         self._save_state(project)
 

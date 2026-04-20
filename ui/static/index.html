@@ -12,8 +12,7 @@
         #topbar {
             display: flex; align-items: center; gap: 16px;
             padding: 0 16px; height: 42px; min-height: 42px;
-            background: #2d2d2d; border-bottom: 1px solid #3c3c3c;
-            font-size: 12px;
+            background: #2d2d2d; border-bottom: 1px solid #3c3c3c; font-size: 12px;
         }
         #topbar .brand { font-weight: 700; font-size: 13px; color: #fff; letter-spacing: 1px; }
         #topbar .model-badge {
@@ -23,40 +22,43 @@
         #phase-track { display: flex; align-items: center; gap: 4px; margin-left: auto; }
         .phase-step {
             padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 600;
-            background: #3c3c3c; color: #666; border: 1px solid #444;
-            transition: all 0.3s ease;
+            background: #3c3c3c; color: #666; border: 1px solid #444; transition: all 0.3s ease;
         }
         .phase-step.active { background: #0e4a72; color: #fff; border-color: #007acc; }
-        .phase-step.done { background: #1e4620; color: #89d185; border-color: #4ec9b0; }
+        .phase-step.done   { background: #1e4620; color: #89d185; border-color: #4ec9b0; }
         .phase-sep { color: #444; font-size: 10px; }
         #status-dot {
             width: 8px; height: 8px; border-radius: 50%; background: #444;
             margin-left: 8px; transition: background 0.3s;
         }
         #status-dot.running { background: #cca700; animation: pulse 1.2s infinite; }
-        #status-dot.done { background: #4ec9b0; animation: none; }
-        #status-dot.failed { background: #f44747; animation: none; }
+        #status-dot.done    { background: #4ec9b0; }
+        #status-dot.failed  { background: #f44747; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-        /* Body layout */
+        /* Layout */
         #body { display: flex; flex: 1; overflow: hidden; }
 
         /* Sidebar */
         #sidebar { width: 260px; min-width: 260px; background: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; }
+        .panel-header { padding: 6px 12px; background: #2d2d2d; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; border-bottom: 1px solid #222; flex-shrink: 0; }
 
-        .panel-header { padding: 6px 12px; background: #2d2d2d; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; border-bottom: 1px solid #222; }
-
-        /* Hardware panel — pinned to bottom of sidebar */
-        #hw-panel { padding: 8px 12px; border-top: 1px solid #333; background: #1e1e1e; }
-        .hw-metric { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-        .hw-metric:last-child { margin-bottom: 0; }
-        .hw-label { font-size: 10px; color: #555; width: 36px; flex-shrink: 0; }
-        .hw-val { font-size: 10px; color: #666; width: 30px; text-align: right; flex-shrink: 0; }
-        .bar-bg { flex: 1; height: 3px; background: #3c3c3c; border-radius: 2px; overflow: hidden; }
-        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 2px; }
-        .vram-fill { background: #007acc; }
-        .cpu-fill { background: #4ec9b0; }
-        .ram-fill { background: #ce9178; }
+        /* Objective tree */
+        #tree-wrap { overflow-y: auto; border-bottom: 1px solid #333; }
+        #tree-wrap.hidden { display: none; }
+        .tree-level { padding: 6px 12px 4px; }
+        .tree-level-label { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+        .tree-modules { display: flex; flex-wrap: wrap; gap: 4px; }
+        .mod-chip {
+            padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 500;
+            background: #2d2d2d; color: #666; border: 1px solid #3c3c3c;
+            transition: all 0.25s ease; white-space: nowrap;
+        }
+        .mod-chip.running {
+            background: #1a3a4a; color: #9cdcfe; border-color: #007acc;
+            animation: pulse 1.2s infinite;
+        }
+        .mod-chip.done { background: #1a3020; color: #89d185; border-color: #3a7a3a; animation: none; }
 
         /* File list */
         #file-list { flex: 1; overflow-y: auto; min-height: 0; }
@@ -69,10 +71,22 @@
         .file-item.active { background: #094771; color: #fff; }
         .file-icon { font-size: 11px; opacity: 0.7; }
         .file-validated { margin-left: auto; font-size: 10px; }
-        .file-validated.ok { color: #4ec9b0; }
+        .file-validated.ok   { color: #4ec9b0; }
         .file-validated.fail { color: #f44747; }
 
-        /* Main area */
+        /* Hardware — pinned footer */
+        #hw-panel { padding: 8px 12px; border-top: 1px solid #333; background: #1e1e1e; flex-shrink: 0; }
+        .hw-metric { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+        .hw-metric:last-child { margin-bottom: 0; }
+        .hw-label { font-size: 10px; color: #555; width: 36px; flex-shrink: 0; }
+        .hw-val   { font-size: 10px; color: #666; width: 30px; text-align: right; flex-shrink: 0; }
+        .bar-bg   { flex: 1; height: 3px; background: #3c3c3c; border-radius: 2px; overflow: hidden; }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 2px; }
+        .vram-fill { background: #007acc; }
+        .cpu-fill  { background: #4ec9b0; }
+        .ram-fill  { background: #ce9178; }
+
+        /* Main */
         #main-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         #editor-container { flex: 1; min-height: 0; }
 
@@ -84,14 +98,16 @@
         #console { flex: 1; background: #0d0d0d; padding: 8px 10px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
         .log-entry { margin-bottom: 3px; display: flex; gap: 8px; line-height: 1.5; }
         .log-time { color: #555; flex-shrink: 0; }
-        .log-msg { word-break: break-all; }
-        .log-entry.START .log-msg    { color: #dcdcaa; }
-        .log-entry.DONE .log-msg     { color: #4ec9b0; font-weight: 600; }
-        .log-entry.FAILED .log-msg   { color: #f44747; font-weight: 600; }
-        .log-entry.PHASE_START .log-msg  { color: #9cdcfe; }
-        .log-entry.CHECKPOINT .log-msg   { color: #cca700; }
+        .log-msg  { word-break: break-all; }
+        .log-entry.START .log-msg         { color: #dcdcaa; }
+        .log-entry.DONE .log-msg          { color: #4ec9b0; font-weight: 600; }
+        .log-entry.FAILED .log-msg        { color: #f44747; font-weight: 600; }
+        .log-entry.PHASE_START .log-msg   { color: #9cdcfe; }
+        .log-entry.CHECKPOINT .log-msg    { color: #cca700; }
         .log-entry.FILE_GENERATED .log-msg { color: #b5cea8; }
-        .log-entry.LOG .log-msg      { color: #888; }
+        .log-entry.MODULE_START .log-msg  { color: #c586c0; }
+        .log-entry.MODULE_DONE .log-msg   { color: #89d185; }
+        .log-entry.LOG .log-msg           { color: #666; }
     </style>
 </head>
 <body>
@@ -112,6 +128,10 @@
 
     <div id="body">
         <div id="sidebar">
+            <div id="tree-section" class="hidden">
+                <div class="panel-header">OBJECTIVES</div>
+                <div id="tree-wrap"></div>
+            </div>
             <div class="panel-header">FILES</div>
             <div id="file-list"></div>
             <div id="hw-panel">
@@ -150,7 +170,6 @@
         let files = {};
         let ramTotal = null;
         let activeFile = null;
-        let currentPhase = null;
         const phases = ['requirements', 'architecture', 'planning', 'development'];
 
         // --- Monaco ---
@@ -165,13 +184,13 @@
 
         function langFromFilename(name) {
             const ext = name.split('.').pop().toLowerCase();
-            const map = { py: 'python', js: 'javascript', ts: 'typescript', html: 'html', css: 'css', json: 'json', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'shell', txt: 'plaintext' };
+            const map = { py:'python', js:'javascript', ts:'typescript', html:'html', css:'css', json:'json', md:'markdown', yml:'yaml', yaml:'yaml', sh:'shell', txt:'plaintext' };
             return map[ext] || 'plaintext';
         }
 
         function iconFromFilename(name) {
             const ext = name.split('.').pop().toLowerCase();
-            const map = { py: '[py]', js: '[js]', ts: '[ts]', html: '[html]', css: '[css]', json: '[json]', md: '[md]' };
+            const map = { py:'[py]', js:'[js]', ts:'[ts]', html:'[html]', css:'[css]', json:'[json]', md:'[md]' };
             return map[ext] || '[file]';
         }
 
@@ -180,29 +199,60 @@
             document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
             const item = document.querySelector(`.file-item[data-file="${CSS.escape(filename)}"]`);
             if (item) item.classList.add('active');
-            const model = monaco.editor.createModel(files[filename], langFromFilename(filename));
-            editor.setModel(model);
+            editor.setModel(monaco.editor.createModel(files[filename], langFromFilename(filename)));
             activeFile = filename;
+        }
+
+        // --- Objective tree ---
+        function buildTree(levels) {
+            const wrap = document.getElementById('tree-wrap');
+            wrap.innerHTML = '';
+            levels.forEach((mods, i) => {
+                const lvl = document.createElement('div');
+                lvl.className = 'tree-level';
+                const label = document.createElement('div');
+                label.className = 'tree-level-label';
+                label.textContent = `Level ${i}${mods.length > 1 ? ' — parallel' : ''}`;
+                const chips = document.createElement('div');
+                chips.className = 'tree-modules';
+                mods.forEach(mod => {
+                    const chip = document.createElement('span');
+                    chip.className = 'mod-chip';
+                    chip.id = `mod-${mod}`;
+                    chip.textContent = mod;
+                    chips.appendChild(chip);
+                });
+                lvl.appendChild(label);
+                lvl.appendChild(chips);
+                wrap.appendChild(lvl);
+            });
+            document.getElementById('tree-section').classList.remove('hidden');
+        }
+
+        function setModuleState(modName, state) {
+            const chip = document.getElementById(`mod-${modName}`);
+            if (!chip) return;
+            chip.className = `mod-chip ${state}`;
         }
 
         // --- Hardware polling ---
         async function updateStats() {
             try {
                 const data = await fetch('/api/stats').then(r => r.json());
-                const vramUsedPct = data.vram.total > 0 ? ((data.vram.total - data.vram.free) / data.vram.total * 100) : 0;
-                document.getElementById('vram-bar').style.width = vramUsedPct + '%';
-                document.getElementById('vram-text').textContent = Math.round(vramUsedPct) + '%';
+                const vPct = data.vram.total > 0 ? (data.vram.total - data.vram.free) / data.vram.total * 100 : 0;
+                document.getElementById('vram-bar').style.width = vPct + '%';
+                document.getElementById('vram-text').textContent = Math.round(vPct) + '%';
 
                 document.getElementById('cpu-bar').style.width = data.system.cpu_usage + '%';
                 document.getElementById('cpu-text').textContent = Math.round(data.system.cpu_usage) + '%';
 
                 if (!ramTotal) {
-                    const total = await fetch('/api/ram_total').then(r => r.json()).catch(() => null);
-                    ramTotal = total?.ram_total_gb || 64;
+                    const t = await fetch('/api/ram_total').then(r => r.json()).catch(() => null);
+                    ramTotal = t?.ram_total_gb || 64;
                 }
-                const ramUsedPct = Math.max(0, 100 - (data.system.ram_free_gb / ramTotal * 100));
-                document.getElementById('ram-bar').style.width = ramUsedPct + '%';
-                document.getElementById('ram-text').textContent = Math.round(ramUsedPct) + '%';
+                const rPct = Math.max(0, 100 - data.system.ram_free_gb / ramTotal * 100);
+                document.getElementById('ram-bar').style.width = rPct + '%';
+                document.getElementById('ram-text').textContent = Math.round(rPct) + '%';
 
                 if (data.recommendation) {
                     const [model, mode] = data.recommendation;
@@ -214,33 +264,31 @@
         setInterval(updateStats, 2000);
 
         // --- Phase tracker ---
-        function setPhase(phase, done = false) {
+        function setPhase(phase, allDone = false) {
             phases.forEach(p => {
                 const el = document.getElementById('ph-' + p);
                 if (!el) return;
                 el.className = 'phase-step';
-                if (p === phase && !done) el.classList.add('active');
+                if (allDone) { el.classList.add('done'); return; }
+                if (p === phase) el.classList.add('active');
                 else if (phases.indexOf(p) < phases.indexOf(phase)) el.classList.add('done');
             });
-            if (done) phases.forEach(p => document.getElementById('ph-' + p)?.classList.add('done'));
         }
 
         function setStatus(state) {
             const dot = document.getElementById('status-dot');
-            dot.className = '';
-            dot.classList.add(state);
+            dot.className = state;
         }
 
         // --- Console ---
         function log(message, type = 'LOG') {
             const entry = document.createElement('div');
             entry.className = `log-entry ${type}`;
-            const now = new Date();
-            const ts = now.toTimeString().slice(0, 8);
+            const ts = new Date().toTimeString().slice(0, 8);
             entry.innerHTML = `<span class="log-time">${ts}</span><span class="log-msg">${escapeHtml(message)}</span>`;
-            const console_ = document.getElementById('console');
-            console_.appendChild(entry);
-            console_.scrollTop = console_.scrollHeight;
+            const el = document.getElementById('console');
+            el.appendChild(entry);
+            el.scrollTop = el.scrollHeight;
         }
 
         function escapeHtml(s) {
@@ -254,7 +302,7 @@
             ws.onmessage = (event) => {
                 const payload = JSON.parse(event.data);
                 const type = payload.event_type || 'LOG';
-                const msg = payload.message || '';
+                const msg  = payload.message || '';
                 const data = payload.data || {};
 
                 log(msg, type);
@@ -263,8 +311,10 @@
                     case 'START':
                         setStatus('running');
                         document.getElementById('file-list').innerHTML = '';
+                        document.getElementById('tree-wrap').innerHTML = '';
+                        document.getElementById('tree-section').classList.add('hidden');
                         files = {};
-                        phases.forEach(p => document.getElementById('ph-' + p).className = 'phase-step');
+                        phases.forEach(p => { const el = document.getElementById('ph-' + p); if(el) el.className = 'phase-step'; });
                         break;
 
                     case 'PHASE_START':
@@ -272,6 +322,15 @@
                         break;
 
                     case 'CHECKPOINT':
+                        if (data.number === 3 && data.levels) buildTree(data.levels);
+                        break;
+
+                    case 'MODULE_START':
+                        if (data.module) setModuleState(data.module, 'running');
+                        break;
+
+                    case 'MODULE_DONE':
+                        if (data.module) setModuleState(data.module, 'done');
                         break;
 
                     case 'FILE_GENERATED': {
@@ -281,7 +340,7 @@
                         const item = document.createElement('div');
                         item.className = 'file-item';
                         item.dataset.file = filename;
-                        item.innerHTML = `<span class="file-icon">${iconFromFilename(filename)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(filename)}</span><span class="file-validated ${validated ? 'ok' : 'fail'}">${validated ? 'OK' : 'ERR'}</span>`;
+                        item.innerHTML = `<span class="file-icon">${iconFromFilename(filename)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(filename)}</span><span class="file-validated ${validated?'ok':'fail'}">${validated?'OK':'ERR'}</span>`;
                         item.onclick = () => openFile(filename);
                         document.getElementById('file-list').appendChild(item);
                         openFile(filename);
@@ -289,7 +348,7 @@
                     }
 
                     case 'DONE':
-                        setPhase('development', true);
+                        setPhase(null, true);
                         setStatus('done');
                         break;
 
@@ -299,7 +358,7 @@
                 }
             };
 
-            ws.onclose = () => { setTimeout(connectWS, 3000); };
+            ws.onclose = () => setTimeout(connectWS, 3000);
             ws.onerror = () => ws.close();
         }
 
