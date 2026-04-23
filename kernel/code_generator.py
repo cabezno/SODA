@@ -68,9 +68,13 @@ def _noop(*a, **kw):
 
 class CodeGenerator:
     MAX_LOCAL_RETRIES = 3
-    # 6-level escalation ladder:
-    # L1-L3: Qwen retries  L4: Claude  L5: Gemini  L6: Claude Haiku (fallback)
-    ESCALATION_LEVELS = ["qwen", "qwen", "qwen", "claude", "gemini", "claude_haiku"]
+    # 9-level escalation ladder:
+    # L1-L3: Qwen × 3  →  L4-L6: Gemini × 3  →  L7-L9: Claude × 3
+    ESCALATION_LEVELS = [
+        "qwen",   "qwen",   "qwen",
+        "gemini", "gemini", "gemini",
+        "claude", "claude", "claude",
+    ]
 
     def __init__(self, ollama_driver, claude_driver, gemini_driver=None):
         self.ollama = ollama_driver
@@ -336,37 +340,37 @@ class CodeGenerator:
             )
 
         qwen_attempt = 0
+        gemini_attempt = 0
+        claude_attempt = 0
         qwen_errors: list[str] = []
         first_cloud_level: Optional[str] = None  # track when we leave Qwen
 
         for level_idx, level in enumerate(self.ESCALATION_LEVELS):
             attempt_num = level_idx + 1
-            is_cloud = level in ("claude", "gemini", "claude_haiku")
+            is_cloud = level in ("claude", "gemini")
 
             if level == "qwen":
                 qwen_attempt += 1
-                print(f"    [L{attempt_num}/Qwen] {filepath} — intento {qwen_attempt}")
+                print(f"    [L{attempt_num}/Qwen] {filepath} — intento {qwen_attempt}/3")
                 raw = await self._call_ollama(task, filepath, qwen_attempt, last_error, skills_context, profile_context)
+
+            elif level == "gemini":
+                if not self.gemini:
+                    # Skip all 3 Gemini slots and move on
+                    last_error = f"L{attempt_num} Gemini no disponible"
+                    continue
+                if first_cloud_level is None:
+                    first_cloud_level = "gemini"
+                gemini_attempt += 1
+                print(f"    [L{attempt_num}/Gemini] {filepath} — intento {gemini_attempt}/3 (corrigiendo errores Qwen)")
+                raw = await self._call_gemini(task, filepath, last_error, skills_context, profile_context)
 
             elif level == "claude":
                 if first_cloud_level is None:
                     first_cloud_level = "claude"
-                print(f"    [L{attempt_num}/Claude] Escalando {filepath}…")
+                claude_attempt += 1
+                print(f"    [L{attempt_num}/Claude] {filepath} — intento {claude_attempt}/3 (corrigiendo errores previos)")
                 raw = await self._call_claude(task, filepath, last_error, skills_context, profile_context)
-
-            elif level == "gemini":
-                if not self.gemini:
-                    continue
-                if first_cloud_level is None:
-                    first_cloud_level = "gemini"
-                print(f"    [L{attempt_num}/Gemini] Escalando {filepath}…")
-                raw = await self._call_gemini(task, filepath, last_error, skills_context, profile_context)
-
-            elif level == "claude_haiku":
-                if first_cloud_level is None:
-                    first_cloud_level = "claude_haiku"
-                print(f"    [L{attempt_num}/Haiku] Escalando {filepath}…")
-                raw = await self._call_claude_haiku(task, filepath, last_error, skills_context, profile_context)
 
             else:
                 continue
@@ -418,7 +422,7 @@ class CodeGenerator:
             if level == "qwen":
                 qwen_errors.append(last_error)
 
-        print(f"    [!] {filepath} — 6 niveles fallaron. Guardando sin validar.")
+        print(f"    [!] {filepath} — 9 niveles fallaron (Qwen×3 → Gemini×3 → Claude×3). Guardando sin validar.")
         if self.tracker is not None:
             self.tracker.record_file_generated(
                 provider="none", level=len(self.ESCALATION_LEVELS), validated=False

@@ -102,21 +102,42 @@ class PerformanceTracker:
             if failed_all:
                 print(_row("  Sin validar   [todos fallaron]", f"{failed_all:>3}  {_pct(failed_all, total)}"))
 
-        # ── Cloud escalation providers ────────────────────────────────────────
-        cloud_labels = [
-            ("claude",       "Claude Sonnet — Escalación de código"),
-            ("gemini",       "Gemini — Escalación de código"),
-            ("claude_haiku", "Claude Haiku — Escalación L6"),
-        ]
-        for key, label in cloud_labels:
-            subset = [f for f in self._files if f.provider == key]
-            if subset:
-                ok = sum(1 for f in subset if f.validated)
-                n  = len(subset)
-                print(_sep())
-                print(_hdr(label))
-                print(_row("Archivos recibidos",         str(n)))
-                print(_row("  Generados exitosamente",   f"{ok:>3}  {_pct(ok, n)}"))
+        # ── Gemini escalation (L4-L6, up to 3 attempts per file) ────────────────
+        gemini_files = [f for f in self._files if f.provider == "gemini"]
+        if gemini_files:
+            ok = sum(1 for f in gemini_files if f.validated)
+            n  = len(gemini_files)
+            # level 4=1st attempt, 5=2nd, 6=3rd
+            g1 = sum(1 for f in gemini_files if f.level == 4 and f.validated)
+            g2 = sum(1 for f in gemini_files if f.level == 5 and f.validated)
+            g3 = sum(1 for f in gemini_files if f.level == 6 and f.validated)
+            print(_sep())
+            print(_hdr("Gemini — Escalación (L4-L6, máx 3 intentos)"))
+            print(_row("Archivos recibidos de Qwen",        str(n)))
+            print(_row("  Resuelto en 1er intento [L4]",    f"{g1:>3}  {_pct(g1, n)}"))
+            print(_row("  Resuelto en 2do intento [L5]",    f"{g2:>3}  {_pct(g2, n)}"))
+            print(_row("  Resuelto en 3er intento [L6]",    f"{g3:>3}  {_pct(g3, n)}"))
+            failed_g = n - ok
+            if failed_g:
+                print(_row("  Escaló a Claude         [L7+]",f"{failed_g:>3}  {_pct(failed_g, n)}"))
+
+        # ── Claude escalation (L7-L9, up to 3 attempts per file) ────────────────
+        claude_files = [f for f in self._files if f.provider == "claude"]
+        if claude_files:
+            ok = sum(1 for f in claude_files if f.validated)
+            n  = len(claude_files)
+            c1 = sum(1 for f in claude_files if f.level == 7 and f.validated)
+            c2 = sum(1 for f in claude_files if f.level == 8 and f.validated)
+            c3 = sum(1 for f in claude_files if f.level == 9 and f.validated)
+            print(_sep())
+            print(_hdr("Claude Sonnet — Escalación (L7-L9, máx 3 intentos)"))
+            print(_row("Archivos recibidos de Gemini",       str(n)))
+            print(_row("  Resuelto en 1er intento [L7]",    f"{c1:>3}  {_pct(c1, n)}"))
+            print(_row("  Resuelto en 2do intento [L8]",    f"{c2:>3}  {_pct(c2, n)}"))
+            print(_row("  Resuelto en 3er intento [L9]",    f"{c3:>3}  {_pct(c3, n)}"))
+            failed_c = n - ok
+            if failed_c:
+                print(_row("  Sin validar (9 niveles)", f"{failed_c:>3}  {_pct(failed_c, n)}"))
 
         # ── Architect v2 ──────────────────────────────────────────────────────
         if self._architect_status is not None:
