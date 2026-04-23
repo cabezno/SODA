@@ -67,6 +67,8 @@ from kernel.audit.language_auditor import LanguageAuditor
 from kernel.external.web_researcher import WebResearcher
 from kernel.watchdog_mgr import ProjectWatchdog
 from kernel.persistence.requirements_store import RequirementsStore
+from kernel.monitoring.performance_tracker import PerformanceTracker
+from kernel.intelligence.conformance_verifier import ConformanceVerifier
 
 
 class ProjectState(Enum):
@@ -195,6 +197,9 @@ class SodaOrchestrator:
         self.code_gen.coach = self.coach
         self._ui_url = "http://127.0.0.1:8000/api/event"
         self.code_gen.notify = self._notify
+        self.perf_tracker = PerformanceTracker()
+        self.code_gen.tracker = self.perf_tracker
+        self.conformance_verifier = ConformanceVerifier(self.claude, self.perf_tracker)
         self._load_custom_providers()
 
     def _load_custom_providers(self) -> None:
@@ -1020,6 +1025,11 @@ class SodaOrchestrator:
                     encoding="utf-8",
                 )
                 attempt_count = len(result.attempts)
+                self.perf_tracker.record_contract_result(
+                    status=result.status,
+                    attempts=attempt_count,
+                    model=result.contract.model_used,
+                )
                 self._notify(
                     f"Arquitecto v2: contrato maestro aprobado "
                     f"(status={result.status}, intentos={attempt_count}).",
@@ -1049,6 +1059,10 @@ class SodaOrchestrator:
             else:
                 # requires_user_intervention
                 error_count = len(result.final_issues.all_errors) if result.final_issues else 0
+                self.perf_tracker.record_contract_result(
+                    status="requires_user_intervention",
+                    attempts=len(result.attempts),
+                )
                 self._notify(
                     f"Arquitecto v2: contrato maestro no aprobado tras {len(result.attempts)} intento(s). "
                     f"{error_count} error(s) sin resolver. Pipeline continúa con architecture.json (legacy).",
@@ -1201,6 +1215,26 @@ class SodaOrchestrator:
         print(f"\n  [OK] Code generated -> {source_dir}")
         self._save_goal_tree(project)
         self._save_state(project)
+
+    async def _phase_verify(self, project: Project) -> None:
+        """Architectural conformance check: Haiku verifies every generated module
+        against its contract and fixes non-conformances in place. Non-fatal."""
+        try:
+            source_dir = self._workspace(project) / "source"
+            self._notify(
+                "Verificando conformidad arquitectónica con Haiku...",
+                "PHASE_START",
+                {"phase": "conformance_verify"},
+            )
+            await self.conformance_verifier.verify_project(project.architecture, source_dir)
+            self._notify(
+                "Verificación de conformidad completa.",
+                "PHASE_DONE",
+                {"phase": "conformance_verify"},
+            )
+        except Exception as exc:
+            print(f"  [VERIFY] Error (no crítico): {exc}")
+            self._notify(f"ConformanceVerifier falló (no crítico): {exc}", "LOG", {})
 
     async def _dev_qwen_copilot_loop(
         self, module: dict, project: "Project", source_dir: Path,
@@ -1720,8 +1754,10 @@ class SodaOrchestrator:
 
         try:
             await self._phase_capabilities(project)
+            self.perf_tracker.record_gemini_phase("capabilities")
             self.lineage.record_capabilities(project.id, project.skills, project.profile)
             await self._phase_wisdom(project)
+            self.perf_tracker.record_gemini_phase("wisdom")
             self._apply_project_type(project)
             self._apply_capability_packs(project)
 
@@ -1735,6 +1771,7 @@ class SodaOrchestrator:
             print(f"\n[CHECKPOINT 1] Blueprint ready.")
 
             await self._phase_architecture(project)
+            self.perf_tracker.record_gemini_phase("architecture")
             self._git_commit(project, "Fase 2: Arquitectura generada")
             print(f"\n[CHECKPOINT 2] Architecture ready.")
 
@@ -1743,6 +1780,10 @@ class SodaOrchestrator:
 
             await self._phase_design(project)
             await self._phase_development(project, plan, interactive_mode)
+
+            # FASE 4.V: Verificación de conformidad arquitectónica (Haiku)
+            await self._phase_verify(project)
+            self._git_commit(project, "feat: conformance verify — Haiku corrigió no-conformidades")
 
             # FASE 4: Validación de integridad de objetivos (Anti-Huérfanos)
             integrity_report = self.goal_validator.validate_project_integrity(project.architecture)
@@ -1812,6 +1853,7 @@ class SodaOrchestrator:
                 )
 
             await self._phase_evolution(project)
+            self.perf_tracker.record_gemini_phase("evolution")
 
             run_command = self._get_run_command(project)
             install_command = self._get_install_command(project)
@@ -1819,6 +1861,9 @@ class SodaOrchestrator:
 
             setup_result = await self._phase_setup_and_verify(project)
             runtime_smoke = setup_result.get("smoke", self._get_runtime_smoke(project, run_command, install_command))
+
+            # Reporte final de efectividad del equipo IA
+            self.perf_tracker.print_report()
 
             self._notify(
                 "Pipeline completo.",
