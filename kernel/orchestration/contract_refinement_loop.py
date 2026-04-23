@@ -77,12 +77,14 @@ class ContractRefinementLoop:
                         active_skills=active_skills,
                         active_profile=active_profile,
                         goal_tree=goal_tree,
+                        attempt_number=attempt_num + 1,
                     )
                 else:
                     current_contract = await self.architect.refine_contract(
                         current_contract=current_contract,
                         audit_feedback=attempts[-1].audit_report,
                         complexity=complexity,
+                        attempt_number=attempt_num + 1,
                     )
             except Exception as exc:
                 # Architect failed (API error, bad JSON, schema validation) —

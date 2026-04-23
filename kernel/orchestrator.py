@@ -1033,6 +1033,11 @@ class SodaOrchestrator:
                     },
                 )
                 print(f"  [ARCH-V2] master_contract.json -> {contract_path}")
+                self._git_commit(
+                    project,
+                    f"feat: master contract approved "
+                    f"(complexity: {assessment.level.value}, attempts: {attempt_count})",
+                )
                 if result.status == "approved_with_warnings":
                     warning_count = len(result.attempts[-1].audit_report.all_warnings)
                     self._notify(

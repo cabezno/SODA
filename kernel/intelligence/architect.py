@@ -46,6 +46,7 @@ class Architect:
         active_skills: list | None = None,
         active_profile: dict | None = None,
         goal_tree: dict | None = None,
+        attempt_number: int = 1,
     ) -> MasterContract:
         """Generate the initial MasterContract.
 
@@ -72,6 +73,12 @@ class Architect:
             user_message=user_message,
             model=model,
             **MODEL_CALL_CONFIG[model],
+            metadata={
+                "phase": "master_contract",
+                "action": "generate",
+                "complexity": complexity.value,
+                "attempt_number": attempt_number,
+            },
         )
 
         if response.error_code:
@@ -90,6 +97,7 @@ class Architect:
         current_contract: MasterContract,
         audit_feedback: object,  # AuditReport — avoid circular import
         complexity: ComplexityLevel,
+        attempt_number: int = 2,
     ) -> MasterContract:
         """Refine a contract based on auditor feedback.
 
@@ -108,6 +116,12 @@ class Architect:
             user_message=user_message,
             model=model,
             **MODEL_CALL_CONFIG[model],
+            metadata={
+                "phase": "master_contract",
+                "action": "refine",
+                "complexity": complexity.value,
+                "attempt_number": attempt_number,
+            },
         )
 
         if response.error_code:
