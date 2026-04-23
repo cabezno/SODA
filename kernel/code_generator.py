@@ -10,6 +10,7 @@ from kernel.goals.goal_tree import build_file_goal_id, build_file_goal_node
 from kernel.goals.metadata_injector import MetadataInjector
 from kernel.integrity.goal_integrity_validator import GoalIntegrityValidator
 from kernel.execution.html_template_injector import get_html_hint
+from kernel.execution.log_collector import LogCollector
 
 
 @dataclass
@@ -89,6 +90,7 @@ class CodeGenerator:
         self.observer = None   # BehaviorObserver | None
         self.coach = None      # LocalAICoach | None
         self.tracker = None    # PerformanceTracker | None — set by orchestrator after init
+        self._log_collector = LogCollector(max_bytes_per_tool=2_000, max_age_minutes=30)
 
     def _build_task(
         self, filepath: str, module: dict, blueprint: dict, architecture: dict,
@@ -344,10 +346,33 @@ class CodeGenerator:
         claude_attempt = 0
         qwen_errors: list[str] = []
         first_cloud_level: Optional[str] = None  # track when we leave Qwen
+        _log_context_injected = False             # inject logs only once per escalation
+
+        # Resolve stack name for log collection
+        _stack_name = (
+            blueprint.get("stack_sugerido", {}).get("backend", "")
+            or blueprint.get("stack_sugerido", {}).get("frontend", "")
+            or ""
+        ).lower()
 
         for level_idx, level in enumerate(self.ESCALATION_LEVELS):
             attempt_num = level_idx + 1
             is_cloud = level in ("claude", "gemini")
+
+            # On first cloud escalation, append system logs to error context
+            if is_cloud and not _log_context_injected:
+                _log_context_injected = True
+                try:
+                    log_snippet = self._log_collector.collect(
+                        stack=_stack_name or "node",
+                        workspace=Path(filepath).parent if Path(filepath).parent.is_dir() else None,
+                    )
+                    if log_snippet and last_error:
+                        last_error = f"{last_error}\n{log_snippet}"
+                    elif log_snippet:
+                        last_error = log_snippet
+                except Exception:
+                    pass
 
             if level == "qwen":
                 qwen_attempt += 1
