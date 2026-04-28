@@ -3,13 +3,46 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Callable, Optional
+
+# After this many similar projects, suggest creating a specialized profile
+SPECIALIZE_THRESHOLD = 3
 
 
 class ProfileEvolutionEngine:
-    def __init__(self, gemini_driver, context_builder):
+    def __init__(self, gemini_driver, context_builder, claude_driver=None):
         self.gemini = gemini_driver
+        self.claude = claude_driver
         self.builder = context_builder
         self.profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
+        # Optional callback: notify_fn(message, event_type, data)
+        self.notify_fn: Optional[Callable] = None
+
+    def _count_similar_projects(self, profile_name: str) -> int:
+        """Count experience entries in the profile (proxy for similar projects done)."""
+        exp_dir = self.profiles_dir / "base" / profile_name / "experience"
+        if not exp_dir.exists():
+            return 0
+        return len(list(exp_dir.glob("*_learnings.md")))
+
+    def _check_specialization_opportunity(self, profile_name: str, skills: list[str]) -> None:
+        """If enough similar projects exist, fire a specialization suggestion."""
+        if not self.notify_fn:
+            return
+        count = self._count_similar_projects(profile_name)
+        if count >= SPECIALIZE_THRESHOLD and count % SPECIALIZE_THRESHOLD == 0:
+            dominant_skills = skills[:3] if skills else []
+            self.notify_fn(
+                f"SODA detectó {count} proyectos completados con el perfil '{profile_name}'. "
+                f"Podría ser útil crear un perfil especializado para: {', '.join(dominant_skills) or 'este dominio'}.",
+                "SPECIALIZATION_SUGGESTED",
+                {
+                    "profile_name": profile_name,
+                    "project_count": count,
+                    "dominant_skills": dominant_skills,
+                    "action": "Revisá los aprendizajes acumulados y considerá crear un perfil custom en profiles/custom/.",
+                },
+            )
 
     async def evolve(self, project_id: str, description: str, blueprint: dict, architecture: dict, profile_name: str, skills: list[str]) -> dict:
         task = (
@@ -19,10 +52,15 @@ class ProfileEvolutionEngine:
             f"ACTIVE PROFILE: {profile_name}\n"
             f"ACTIVE SKILLS: {', '.join(skills) or 'none'}"
         )
+        from kernel.utils.ai_fallback import is_capacity_error
         payload = self.builder.build_payload("gemini", "profile_evolution", task)
-        raw = await asyncio.to_thread(self.gemini.prompt, payload["system"], payload["user"])
+        raw = (await self.gemini.call(payload["system"], payload["user"])).content
+        if is_capacity_error(raw) and self.claude:
+            fallback = self.builder.build_payload("claude", "profile_evolution", task)
+            raw = self.claude.prompt(fallback["system"], fallback["user"])
         learnings = self._parse(raw)
         self._persist(project_id, profile_name, learnings)
+        self._check_specialization_opportunity(profile_name, skills)
         return learnings
 
     def _parse(self, text: str) -> dict:

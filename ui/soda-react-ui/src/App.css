@@ -1,0 +1,296 @@
+/* ── Palette ───────────────────────────────────────────────────── */
+:root,
+.dark,
+html.dark,
+body.dark,
+[data-theme="dark"] {
+  /* Override every CopilotKit variable */
+  --copilot-kit-background-color:        #000000 !important;
+  --copilot-kit-secondary-color:         #0a0a0a !important;
+  --copilot-kit-primary-color:           #e040fb !important; /* magenta — send btn, borders */
+  --copilot-kit-contrast-color:          #ffffff !important;
+  --copilot-kit-secondary-contrast-color:#ffffff !important;
+  --copilot-kit-muted-color:             #546e7a !important;
+  --copilot-kit-separator-color:         #1a1a1a !important;
+  --copilot-kit-input-background-color:  #050505 !important;
+  --copilot-kit-error-background:        #1a0000 !important;
+  --copilot-kit-error-border:            #ff1744 !important;
+  --copilot-kit-error-text:              #ff5252 !important;
+
+  /* SODA palette */
+  --soda-black:   #000000;
+  --soda-surface: #0a0a0a;
+  --soda-border:  #1a1a1a;
+  --soda-white:   #ffffff;
+  --soda-yellow:  #f5d060;
+  --soda-cyan:    #00e5ff;
+  --soda-magenta: #e040fb;
+  --soda-muted:   #546e7a;
+}
+
+/* ── Global reset ──────────────────────────────────────────────── */
+html, body, #root {
+  background: #000000 !important;
+  color: #ffffff;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── BMB Header ────────────────────────────────────────────────── */
+.bmb-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: #000000;
+  border-bottom: 1px solid #1a1a1a;
+  flex-shrink: 0;
+}
+
+.bmb-monogram {
+  font-family: 'Cinzel Decorative', 'Trajan Pro', 'Times New Roman', serif;
+  font-weight: 700;
+  font-size: 1.6rem;
+  letter-spacing: 0.12em;
+  background: linear-gradient(135deg, #00e5ff 0%, #f5d060 45%, #e040fb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+  user-select: none;
+}
+
+.bmb-subtitle {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #00e5ff;
+  user-select: none;
+}
+
+/* ── Hide built-in CopilotKit header ───────────────────────────── */
+[class*="copilotKitHeader"],
+[class*="copilot-kit-header"],
+.copilotKitHeader {
+  display: none !important;
+}
+
+/* ── Main containers ───────────────────────────────────────────── */
+.copilotKitChat,
+.copilotKitWindow,
+[class*="copilotKit"],
+[class*="copilot-kit"] {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* ── Messages list area ────────────────────────────────────────── */
+.copilotKitMessages,
+[class*="messagesContainer"],
+[class*="MessagesContainer"],
+[class*="messagesList"],
+[class*="MessagesList"] {
+  background-color: #000000 !important;
+}
+
+/* ── Assistant message bubble ──────────────────────────────────── */
+.copilotKitAssistantMessage,
+[class*="copilotKitAssistantMessage"],
+[class*="assistantMessage"],
+[class*="AssistantMessage"] {
+  background-color: #050505 !important;
+  color: #ffffff !important;
+  border: 1px solid #00e5ff2a !important;
+  border-radius: 8px !important;
+}
+
+/* ── User message bubble ───────────────────────────────────────── */
+.copilotKitUserMessage,
+[class*="copilotKitUserMessage"],
+[class*="userMessage"],
+[class*="UserMessage"] {
+  background-color: #07000d !important;
+  color: #ffffff !important;
+  border: 1px solid #e040fb33 !important;
+  border-radius: 8px !important;
+}
+
+/* ── Input section ─────────────────────────────────────────────── */
+.copilotKitInputControls,
+[class*="copilotKitInput"],
+[class*="inputSection"],
+[class*="InputSection"],
+[class*="chatInput"],
+[class*="ChatInput"],
+[class*="inputContainer"],
+[class*="InputContainer"] {
+  background-color: #000000 !important;
+  border-top: 1px solid #1a1a1a !important;
+}
+
+/* ── Textarea / input field ────────────────────────────────────── */
+.copilotKitInput,
+[class*="copilotKitInput"] textarea,
+[class*="copilotKitInput"] input,
+[class*="chatInput"] textarea,
+[class*="chatInput"] input,
+textarea,
+input[type="text"] {
+  background-color: #050505 !important;
+  color: #ffffff !important;
+  border: 1px solid #1a1a1a !important;
+  caret-color: #00e5ff !important;
+  border-radius: 6px !important;
+}
+
+[class*="copilotKitInput"] textarea::placeholder,
+[class*="chatInput"] textarea::placeholder,
+textarea::placeholder {
+  color: #546e7a !important;
+}
+
+/* ── Send button ───────────────────────────────────────────────── */
+.copilotKitSendButton,
+[class*="copilotKitSend"],
+[class*="sendButton"],
+[class*="SendButton"],
+[class*="submitButton"],
+[class*="SubmitButton"],
+button[type="submit"] {
+  background-color: #e040fb !important;
+  color: #000000 !important;
+  border: none !important;
+  border-radius: 6px !important;
+}
+
+.copilotKitSendButton:hover,
+[class*="copilotKitSend"]:hover,
+[class*="sendButton"]:hover {
+  background-color: #f06fff !important;
+}
+
+/* ── Floating action button ────────────────────────────────────── */
+.copilotKitButton {
+  background-color: #e040fb !important;
+  border-color: #e040fb !important;
+  color: #000000 !important;
+}
+
+/* ── Links ─────────────────────────────────────────────────────── */
+[class*="copilotKit"] a,
+.copilotKitChat a {
+  color: #00e5ff !important;
+}
+
+/* ── Code blocks ───────────────────────────────────────────────── */
+[class*="copilotKit"] code,
+[class*="copilotKit"] pre,
+.copilotKitChat code,
+.copilotKitChat pre {
+  background-color: #050505 !important;
+  color: #f5d060 !important;
+  border: 1px solid #1a1a1a !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────── */
+[class*="copilotKit"] ::-webkit-scrollbar-track,
+.copilotKitChat ::-webkit-scrollbar-track {
+  background: #000000 !important;
+}
+[class*="copilotKit"] ::-webkit-scrollbar-thumb,
+.copilotKitChat ::-webkit-scrollbar-thumb {
+  background: #1a1a1a !important;
+  border-radius: 4px;
+}
+[class*="copilotKit"] ::-webkit-scrollbar-thumb:hover,
+.copilotKitChat ::-webkit-scrollbar-thumb:hover {
+  background: #00e5ff !important;
+}
+
+/* ── Response action buttons (copy, thumbs, etc.) ──────────────── */
+[class*="responseButton"],
+[class*="ResponseButton"],
+[class*="actionButton"],
+[class*="ActionButton"],
+[class*="copilotKitButton"] {
+  color: #546e7a !important;
+  border-color: #1a1a1a !important;
+  background: transparent !important;
+}
+[class*="responseButton"]:hover,
+[class*="actionButton"]:hover {
+  color: #00e5ff !important;
+  border-color: #00e5ff !important;
+}
+
+/* ── Typing indicator ──────────────────────────────────────────── */
+[class*="typingIndicator"] span,
+[class*="TypingIndicator"] span,
+[class*="loadingDot"],
+[class*="dot"] {
+  background-color: #00e5ff !important;
+}
+
+/* ── Powered by / footer ───────────────────────────────────────── */
+.poweredBy,
+[class*="poweredBy"],
+[class*="PoweredBy"] {
+  color: #546e7a !important;
+  background: #000000 !important;
+  border-top: 1px solid #1a1a1a !important;
+}
+
+/* ── Hardcoded CopilotKit classes with blue/gray colors ────────── */
+/* These use #1f2937 / #374151 (Tailwind blue-gray) hardcoded, not via CSS vars */
+.copilotkit-response-content,
+.copilotkit-response-completed-feedback {
+  background-color: #050505 !important;
+  color: #ffffff !important;
+}
+
+.copilotkit-response-label,
+.copilotkit-icon {
+  color: #00e5ff !important;
+}
+
+.copilotkit-state-label,
+[class*="copilotkit-state"] {
+  background-color: #050505 !important;
+  color: #546e7a !important;
+}
+
+.copilotkit-response-completed-feedback span {
+  color: #ffffff !important;
+}
+
+/* Attachment icons fallback color (#6366f1 indigo → magenta) */
+.copilotKitAttachmentQueueDocIcon,
+.copilotKitAttachmentDocIcon {
+  background-color: #e040fb !important;
+  color: #000000 !important;
+}
+
+.copilotKitDragOver {
+  outline-color: #00e5ff !important;
+}
+
+/* Any element with a Tailwind blue-gray background set inline */
+[style*="1f2937"],
+[style*="374151"],
+[style*="1F2937"],
+[style*="374151"] {
+  background-color: #050505 !important;
+}
+
+/* ── Nuke any remaining hardcoded blues ────────────────────────── */
+[class*="copilotKit"] [style*="0e4a72"],
+[class*="copilotKit"] [style*="rgb(14, 74, 114)"],
+[class*="copilotKit"] [style*="rgb(0, 122, 255)"],
+[class*="copilotKit"] [style*="#007aff"],
+.copilotKitChat [style*="background: rgb(14"],
+.copilotKitChat [style*="background-color: rgb(14"] {
+  background-color: #e040fb !important;
+  color: #000000 !important;
+}

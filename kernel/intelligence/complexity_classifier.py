@@ -21,9 +21,10 @@ MODEL_ASSIGNMENT_BY_COMPLEXITY: dict[str, str] = {
 }
 
 MODEL_CALL_CONFIG: dict[str, dict] = {
-    "claude-haiku-4-5-20251001": {"temperature": 0.2, "max_tokens": 6000},
-    "claude-sonnet-4-6": {"temperature": 0.2, "max_tokens": 8000},
-    "claude-opus-4-7": {"temperature": 0.2, "max_tokens": 12000},
+    "claude-haiku-4-5-20251001": {"max_tokens": 8192},
+    "claude-sonnet-4-6":         {"max_tokens": 64000},
+    # Opus output cap is 32K; max_continuations allows multi-turn completion for large JSONs
+    "claude-opus-4-7":           {"max_tokens": 32000, "max_continuations": 2},
 }
 
 # ---------------------------------------------------------------------------
@@ -107,6 +108,9 @@ class ProjectComplexityClassifier:
         scores = self._calculate_scores(signals)
         level = self._determine_level(scores)
         level = self._apply_minimum_level(level, signals)
+        
+
+            
         reasoning = self._build_reasoning(signals, scores, level)
 
         return ComplexityAssessment(

@@ -1,0 +1,21 @@
+name: skill_postgresql
+category: database
+description: PostgreSQL with SQLAlchemy (Python), GORM (Go), JPA (Java), or Prisma
+  (Node.js)
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- postgresql
+- postgres
+- pg
+- sql
+- relational database
+- prisma
+version: '1.0'

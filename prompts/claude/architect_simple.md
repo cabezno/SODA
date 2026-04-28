@@ -37,20 +37,77 @@ El contrato debe incluir:
 
 **Errores mínimos (3):** cubrir al menos: not found, validación, autenticación o técnico.
 
-## Schema MasterContract
+## Schema MasterContract — ESTRUCTURA EXACTA REQUERIDA
 
-```
+```json
 {
-  "project_id": "string (snake_case)",
+  "project_id": "string en snake_case (ej: 'my_project')",
   "project_name": "string",
   "version": "1.0.0",
   "complexity_level": "simple",
   "model_used": "string",
-  "modules": [ { "id", "name", "purpose" (≥20 chars), "interfaces", "goal_ids" (≥1), "layer", "depends_on" } ],
-  "data_types": [ { "name" (PascalCase), "kind", "description" (≥10 chars), "used_by_modules" } ],
-  "event_channels": [ { "name" (dotted), "payload_schema", "description" } ],
-  "extension_points": [ { "id", "type", "location", "contract" (≥20 chars), "description", "example_use_case" } ],
-  "error_types": [ { "name" (PascalCase), "code" (UPPER_SNAKE), "message_template", "recoverable" } ],
+  "modules": [
+    {
+      "id": "string en snake_case",
+      "name": "string descriptivo",
+      "purpose": "string mínimo 20 caracteres describiendo responsabilidad",
+      "interfaces": [
+        {
+          "name": "string (ej: 'UserServiceInterface')",
+          "description": "string",
+          "methods": [
+            {
+              "name": "string en snake_case",
+              "parameters": {"param_name": "type"},
+              "returns": "string",
+              "raises": [],
+              "description": "string mínimo 10 caracteres",
+              "example_usage": "service.method(arg)",
+              "is_async": false
+            }
+          ],
+          "events_emitted": [],
+          "events_consumed": []
+        }
+      ],
+      "depends_on": [],
+      "data_types_used": [],
+      "extension_points": [],
+      "goal_ids": ["goal_id_descriptivo"],
+      "layer": "application"
+    }
+  ],
+  "data_types": [
+    {
+      "name": "PascalCase",
+      "kind": "object",
+      "fields": {"field_name": "type"},
+      "description": "string mínimo 10 caracteres",
+      "used_by_modules": []
+    }
+  ],
+  "event_channels": [],
+  "extension_points": [
+    {
+      "id": "ep_unique_id",
+      "type": "middleware_slot",
+      "location": "string",
+      "contract": "string",
+      "description": "string",
+      "example_use_case": "string"
+    }
+  ],
+  "error_types": [
+    {
+      "name": "PascalCase (ej: 'NotFoundError')",
+      "code": "UPPER_SNAKE_CASE (ej: 'NOT_FOUND')",
+      "message_template": "Resource {id} not found",
+      "recoverable": false,
+      "retry_strategy": null,
+      "http_status": 404,
+      "raised_by_modules": []
+    }
+  ],
   "constants": [],
   "architectural_decisions": [],
   "assumptions": [],
@@ -58,9 +115,11 @@ El contrato debe incluir:
 }
 ```
 
-## Capas válidas para módulos
+## Valores válidos para campos con enum
 
-`domain` | `application` | `infrastructure` | `presentation`
+- `modules[].layer`: `"domain"` | `"application"` | `"infrastructure"` | `"presentation"`
+- `extension_points[].type`: `"middleware_slot"` | `"event_channel"` | `"metadata_field"` | `"plugin"` | `"hook"` | `"filter"`
+- `data_types[].kind`: `"primitive"` | `"object"` | `"enum"` | `"union"` | `"list"`
 
 ## Formato de output
 

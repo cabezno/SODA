@@ -8,7 +8,7 @@ from typing import Optional
 @dataclass
 class _FileResult:
     provider: str  # "qwen" | "claude" | "gemini" | "claude_haiku" | "none"
-    level: int     # 1-6 (escalation level)
+    level: int     # 1-9 (escalation level: 1-3 Qwen, 4-6 Gemini, 7-9 Claude)
     validated: bool
 
 
@@ -53,6 +53,17 @@ class PerformanceTracker:
             self._conformance_fixed += 1
         else:
             self._conformance_compliant += 1
+
+    def reset(self) -> None:
+        """Clear all accumulated metrics. Call at the start of each pipeline run."""
+        self._files.clear()
+        self._architect_attempts = 0
+        self._architect_status = None
+        self._architect_model = None
+        self._conformance_compliant = 0
+        self._conformance_fixed = 0
+        self._conformance_skipped = 0
+        self._gemini_phases.clear()
 
     # ── Phase tracking ───────────────────────────────────────────────────────
 

@@ -1,0 +1,25 @@
+name: skill_marketing
+category: domain_discipline
+description: Digital marketing strategy, growth, SEO, analytics, content, email campaigns, and conversion optimization
+applies_to_roles:
+  code_generator:
+    load_level: summary
+  global_architect:
+    load_level: full
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: full
+activation_keywords:
+  - marketing
+  - seo
+  - growth
+  - landing page
+  - email campaign
+  - conversion
+  - analytics
+  - funnel
+  - ads
+  - social media
+  - content strategy
+version: "1.0"

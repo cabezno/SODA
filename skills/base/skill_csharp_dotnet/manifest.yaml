@@ -1,0 +1,22 @@
+name: skill_csharp_dotnet
+category: backend_framework
+description: C# .NET 8 Web API with Entity Framework Core and clean architecture
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- csharp
+- c#
+- dotnet
+- .net
+- asp.net
+- entity framework
+- ef core
+- blazor
+version: '1.0'

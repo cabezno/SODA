@@ -31,7 +31,7 @@ from kernel.integrity.audit_schemas import AuditReport, Issue, ValidatorResult
 # ---------------------------------------------------------------------------
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 @dataclass
@@ -351,3 +351,41 @@ def test_refine_includes_feedback_in_user_message():
     user_message = kwargs.get("user_message", "")
     assert "Feedback del Auditor" in user_message
     assert "Errores críticos" in user_message
+
+
+# ---------------------------------------------------------------------------
+# Test: topology parameter (v2 paths)
+# ---------------------------------------------------------------------------
+
+def test_generate_with_topology_does_not_crash():
+    """Passing topology should not break generation — it enriches the prompt."""
+    driver = _make_driver(json.dumps(_minimal_contract_dict()))
+    architect = Architect(driver)
+    topology = {
+        "modulos": [
+            {"id": "api_module", "archivos_principales": ["api/routes.py", "api/models.py"]},
+            {"id": "auth_module", "archivos_principales": ["auth/service.py"]},
+        ]
+    }
+    contract = run(architect.generate_master_contract(
+        blueprint={"nombre": "Test App"},
+        complexity=ComplexityLevel.SIMPLE,
+        topology=topology,
+    ))
+    assert isinstance(contract, MasterContract)
+    driver.call.assert_called_once()
+
+
+def test_generate_topology_none_explicit_matches_default():
+    """Explicit topology=None is identical to omitting the parameter."""
+    driver_a = _make_driver(json.dumps(_minimal_contract_dict()))
+    driver_b = _make_driver(json.dumps(_minimal_contract_dict()))
+    architect_a = Architect(driver_a)
+    architect_b = Architect(driver_b)
+
+    run(architect_a.generate_master_contract({}, ComplexityLevel.SIMPLE, topology=None))
+    run(architect_b.generate_master_contract({}, ComplexityLevel.SIMPLE))
+
+    # Both should invoke driver exactly once
+    assert driver_a.call.call_count == 1
+    assert driver_b.call.call_count == 1

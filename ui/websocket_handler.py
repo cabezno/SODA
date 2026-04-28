@@ -11,14 +11,22 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        try:
+            self.active_connections.remove(websocket)
+        except ValueError:
+            pass
 
     async def broadcast(self, message: dict):
+        dead = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception:
-                # Si una conexión falla, la ignoramos o la removemos en el próximo ciclo
+                dead.append(connection)
+        for conn in dead:
+            try:
+                self.active_connections.remove(conn)
+            except ValueError:
                 pass
 
 manager = ConnectionManager()

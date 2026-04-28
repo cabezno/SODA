@@ -1,0 +1,34 @@
+PLAN DE CORRECCIONES Y MEJORAS - SODA PROJECT
+=============================================
+
+1. ARQUITECTURA Y MODULARIZACIÓN (CRÍTICO)
+-----------------------------------------
+* Descomposición de kernel/orchestrator.py: Actualmente es un "God Object" de +2300 líneas. Se propone mover la lógica de inicialización y las máquinas de estado de fases específicas a orquestadores delegados (ej. PhaseOrchestrator, CapabilityManager).
+* Limpieza de placeholders: Consolidar o categorizar directorios vacíos o experimentales (stt, tts, vision) para reducir el ruido cognitivo en la estructura del kernel.
+
+2. FORTALECIMIENTO DE LA INTELIGENCIA (CORE)
+-------------------------------------------
+* Refinamiento de Refundación (kernel/intelligence/refoundation.py): Implementar una lógica de compresión semántica real usando ChromaDB. No solo resumir, sino destilar decisiones clave y contratos para "rejuvenecer" el contexto de los modelos sin perder coherencia.
+* Impact Analyzer Proactivo: Expandir la lógica para generar reportes de "Riesgo de Regresión" que analicen cómo un cambio en un módulo afecta la integridad de los contratos de API de sus dependientes.
+* Enforzamiento de Contratos: Automatizar APIContractEnforcer para que actúe como una barrera infranqueable entre la generación de módulos, evitando que un error de interfaz se propague al resto del DAG.
+
+3. INTEGRACIÓN ESTRATÉGICA: TYPESPEC + VECTOR DB (NUEVO)
+-------------------------------------------------------
+* TypeSpec como Estándar de Contratos: Migrar de definiciones JSON puras a TypeSpec para la fase de arquitectura. Esto proporcionará un "Contrato de Acero" que puede compilarse a OpenAPI/JSON Schema, permitiendo una validación estática rigurosa antes de generar código.
+* Memoria Semántica Profunda (Vector DB): Utilizar ChromaDB para indexar no solo código, sino fragmentos de TypeSpec y el "lineage" de decisiones. Esto permitirá un "Context Pruning" agresivo, inyectando solo las interfaces necesarias y ejemplos semánticamente relevantes en cada prompt.
+* Sinergia Estructura/Significado: El Architect diseña en TypeSpec -> Se indexa en Vector DB -> El CodeGenerator recupera el contrato exacto -> El Enforcer valida contra el esquema compilado.
+
+4. ESTABILIDAD Y VALIDACIÓN (CALIDAD)
+------------------------------------
+* Suite de Salud de Drivers: Ampliar el SmokeTester para verificar no solo la disponibilidad de la API, sino también la latencia y la capacidad de respuesta (context window check) de Ollama, Claude y Gemini al arrancar.
+* Centralización de Fallbacks: Mover toda la lógica de reintentos (3x Qwen -> Claude) al AIProviderHub. Actualmente está dispersa, lo que dificulta la calibración global de la estrategia de escalado.
+* Cobertura de Tests: Crear tests de integración específicos para los componentes de seguridad (SecurityReviewer) y auditoría (LanguageAuditor).
+
+5. INTERFAZ Y UX (VISIBILIDAD)
+-----------------------------
+* Inspector de Prompts: Añadir una vista en la UI que permita ver el prompt final construido por el ContextBuilder y la respuesta cruda de la IA. Esencial para el debugging de instrucciones.
+* Interactividad del Árbol de Objetivos: Permitir acciones granulares sobre los nodos (Regenerar, Marcar como manual, Ver lineage) directamente desde la interfaz visual.
+
+6. OPTIMIZACIÓN DE RECURSOS
+---------------------------
+* Gestión dinámica de VRAM: Implementar un monitor que pause o secuencie llamadas a Ollama si detecta que la carga de contextos paralelos está cerca del límite de la GPU (evitando crashes de drivers).

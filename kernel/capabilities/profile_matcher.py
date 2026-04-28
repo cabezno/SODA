@@ -4,8 +4,9 @@ import yaml
 
 
 class ProfileMatcher:
-    def __init__(self, gemini_driver, context_builder):
+    def __init__(self, gemini_driver, context_builder, claude_driver=None):
         self.gemini = gemini_driver
+        self.claude = claude_driver
         self.builder = context_builder
         self.profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
 
@@ -38,15 +39,19 @@ class ProfileMatcher:
             f"AVAILABLE PROFILES:\n{self._build_profiles_summary(available)}"
         )
         payload = self.builder.build_payload("gemini", "profile_matcher", task)
-        raw = await self._call_gemini(payload)
+        raw = await self._call_gemini(payload, "profile_matcher", task)
         result = self._parse_json(raw)
         matched = result.get("matched_profile", "")
         valid_names = {p["name"] for p in available}
         return matched if matched in valid_names else "profile_general_dev"
 
-    async def _call_gemini(self, payload: dict) -> str:
-        import asyncio
-        return await asyncio.to_thread(self.gemini.prompt, payload["system"], payload["user"])
+    async def _call_gemini(self, payload: dict, role: str = "profile_matcher", task: str = "") -> str:
+        from kernel.utils.ai_fallback import is_capacity_error
+        result = (await self.gemini.call(payload["system"], payload["user"])).content
+        if is_capacity_error(result) and self.claude:
+            fallback = self.builder.build_payload("claude", role, task)
+            result = await self.claude.prompt(fallback["system"], fallback["user"])
+        return result
 
     @staticmethod
     def _parse_json(text: str) -> dict:

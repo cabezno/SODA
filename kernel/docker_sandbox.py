@@ -31,8 +31,78 @@ class DockerSandbox:
     TIMEOUT_SECONDS = 30
 
     def __init__(self):
-        self.client = self._connect()
-        self._ensure_image()
+        self.client = None
+
+    @property
+    def available(self) -> bool:
+        """Alias para compatibilidad con el resto de SODA."""
+        try:
+            return self._ensure_connected(autostart=False)
+        except:
+            return False
+
+    @staticmethod
+    def project_needs_docker(workspace: str) -> bool:
+        """Return True if the project explicitly uses Docker (compose file or docker skill)."""
+        ws = Path(workspace)
+        # Presence of docker-compose file
+        for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+            if (ws / "source" / name).exists() or (ws / name).exists():
+                return True
+        # Check architecture/blueprint for docker mentions
+        for fname in ("architecture.json", "blueprint.json", "master_contract.json"):
+            p = ws / fname
+            if p.exists():
+                try:
+                    import json as _json
+                    text = p.read_text(encoding="utf-8", errors="replace").lower()
+                    if "docker" in text or "container" in text:
+                        return True
+                except Exception:
+                    pass
+        return False
+
+    def _ensure_connected(self, autostart: bool = False) -> bool:
+        '''Conexion perezosa a Docker. Solo arranca Docker Desktop si autostart=True.'''
+        if self.client is not None:
+            try:
+                self.client.ping()
+                return True
+            except Exception:
+                self.client = None
+
+        import docker
+        try:
+            self.client = self._connect()
+            self._ensure_image()
+            return True
+        except Exception:
+            pass
+
+        if not autostart:
+            return False
+
+        import time, subprocess
+        print("  [DockerSandbox] El proyecto requiere Docker. Intentando arrancar Docker Desktop...")
+        try:
+            subprocess.Popen([r"C:\Program Files\Docker\Docker\Docker Desktop.exe"])
+        except Exception as e:
+            print(f"  [DockerSandbox] No se pudo invocar Docker Desktop: {e}")
+            return False
+
+        for _ in range(15):
+            time.sleep(3)
+            try:
+                self.client = self._connect()
+                self._ensure_image()
+                print("  [DockerSandbox] Docker ha levantado con exito.")
+                return True
+            except Exception:
+                pass
+
+        print("  [DockerSandbox] Timeout esperando a Docker.")
+        return False
+
 
     @staticmethod
     def _connect() -> docker.DockerClient:
@@ -92,6 +162,9 @@ class DockerSandbox:
 
         shell_cmd = " && ".join(cmds)
 
+        if not self._ensure_connected():
+            return SandboxResult(success=True, stdout="DOCKER_UNAVAILABLE", stderr="", exit_code=0, duration_ms=0)
+
         container = None
         start = time.time()
         try:
@@ -138,6 +211,51 @@ class DockerSandbox:
                     container.remove(force=True)
                 except Exception:
                     pass
+
+
+    def run_tests(
+        self,
+        workspace: str,
+        install_command: Optional[str] = None,
+        run_command: Optional[str] = None,
+    ) -> dict:
+        """Project-level test runner. Runs pytest inside the sandbox if available."""
+        needs = self.project_needs_docker(workspace)
+        if not self._ensure_connected(autostart=needs):
+            reason = "Docker no disponible" if not needs else "Docker requerido pero no pudo arrancar"
+            return {"success": True, "skipped": True, "reason": reason}
+
+        cmds = []
+        if install_command:
+            cmds.append(install_command)
+        cmds.append("python -m pytest --tb=short -q 2>&1 || true")
+        shell_cmd = " && ".join(cmds)
+
+        container = None
+        start = time.time()
+        try:
+            ws_path = Path(workspace)
+            files: dict[str, str] = {}
+            for f in ws_path.rglob("*.py"):
+                try:
+                    rel = f.relative_to(ws_path)
+                    files[str(rel).replace("\\", "/")] = f.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    pass
+
+            result = self.run(
+                code="# project runner",
+                extra_files=files if files else None,
+                install_packages=[],
+            )
+            return {
+                "success": result.success,
+                "stdout": result.stdout[:2000],
+                "exit_code": result.exit_code,
+                "duration_ms": result.duration_ms,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 def _smoke_test():

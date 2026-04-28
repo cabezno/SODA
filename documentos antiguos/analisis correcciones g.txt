@@ -1,0 +1,89 @@
+=============================================================================
+           INFORME DE ANÁLISIS DE CORRECCIONES Y AUDITORÍA (SODA)
+=============================================================================
+
+Este documento presenta un análisis paso a paso de los recientes cambios
+implementados en el orquestador y detalla las incidencias (errores activos)
+que aún persisten en la base de código, explicando su impacto real.
+
+-----------------------------------------------------------------------------
+PARTE 1: ANÁLISIS DE LOS CAMBIOS RECIENTES
+-----------------------------------------------------------------------------
+Se auditaron las últimas modificaciones realizadas en `kernel/orchestrator.py` 
+y `kernel/orchestration/phase_mixin.py`.
+
+1. Centralización del Copilot (_handle_copilot_review)
+   - QUÉ SE HIZO: Se consolidó la lógica dispersa de parsing de revisiones
+     de Copilot en un solo método capaz de decidir la estrategia de intervención
+     (annotate, regenerate, rephase, ignore).
+   - IMPACTO (POSITIVO): Reduce drásticamente la repetición de código (DRY).
+     Al tener un único punto de decisión basado en la confianza (confidence) y 
+     severidad (severity), SODA ya no descarta módulos enteros por errores menores,
+     ahorrando costos de API y evitando regeneraciones destructivas.
+
+2. Integración Dinámica en Fases de Desarrollo
+   - QUÉ SE HIZO: Se actualizaron todos los bucles (ej. `_dev_qwen_copilot_loop`
+     y `_phase_requirements`) para usar este manejador centralizado.
+   - IMPACTO (POSITIVO): Si Copilot arroja un formato JSON ligeramente alterado,
+     el sistema ahora puede recuperar los cambios de forma robusta a través de 
+     la clave `handled["changes"]`, previniendo crashes durante la Fase 4.
+
+
+-----------------------------------------------------------------------------
+PARTE 2: INCIDENCIAS CRÍTICAS DETECTADAS (ERRORES ACTIVOS)
+-----------------------------------------------------------------------------
+A pesar de las mejoras arquitectónicas, la auditoría profunda reveló fallas
+severas en otros módulos del sistema.
+
+INCIDENCIA 1: Fugas de Procesos Zombis y Bloqueo de Puertos (EADDRINUSE)
+- Archivo: `kernel/execution/project_runner.py`
+- El Error: El método `kill()` usa `proc.kill()` sobre procesos shell (CMD/bash).
+  Matar el shell no mata a los hijos (ej. `node`, `npm`, `python`).
+- Impacto: Cuando el orquestador detiene un proyecto o el usuario cancela, 
+  el servidor backend generado por IA queda ejecutándose "invisible" en memoria. 
+  Al intentar correr el proyecto nuevamente, SODA fallará inevitablemente 
+  porque el puerto de red seguirá ocupado por el proceso zombi.
+
+INCIDENCIA 2: Riesgo de Desbordamiento de Disco por Logs sin Control
+- Archivo: `kernel/execution/project_runner.py` (método `launch`)
+- El Error: Se usa una tarea `fire-and-forget` (`asyncio.create_task(_stream_to_log)`)
+  para volcar la salida estándar al archivo `_soda_launch.log`.
+- Impacto: La tarea jamás es cancelada al matar el proceso. Si la IA genera un
+  servidor con un bucle infinito que imprime errores de sintaxis a máxima velocidad,
+  esta tarea llenará gigabytes del disco duro del servidor host hasta crashearlo.
+
+INCIDENCIA 3: Falsa Paralelización (Cuello de Botella en Costos de Tiempo)
+- Archivo: `kernel/code_generator.py` (método `generate_module`)
+- El Error: La orquestación fue preparada para el paralelismo entre módulos, pero 
+  dentro de este archivo se lee `for filepath in files: result = await generate(...)`.
+- Impacto: SODA es secuencial a nivel de archivo. Si un módulo tiene 5 controladores, 
+  la IA se queda esperando 5 rondas completas uno por uno, multiplicando el 
+  tiempo de espera del usuario exponencialmente y desaprovechando la API asíncrona.
+
+INCIDENCIA 4: Determinismo Roto en Compilación de Dependencias
+- Archivo: `kernel/dependency_graph.py`
+- El Error: El algoritmo DFS para romper dependencias circulares itera sobre los
+  nodos del grafo usando el orden nativo del diccionario/sets, el cual varía
+  según el hash en tiempo de ejecución.
+- Impacto: Si el modelo de IA alucina una dependencia circular compleja, SODA
+  resolverá el árbol de ejecución de manera aleatoria. Esto crea "Heisenbugs": 
+  proyectos que compilan perfectamente un día y fallan al día siguiente con el 
+  mismo código base, haciendo imposible replicar errores.
+
+INCIDENCIA 5: Cuelgues de UI por Inconsistencia Asíncrona (Event Loop)
+- Archivo: `kernel/orchestrator.py` (método `_notify`)
+- El Error: Inyección directa de tareas asíncronas (`create_task`) desde contextos
+  potencialmente bloqueantes, o creación masiva de Hilos (`threading.Thread`)
+  por cada log emitido al Web UI y a Telegram.
+- Impacto: El despilfarro de hilos (thread exhaustion) bajo ráfagas intensas de 
+  logs del agente inspector o auditor causará pausas (stutters) masivos en la UI,
+  falsos timeouts de WebSocket y que el orquestador se congele silenciosamente.
+
+-----------------------------------------------------------------------------
+CONCLUSIÓN Y SIGUIENTES PASOS
+-----------------------------------------------------------------------------
+El avance en la modularización de decisiones cognitivas (Copilot) estabilizó la
+capa de inteligencia. Sin embargo, la capa de infraestructura (ejecución asíncrona,
+gestión de sockets/puertos de red, y concurrencia de APIs) se encuentra frágil.
+Se requiere corregir urgentemente el manejo de Procesos del `project_runner.py` 
+para que el producto sea utilizable de forma reiterada.

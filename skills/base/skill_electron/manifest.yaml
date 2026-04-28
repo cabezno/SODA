@@ -1,0 +1,23 @@
+name: skill_electron
+category: desktop_framework
+description: Electron desktop app with TypeScript, main/renderer/preload architecture, and electron-builder packaging
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- electron
+- electronjs
+- desktop app
+- electron-builder
+- ipc
+- main process
+- renderer process
+- preload
+- cross-platform desktop
+version: '1.0'

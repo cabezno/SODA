@@ -1,0 +1,99 @@
+    @staticmethod
+    def _extract_python_interface(code: str) -> str:
+        """Extrae solo la estructura pública (clases y firmas) de un archivo Python."""
+        import ast
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    doc = ast.get_docstring(node)
+                    if doc:
+                        node.body = [ast.Expr(value=ast.Constant(value=doc))]
+                    else:
+                        node.body = [ast.Pass()]
+            return ast.unparse(tree)
+        except Exception:
+            return code[:1500] + "\n# ... (parse failed, truncated)"
+
+    def _build_task(
+        self, filepath: str, module: dict, blueprint: dict, architecture: dict,
+        user_requirements: str = "",
+        dependency_context: Optional[dict] = None,
+        design_context: Optional[str] = None,
+        source_dir: Optional[Path] = None,
+        qwen_attempt: int = 1,
+        runtime_errors: str = "",
+        mode: str = "full",
+        skeleton_code: str = "",
+    ) -> str:
+        stack = blueprint.get("stack_sugerido", {})
+        contracts = architecture.get("contratos", [])
+        relevant = [
+            c for c in contracts
+            if module["nombre"] in (c.get("modulo_origen", ""), c.get("modulo_destino", ""))
+        ]
+        goal_id = build_file_goal_id(module["nombre"], filepath)
+        goal_hash = build_file_goal_node(module, filepath).hash or build_file_goal_node(module, filepath).sync_hash()
+
+        is_qwen_retry = qwen_attempt > 1
+
+        task: dict = {
+            "archivo_a_generar": filepath,
+            "goal_id": goal_id,
+            "goal_hash": goal_hash,
+            "modulo": module["nombre"],
+            "responsabilidad": module["responsabilidad"],
+            "stack": stack,
+            "endpoints": module.get("endpoints", []),
+        }
+
+        if mode == "skeleton":
+            task["INSTRUCCION_ESPECIAL"] = "GENERA SOLO EL ESQUELETO DEL CODIGO (imports, firmas de funciones con pass, y tipos). NO ESCRIBAS LOGICA INTERNA."
+            task["dependencias_del_modulo"] = module.get("dependencias", [])
+            task["contratos_relevantes"] = relevant
+            return json.dumps(task, ensure_ascii=False, indent=2)
+
+        if mode == "logic":
+            task["INSTRUCCION_ESPECIAL"] = "Rellena la logica interna del siguiente esqueleto de codigo. No alteres las firmas ni los nombres de clases/funciones."
+            task["ESQUELETO_BASE"] = skeleton_code
+
+        if mode in ("full", "logic") and not is_qwen_retry:
+            task["dependencias_del_modulo"] = module.get("dependencias", [])
+            task["contratos_relevantes"] = relevant
+
+        if "_copilot_feedback" in module:
+            task["copilot_feedback"] = module["_copilot_feedback"]
+        if user_requirements:
+            task["requisitos_usuario"] = user_requirements
+
+        html_hint = get_html_hint(filepath, blueprint, architecture)
+        if html_hint and not is_qwen_retry:
+            task["plantilla_ui"] = html_hint.strip()
+
+        if dependency_context and mode in ("full", "logic"):
+            dep_code: dict = {}
+            for dep_nombre in module.get("dependencias", []):
+                if dep_nombre not in dependency_context:
+                    continue
+                files = dependency_context[dep_nombre]
+                processed_files = {}
+                for fp, content in list(files.items())[:5]:
+                    if fp.endswith('.py'):
+                        processed_files[fp] = self._extract_python_interface(content)
+                    else:
+                        limit = 800 if is_qwen_retry else 1500
+                        processed_files[fp] = content[:limit] + "\n# ... (truncado)" if len(content) > limit else content
+                if processed_files:
+                    dep_code[dep_nombre] = processed_files
+            if dep_code:
+                task["codigo_generado_dependencias"] = dep_code
+
+        if runtime_errors:
+            task["errores_runtime_nivel_anterior"] = runtime_errors[:1200]
+
+        if design_context and not is_qwen_retry:
+            task["especificacion_diseno"] = design_context
+
+        return json.dumps(task, ensure_ascii=False, indent=2)
+
+    def _validate_syntax(

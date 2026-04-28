@@ -1,0 +1,945 @@
+================================================================================
+  SODA — DOCUMENTACIÓN TÉCNICA COMPLETA
+  Sistema Orquestado de Desarrollo Autónomo
+  Generado: 2026-04-25
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 1. DESCRIPCIÓN GENERAL DEL SISTEMA
+────────────────────────────────────────────────────────────────────────────────
+
+SODA es un sistema multi-agente de desarrollo de software que orquesta múltiples
+modelos de IA (Claude, Gemini, Qwen/Ollama) para generar proyectos completos de
+software a partir de una descripción en lenguaje natural. Corre en Windows 11
+nativo (sin WSL2) y expone una interfaz web + webview embebida.
+
+Stack tecnológico:
+  - Python 3.11.9 en Windows 11
+  - FastAPI + uvicorn como servidor HTTP/WebSocket
+  - pywebview (Edge Chromium) como ventana nativa de escritorio
+  - Monaco Editor en el frontend (editor de código)
+  - Docker Desktop (npipe Windows) para validación de sintaxis
+  - python-telegram-bot v22 para notificaciones móviles
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2. PIPELINE COMPLETO: FASES DE EJECUCIÓN
+────────────────────────────────────────────────────────────────────────────────
+
+El pipeline sigue este orden determinístico:
+
+  CAP → WISDOM → REQ → ARCH → PLAN → DEV → EVOLUTION → DONE
+
+Detalle de cada fase:
+
+  CAP (Capabilities)
+    Modelo: Gemini
+    Qué hace: Analiza la descripción del usuario y selecciona qué skills y
+    perfiles de desarrollador son más apropiados para el proyecto.
+    Agentes: skill_matcher, profile_matcher
+    Salida: lista de skills activos + perfil seleccionado
+
+  WISDOM
+    Modelo: Gemini
+    Qué hace: Detecta ambigüedades o puntos poco claros en la descripción
+    antes de proceder. Si encuentra ambigüedad, pregunta al usuario.
+    Agente: wisdom_agent
+    Salida: confirmación de que la descripción es suficientemente clara,
+    o preguntas de clarificación al usuario.
+
+  REQ (Requirements)
+    Modelo: Claude (claude-sonnet-4-6)
+    Qué hace: Entrevista al usuario (si interactive_mode=True) y genera
+    el blueprint.json con módulos, stack sugerido, endpoints y
+    funcionalidades.
+    Agente: requirements_interviewer
+    Salida: blueprint.json
+
+  ARCH (Architecture)
+    Modelo: Gemini
+    Qué hace: Lee el blueprint y genera la arquitectura maestra con módulos,
+    interfaces, tipos de datos, contratos entre módulos y tipos de error.
+    Agente: global_architect
+    Salida: architecture.json (el contrato maestro del proyecto)
+
+  PLAN (Planning)
+    Tecnología: Python puro (sin IA)
+    Qué hace: Construye el grafo de dependencias entre módulos (DAG), rompe
+    ciclos si los hay, y genera el plan de ejecución por niveles donde
+    los módulos del mismo nivel pueden generarse en paralelo.
+    Salida: execution_plan.json con niveles de ejecución
+
+  DEV (Development)
+    Modelos: Qwen (local) → Gemini → Claude (escalación)
+    Qué hace: Genera el código de cada módulo siguiendo el plan. Aplica
+    el loop Qwen↔Copilot para revisar y corregir iterativamente.
+    Salida: archivos de código en projects/{id}/source/
+
+  EVOLUTION
+    Modelo: Gemini
+    Qué hace: Captura learnings del proyecto completado y actualiza el
+    perfil del desarrollador para futuros proyectos.
+    Agente: profile_evolution
+    Salida: actualizaciones en profiles/
+
+  DONE
+    Estado final. Se emite evento DONE vía WebSocket y Telegram.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 3. ESCALACIÓN DE CÓDIGO: SISTEMA DE 9 NIVELES
+────────────────────────────────────────────────────────────────────────────────
+
+Cada archivo se intenta generar en hasta 9 niveles antes de rendirse:
+
+  Nivel 1-3 │ Qwen (Ollama, local)
+  ──────────┼───────────────────────────────────────────────────────────────
+            │ Modelo: qwen2.5-coder:14b (si disponible) o qwen2.5-coder:7b
+            │ 3 intentos. Rápido, gratuito, sin red. Ideal para archivos
+            │ simples: configuraciones, modelos de datos, utilidades.
+
+  Nivel 4-6 │ Gemini (Google Cloud)
+  ──────────┼───────────────────────────────────────────────────────────────
+            │ Modelo: gemini-2.5-pro o gemini-2.5-flash
+            │ 3 intentos. Se activa cuando Qwen falla 3 veces.
+            │ Nivel 6 usa Claude Haiku como variante.
+
+  Nivel 7-9 │ Claude (Anthropic Cloud)
+  ──────────┼───────────────────────────────────────────────────────────────
+            │ Modelo: claude-sonnet-4-6
+            │ 3 intentos. Máxima capacidad de razonamiento.
+            │ Si los 9 niveles fallan, el archivo se guarda con
+            │ validated=False y el pipeline continúa (no aborta).
+
+Router de complejidad: el sistema clasifica automáticamente cada archivo
+según su complejidad. Los archivos complejos saltan Qwen directamente y
+empiezan en Gemini (nivel 4).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 4. MODELOS DE IA: PARÁMETROS Y CONFIGURACIÓN
+────────────────────────────────────────────────────────────────────────────────
+
+──── Claude (anthropic SDK) ────────────────────────────────────────────────────
+
+  Modelo principal:  claude-sonnet-4-6
+  Modelo fallback:   claude-haiku-4-5-20251001
+
+  Límites de tokens por modelo:
+    claude-haiku-4-5-20251001   →  8.192 tokens
+    claude-haiku-4-5            →  8.192 tokens
+    claude-sonnet-4-6           → 64.000 tokens
+    claude-sonnet-4-5           → 64.000 tokens
+    claude-opus-4-7             → 32.000 tokens
+    claude-opus-4-5             → 32.000 tokens
+
+  Temperatura: DEPRECATED en Claude 4.x. El parámetro se acepta por
+  compatibilidad de API pero NO se envía a la API de Anthropic.
+
+  Streaming: activado siempre (requerimiento de Anthropic para max_tokens
+  grandes).
+
+  Prompt caching (cache_control: ephemeral):
+    - El system prompt se cachea en cada llamada.
+    - Si se pasa cached_context (contexto previo), también se cachea.
+    - El mensaje del usuario no se cachea (varía en cada llamada).
+    - Reduce costos entre 50-70% en llamadas repetidas al mismo rol.
+
+  Continuation loop: si la respuesta se trunca (max_tokens alcanzado),
+  el driver hace llamadas adicionales para completar la respuesta.
+
+──── Gemini (google-genai SDK) ─────────────────────────────────────────────────
+
+  Modelos disponibles: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash
+  Usado en: CAP, WISDOM, ARCH, DEV (escalación media), EVOLUTION
+
+──── Qwen / Ollama (local) ─────────────────────────────────────────────────────
+
+  Modelos: qwen2.5-coder:14b (preferido), qwen2.5-coder:7b (fallback)
+  Base URL: http://localhost:11434 (configurable via OLLAMA_BASE_URL)
+  Usado en: DEV (primera línea de generación de código)
+
+──── Routing y cadenas de fallback ─────────────────────────────────────────────
+
+  Definido en soda_config.json → "ai_routing":
+    "claude":  ["claude", "gemini", "ollama"]
+    "gemini":  ["gemini", "claude", "ollama"]
+    "ollama":  ["ollama", "claude", "gemini"]
+
+  Si el proveedor primario falla, el sistema intenta el siguiente en la cadena.
+
+──── Asignación de proveedor por fase ──────────────────────────────────────────
+
+  Definido en soda_config.json → "ai_phase_provider":
+    requirements_interviewer  → claude
+    global_architect          → gemini
+    docs_generator            → claude
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 5. SISTEMA DE SKILLS
+────────────────────────────────────────────────────────────────────────────────
+
+Ubicación: skills/base/
+Formato: manifest.yaml + system_prompt.md + knowledge/*.md
+
+Skills disponibles:
+  skill_fastapi      — FastAPI backend con Python
+  skill_sqlite       — Base de datos SQLite
+  skill_react        — React 18 con hooks y Vite
+  skill_jwt_auth     — Autenticación JWT
+  skill_rest_api     — Diseño de APIs REST
+  (y todos los que existan en skills/base/)
+
+Estructura de manifest.yaml:
+  name:             identificador único
+  category:         frontend_framework | backend | database | auth | ...
+  description:      descripción breve
+  applies_to_roles: qué roles usan este skill y con qué nivel de detalle
+  activation_keywords: palabras que activan el skill automáticamente
+  version:          versión del skill
+
+Niveles de carga (load_level) por rol:
+  full       — Contexto completo: patrones de código, ejemplos, docs de API
+  summary    — Puntos clave para guía arquitectónica
+  checklist  — Lista de verificación rápida para revisión
+
+Selección automática de skills:
+  El agente skill_matcher (Gemini) analiza la descripción del usuario y
+  activa los skills más apropiados. Los keywords en manifest.yaml son pistas
+  para el matcher pero no son las únicas señales.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 6. SISTEMA DE PERFILES
+────────────────────────────────────────────────────────────────────────────────
+
+Ubicación: profiles/base/
+Formato: identity.yaml + experience/ + style/
+
+Perfiles disponibles:
+  profile_web_fullstack    — Fullstack web (backend + frontend)
+  profile_backend_api      — Backend API especializado
+  profile_general_dev      — Desarrollo general
+
+Estructura de identity.yaml:
+  name:                identificador único
+  display_name:        nombre legible
+  description:         descripción del perfil
+  activation_signals:  frases que activan el perfil
+  skills_included:     lista de skills pre-incluidos
+  experience_projects: proyectos completados (se incrementa)
+  version:             versión del perfil
+
+El perfil define el "estilo de desarrollo": convenciones de código,
+organización de archivos, patrones preferidos. Se enriquece con cada
+proyecto completado (via profile_evolution).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 7. GRAFO DE DEPENDENCIAS Y PLANIFICACIÓN
+────────────────────────────────────────────────────────────────────────────────
+
+Clase: DependencyGraph (kernel/dependency_graph.py)
+Algoritmo: Kahn's topological sort con detección de ciclos por DFS
+
+Flujo:
+  1. Se construye el grafo de adyacencia desde architecture.json
+     (campo "dependencias" de cada módulo debe contener nombres exactos
+     de otros módulos, NO rutas de archivo ni librerías externas).
+  2. _find_back_edges(): DFS que detecta aristas que forman ciclos.
+  3. break_cycles(): elimina las aristas de ciclo hasta obtener un DAG.
+     Itera hasta len(grafo) veces para garantizar terminación.
+  4. build_execution_plan(): Kahn's algorithm que agrupa módulos en niveles.
+     Módulos en el mismo nivel no tienen dependencias entre sí → paralelos.
+  5. Retorna ExecutionPlan con:
+     levels          — lista de grupos de módulos paralelos
+     order           — orden topológico plano
+     parallelizable  — True si hay ≥2 módulos en algún nivel
+     broken_edges    — aristas eliminadas para romper ciclos
+
+Ejemplo de plan de 3 niveles:
+  Nivel 0: [db_service, config]          ← sin dependencias → paralelos
+  Nivel 1: [auth_service, user_service]  ← dependen de nivel 0
+  Nivel 2: [api_router]                  ← depende de nivel 1
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 8. MÓDULOS DE INTELIGENCIA
+────────────────────────────────────────────────────────────────────────────────
+
+──── ContextHealthMonitor ──────────────────────────────────────────────────────
+
+Archivo: kernel/intelligence/context_health_monitor.py
+Función: monitoreo pasivo del contexto de IA durante el pipeline.
+
+Umbrales calibrados:
+  TOKEN_WARN_THRESHOLD    = 80.000   (~80% del límite de 100k)
+  TOKEN_REFOUND_THRESHOLD = 60.000   (si se supera sostenidamente → refound)
+  SLOW_CALL_S             = 30s      (llamada lenta: Qwen normal 15-25s)
+  ERROR_RATE_WARN         = 0.50     (>50% errores en ventana rodante)
+  ROLLING_WINDOW          = 15       (llamadas en ventana para tasa de error)
+  GROWTH_CHECK_WINDOW     = 5        (snapshots para detectar crecimiento)
+  GROWTH_STEP_TOKENS      = 3.000    (mínimo de crecimiento por checkpoint)
+
+Niveles de salud:
+  0 = ok        → todo normal
+  1 = observe   → métricas en zona de atención, sin acción necesaria
+  2 = warn      → degradación notable, el pipeline recibe sugerencia
+  3 = critical  → se sugiere refound (compresión de contexto)
+
+Estimación de tokens: len(response) // 4
+
+──── GoalInterpreter ───────────────────────────────────────────────────────────
+
+Archivo: kernel/intelligence/goal_interpreter.py
+Función: clasifica una solicitud de modificación del usuario.
+
+Flujo:
+  1. _check_ambiguity() con Claude: ¿es la solicitud ambigua?
+  2. Si ambigua: pide clarificación al usuario (USER_QUESTION event).
+  3. Tarea completa a Claude para clasificar y planificar la modificación.
+  4. Retorna ModificationPlan con:
+     change_type          — tipo de cambio
+     affected_modules     — módulos que se modifican
+     new_modules          — módulos nuevos (si aplica)
+     requires_regeneration — True/False
+     regeneration_scope   — "full" | "partial" | "none"
+     impact_summary       — descripción del impacto
+
+Tipos de cambio:
+  parameter    → cambio de config/valor (bajo impacto)
+  behavior     → cambio funcional (impacto medio)
+  structural   → renombrar/dividir/fusionar módulos (alto impacto)
+  scope        → agregar/eliminar funcionalidad (alto impacto)
+  new_module   → módulo independiente nuevo (impacto medio)
+
+──── ImpactAnalyzer ────────────────────────────────────────────────────────────
+
+Archivo: kernel/intelligence/impact_analyzer.py
+Función: análisis transitivo de impacto dado un ModificationPlan.
+
+Flujo:
+  1. Construye grafo de dependencias desde architecture.json.
+  2. Claude analiza el plan de modificación y el grafo.
+  3. Retorna ImpactReport con:
+     directly_affected     — módulos directamente afectados
+     transitively_affected — módulos afectados por propagación
+     unaffected            — módulos que no cambian
+     regeneration_order    — orden topológico de regeneración
+     risk_level            — "low" | "medium" | "high"
+     risk_reason           — justificación del nivel de riesgo
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 9. SISTEMA DE BRANCHING (RAMAS DE PROYECTO)
+────────────────────────────────────────────────────────────────────────────────
+
+Archivo: kernel/lineage/branching.py
+
+Cuándo se crea una rama:
+  Se activa cuando change_type ∈ {structural, scope, new_module}
+  Y requires_regeneration = True.
+
+  La lógica: cambios estructurales pueden romper el proyecto activo.
+  La rama permite desarrollar la nueva versión en paralelo y comparar.
+
+Operaciones:
+  should_branch(change_type, requires_regeneration) → bool
+
+  create_branch(parent_id, branch_name) → (branch_id, branch_dir)
+    Copia: source/, blueprint.json, architecture.json, execution_plan.json
+    Ajusta metadata.json con id nuevo, parent_id, state="branch"
+
+  list_branches(parent_id) → list[dict]
+    Campos: branch_id, branch_name, state, created_at
+
+  promote_branch(parent_id, branch_id)
+    Copia source/ de la rama de vuelta al proyecto principal.
+    Actualiza state del proyecto principal → "done".
+
+  run_both_and_compare(parent_id, branch_id, run_command, install_command)
+    Ejecuta ambas versiones en paralelo (ProjectRunner + SmokeTester).
+    Retorna comparación con scores y recomendación de cuál usar.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 10. SISTEMA DE VALIDACIÓN E INTEGRIDAD
+────────────────────────────────────────────────────────────────────────────────
+
+──── Validación de sintaxis ────────────────────────────────────────────────────
+
+  Python (.py):   py_compile en sandbox Docker
+  JSON:           json.loads() + sanitización de package.json
+  Otros:          sin validación de sintaxis (confianza en el modelo)
+
+──── GoalIntegrityValidator ────────────────────────────────────────────────────
+
+  validate_workspace(workspace):
+    - Verifica que todos los .py tengan metadata goal_id
+    - Verifica que todos los goal_id existan en goal_tree.json
+    - Verifica que metas "implemented" tengan archivos en disco
+
+  validate_content(code: str) → bool:
+    - Regex: busca `# goal_id: <valor>` en el código
+    - Un archivo Python sin goal_id falla esta validación
+
+──── BlueprintValidator ─────────────────────────────────────────────────────────
+
+  Valida la estructura de blueprint.json antes de continuar al ARCH.
+
+──── ArchitectureValidator ──────────────────────────────────────────────────────
+
+  Valida architecture.json: módulos bien formados, contratos completos.
+
+──── ImportDependencyValidator ──────────────────────────────────────────────────
+
+  Verifica que los imports Python coincidan con las dependencias declaradas.
+
+──── APIContractEnforcer ────────────────────────────────────────────────────────
+
+  Verifica que frontend y backend usen los mismos contratos de API.
+
+──── ConformanceVerifier ────────────────────────────────────────────────────────
+
+  Claude Haiku valida la conformidad arquitectónica del código generado.
+  Corrige no-conformidades. Usa Level 6 (Haiku) como fallback económico.
+
+──── Sanitización de package.json ──────────────────────────────────────────────
+
+  Correcciones de nombres de paquetes incorrectos:
+    @framer-motion/framer-motion  → framer-motion
+    @react-router/react-router    → react-router
+    @axios/axios                  → axios
+    @lodash/lodash                → lodash
+
+  Correcciones de versiones:
+    @types/*           → ^29.5.0 / ^20.0.0 / ^18.0.0 (según paquete)
+    nodemailer         → ^6.9.0
+    next-auth          → ^4.24.0
+    @electron-toolkit  → ^3.0.0
+    versión "undefined" o null → "*"
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 11. MANEJO DE ERRORES
+────────────────────────────────────────────────────────────────────────────────
+
+──── Errores transitorios (reintentos automáticos) ─────────────────────────────
+
+  Prefijos reconocidos como transitorios:
+    ERROR:RATE_LIMIT:   — límite de tasa de API alcanzado
+    ERROR:OVERLOADED:   — servicio sobrecargado
+    ERROR:CONNECTION:   — error de red/conexión
+
+  Estrategia de reintento (backoff exponencial):
+    Intento 1: esperar  5 segundos
+    Intento 2: esperar 15 segundos
+    Intento 3: esperar 30 segundos
+    Intento 4: esperar 60 segundos
+    Intento 5: esperar 90 segundos
+    Intentos 6-8: esperar 120 segundos cada uno
+    Máximo: 8 intentos totales por llamada
+
+──── Fallos de generación de código ────────────────────────────────────────────
+
+  Si los 9 niveles de escalación fallan para un archivo:
+    - Se guarda el archivo con validated=False
+    - Se emite evento PIPELINE_ERROR con severidad "CRÍTICO"
+    - El pipeline CONTINÚA (no aborta)
+    - Al finalizar se reportan todos los archivos no validados
+
+──── Ciclos en el grafo de dependencias ────────────────────────────────────────
+
+  Se detectan por DFS antes de planificar.
+  Se rompen eliminando aristas de ciclo.
+  Los broken_edges se reportan en el plan y en los logs.
+  El pipeline nunca falla por un ciclo de dependencias.
+
+──── Proveedor de IA no disponible ─────────────────────────────────────────────
+
+  Si el proveedor primario falla → se intenta el siguiente en la cadena
+  de routing (ver sección 4).
+  Si toda la cadena falla → error transiente con reintento o fallo del módulo.
+
+──── Servidor ya en uso (puerto 8000) ──────────────────────────────────────────
+
+  Si el puerto 8000 ya está en uso al iniciar:
+    - Se detecta el error OSError 10048 (Windows)
+    - Se loguea "reusing existing server"
+    - El launcher continúa y abre la UI sobre el servidor existente
+
+──── Errores de TTS ────────────────────────────────────────────────────────────
+
+  Si no hay voz de referencia registrada → RuntimeError con mensaje claro.
+  Si f5_tts no está instalado → is_available() retorna False y TTS se omite.
+  Los errores de TTS son no-críticos y nunca bloquean el pipeline.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 12. SISTEMA TTS (TEXT-TO-SPEECH)
+────────────────────────────────────────────────────────────────────────────────
+
+Motor: F5-TTS con modelo jpgallegoar/F5-Spanish
+Archivo: kernel/tts/kokoro_tts.py
+Clase: KokoroTTS (singleton thread-safe)
+Sample rate: 24.000 Hz
+Descarga: automática desde HuggingFace en primer uso
+
+Parámetros de calidad de inferencia:
+  _NFE_STEP      = 64      — pasos de difusión (64=máxima calidad, ~2x más lento que 32)
+  _CFG_STRENGTH  = 2.5     — guidance clasificador-libre (más alto = más fiel a la voz)
+  _SWAY_COEF     = -1.0    — coeficiente de muestreo sway negativo (mejora naturalidad)
+  _TARGET_RMS    = 0.15    — normalización de volumen de salida (default 0.1 era muy bajo)
+  _CROSS_FADE    = 0.15    — duración del cross-fade entre lotes (segundos)
+
+Temporización del español:
+  _CHARS_PER_SEC = 11.0    — caracteres por segundo a speed=1.0
+  Justificación: F5-TTS nativo usa longitud en bytes UTF-8 lo que sobre-asigna
+  tiempo para caracteres acentuados (ó = 2 bytes, 1 fonema). 11.0 chars/sec
+  da ~20% de margen de seguridad para evitar audio cortado al final.
+
+Recorte de silencio (sin I/O en disco):
+  _SILENCE_AMP        = 0.003   — umbral de amplitud (~-50 dBFS)
+  _SILENCE_MARGIN_MS  = 80      — ms de contexto antes/después del habla
+  Algoritmo: máscara numpy sobre abs(wav), busca primer/último sample activo,
+  mantiene margen de 80ms. Equivalente a pydub remove_silence_for_generated_wav
+  pero 100% en memoria.
+
+Limpieza de texto antes de síntesis:
+  - Elimina bloques de código (``` ... ```) e inline code
+  - Elimina formato markdown (*_~#)
+  - Elimina URLs
+  - Expande plurales entre paréntesis: error(es) → errores, duda(s) → dudas
+  - Expande abreviaciones: Ej. → ejemplo:, Aprox → aproximadamente, etc.
+  - Corrige dígrafo QU: qu+e/i → k (fonética española)
+  - Elimina emojis y caracteres no-latinos (conserva áéíóúüñ¿¡)
+  - Colapsa espacios múltiples
+
+Voces personalizadas:
+  Ubicación: kernel/tts/voices/{nombre}.wav + {nombre}.txt
+  .wav — audio de referencia (voz a clonar)
+  .txt — transcripción del audio de referencia
+
+Gestión de voces:
+  list_voices()           → {builtin: [], custom: [...], active: ..., speed: ...}
+  set_voice(nombre)       → guarda en soda_config.json
+  set_speed(velocidad)    → clamped [0.5, 2.0], guarda en soda_config.json
+  delete_voice(nombre)    → elimina .wav y .txt, activa otra voz disponible
+
+Conversión a OGG Opus (para Telegram):
+  wav_to_ogg_opus(wav_bytes) → usa ffmpeg subprocess
+  Bitrate: 64k, VBR on, compression_level 10
+  Requiere: ffmpeg en PATH
+
+Control de TTS:
+  tts_enabled()          → UI/consola TTS (desactivado por defecto)
+  tts_telegram_enabled() → TTS en Telegram (activado por defecto)
+
+Parches aplicados al importar:
+  _patch_torchaudio_soundfile() — reemplaza torchaudio.load con soundfile
+  cuando torchcodec no está disponible (sin FFmpeg DLLs en Windows)
+  _patch_f5tts_spanish_text_norm() — evita que jieba (tokenizador chino)
+  fragmente palabras españolas con tildes
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 13. SISTEMA DE NOTIFICACIONES
+────────────────────────────────────────────────────────────────────────────────
+
+El orquestador emite eventos en tiempo real mediante _notify():
+  - WebSocket → UI del browser (ui/websocket_handler.py)
+  - Telegram → bot @Soda_black_bot (chat_id: 7349653298)
+
+La función _notify() usa timeout=0.05s (fire-and-forget).
+NUNCA bloquea el pipeline independientemente de si la UI está conectada.
+
+Tipos de eventos emitidos:
+  LOG              — mensaje de log general
+  AI_WORKING       — una IA está procesando
+  AI_ERROR         — error de IA
+  FILE_GENERATED   — archivo generado exitosamente
+  HEALTH_WARN      — advertencia del monitor de salud
+  COPILOT_SUGGESTION — Copilot sugiere una corrección
+  COPILOT_APPLIED  — sugerencia de Copilot aplicada
+  COPILOT_REJECTED — sugerencia rechazada
+  USER_QUESTION    — se necesita input del usuario
+  START            — inicio del pipeline
+  DONE             — pipeline completado con éxito
+  FAILED           — pipeline falló
+  PIPELINE_ERROR   — error no fatal en el pipeline
+  PHASE_START      — inicio de una fase
+  REFOUND_SUGGESTED — el monitor sugiere comprimir contexto
+
+TTS del frontend (mensajes de voz al usuario):
+  DONE        → "La generación del proyecto ha finalizado con éxito.
+                 Puede ejecutarlo desde el panel de lanzamiento."
+  FAILED      → "El pipeline de generación ha fallado. Revise la consola
+                 para obtener más detalles sobre el error."
+  ITERATION_DONE → "La iteración número N ha finalizado. Puede ejecutar
+                 la aplicación para verificar los cambios."
+  USER_QUESTION → lee la pregunta al usuario
+
+Reglas de texto para TTS (estrictas):
+  1. Oraciones completas — nunca texto cortado ni frases incompletas
+  2. Sin diminutivos ni coloquialismos (no "listo", no "ejecutalo")
+  3. Sin strings técnicos crudos (rutas, códigos de salida, guiones bajos)
+  4. Sin guiones bajos en nombres de proyecto
+  5. Condicionales explícitos — fallback fijo si variable puede ser vacía
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 14. API REST (ui/server.py)
+────────────────────────────────────────────────────────────────────────────────
+
+Servidor: FastAPI + uvicorn
+Host: 0.0.0.0 (acepta conexiones LAN)
+Puerto: 8000
+CORS: allow_origins=["*"] — acceso desde cualquier dispositivo en la red
+
+Endpoints principales:
+
+  GET  /api/health              — health check del servidor
+  GET  /api/stats               — VRAM, sistema, modelo recomendado
+  GET  /api/ram_total           — RAM total en GB
+
+  POST /api/run                 — crear y ejecutar nuevo proyecto
+    Body: { description, project_name, copilot_temperature }
+
+  GET  /api/status              — { running: bool }
+
+  POST /api/modify              — modificar proyecto existente
+    Body: { project_id, request }
+
+  GET  /api/lineage             — historial de proyectos
+  GET  /api/lineage/{id}/branches — ramas de un proyecto
+
+  POST /api/refound             — comprimir contexto de proyecto
+    Body: { project_id }
+
+  POST /api/analyze_code        — analizar código existente
+    Retorna: language, frameworks, stack, summary, capabilities,
+             architecture_type, entry_point, dependencies,
+             install_command, run_command, suggestions
+
+  POST /api/run_from_code       — iniciar pipeline desde código existente
+    Body: { code, filename, intent, project_name, analysis,
+            copilot_temperature }
+
+  POST /api/launch              — ejecutar un proyecto generado
+    Body: { project_id, run_command, install_command }
+    Retorna: { status: "launched", url, pid, command }
+
+  GET  /api/telegram/pair       — genera código de emparejamiento
+  GET  /api/telegram/status     — estado de conexión Telegram
+
+  GET  /api/tts/voices          — lista de voces disponibles
+  POST /api/tts/clone_voice     — registrar nueva voz de referencia
+  POST /api/tts/set_voice       — activar voz
+  POST /api/tts/set_speed       — configurar velocidad
+  DELETE /api/tts/voice/{name}  — eliminar voz
+  POST /api/tts/speak           — sintetizar texto a audio WAV
+
+WebSocket: ws://127.0.0.1:8000/ws
+  Flujo bidireccional para eventos en tiempo real.
+
+CopilotKit Integration:
+  Acciones disponibles desde el agente CopilotKit:
+    resume_project(project_id)
+    create_project(project_name, description, copilot_temperature)
+  Middleware: _copilotkit_telegram_bridge — reenvía mensajes a Telegram
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 15. COPILOT (REVISIÓN ITERATIVA DE CÓDIGO)
+────────────────────────────────────────────────────────────────────────────────
+
+El "Copilot" en SODA es un módulo de revisión que corre sobre el código
+generado para detectar y corregir problemas antes de finalizar.
+
+Temperatura (configurable por proyecto):
+  baja  → 1 pasada de código, sin regeneración de fases
+  media → 3 pasadas de código, 1 regeneración de fase (DEFAULT)
+  alta  → 5 pasadas de código, 2 regeneraciones de fase
+
+Loop Qwen↔Copilot (_dev_qwen_copilot_loop):
+  1. CodeGenerator genera el módulo
+  2. CopilotConsultant revisa el código generado
+  3. Si hay problemas:
+     a. CopilotConsultant intenta corregirlo directamente (fix_module_code)
+     b. O el feedback se pasa a Qwen para regeneración
+  4. En la última pasada + problemas restantes:
+     → verify_module_code (verificación final de Copilot)
+     → correcciones finales de Copilot
+
+Revisión adicional por intensidad:
+  Si intensity_level = "high" o "critical":
+    Claude o Gemini hacen una revisión extra del código generado
+    para detectar problemas que Qwen/Copilot podrían haber pasado.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 16. SISTEMA DE APRENDIZAJE
+────────────────────────────────────────────────────────────────────────────────
+
+──── BehaviorObserver ───────────────────────────────────────────────────────────
+
+Registra patrones de generación:
+  record_code_generation(provider, filepath, task_summary, response_snippet,
+                          validated, attempt, project_id, module_name, framework)
+  record_escalation(filepath, qwen_attempts, cloud_provider,
+                    cloud_response_snippet, cloud_validated, failure_reason,
+                    project_id, module_name)
+
+──── LocalAICoach ───────────────────────────────────────────────────────────────
+
+Genera ejemplos few-shot para Qwen a partir de generaciones exitosas previas:
+  build_few_shot_context(task, filepath) → str
+
+──── KnowledgeBase ──────────────────────────────────────────────────────────────
+
+Almacena patrones de generación en ChromaDB para búsqueda RAG.
+Los ejemplos exitosos se recuperan por similaridad semántica con la tarea actual.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 17. ESTRUCTURA DE ARCHIVOS DEL WORKSPACE DE UN PROYECTO
+────────────────────────────────────────────────────────────────────────────────
+
+projects/{project_id}/
+├── metadata.json         — snapshot del estado del proyecto (state, skills, etc.)
+├── blueprint.json        — requisitos: módulos, stack, endpoints, funcionalidades
+├── architecture.json     — contrato maestro: módulos, interfaces, tipos, contratos
+├── execution_plan.json   — plan de ejecución: niveles, orden, ciclos rotos
+├── goal_tree.json        — árbol de metas con estado (planned/implemented)
+├── boot_report.json      — hallazgos del agente de boot (si se ejecutó)
+├── source/               — código generado
+│   ├── backend/
+│   ├── frontend/
+│   └── ...
+└── output/               — documentación, reportes, artefactos
+
+Estructura de metadata.json:
+  id, description, state, blueprint, architecture, skills, profile,
+  project_type, capability_packs, goal_tree, intensity_level,
+  reference_report, created_at, workspace, copilot_temperature
+
+Estados de un proyecto (ProjectState):
+  idle → capabilities → requirements → architecture → planning →
+  development → integration → done | failed | awaiting_checkpoint
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 18. TELEGRAM BOT
+────────────────────────────────────────────────────────────────────────────────
+
+Bot: @Soda_black_bot
+Library: python-telegram-bot v22
+Chat ID: 7349653298 (configurado en soda_config.json)
+
+Comandos disponibles:
+  /status    — estado actual del pipeline
+  /projects  — lista de proyectos
+  /pair      — emparejar con la instancia de SODA
+
+Notificaciones automáticas:
+  - Inicio/fin de pipeline (DONE, FAILED)
+  - Preguntas al usuario (USER_QUESTION)
+  - Warnings de salud del contexto
+  - Audio TTS en OGG Opus (si tts_telegram_enabled=true)
+
+Para emparejar: GET /api/telegram/pair genera un código de 6 dígitos que
+el usuario introduce al bot de Telegram. El bot confirma y guarda el
+chat_id en soda_config.json.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 19. FUNCIONALIDADES DE LA INTERFAZ WEB
+────────────────────────────────────────────────────────────────────────────────
+
+La UI corre en http://127.0.0.1:8000 (accesible en LAN por IP local).
+
+Pestañas principales:
+
+  Principal
+    - Panel de lanzamiento de proyectos completados
+    - Chat CopilotKit (agente conversacional)
+    - Log en tiempo real de eventos del pipeline
+    - Panel de costos de API (uso acumulado por sesión)
+
+  Crear
+    - Sub-pestaña "Nuevo Proyecto": formulario de creación con temperatura Copilot
+    - Sub-pestaña "Desde Código": sube o pega código existente → análisis → pipeline
+    - Sub-pestaña "Abrir Proyecto": lista proyectos existentes para reanudar/modificar
+
+  Terminal
+    - Monaco Editor integrado para editar archivos del proyecto
+    - Vista de estructura de archivos del workspace
+
+  Sistema
+    - Sub-pestaña "Estado": métricas del sistema (RAM, GPU, modelos disponibles)
+    - Sub-pestaña "API Keys & IAs": configurar proveedores de IA
+
+  Conectividad
+    - Código QR para acceder desde dispositivos móviles en la misma red
+    - Emparejamiento con Telegram
+
+  Test UI  [NUEVA]
+    - Iframe embebido para previsualizar el proyecto generado en ejecución
+    - Barra de navegación: atrás, adelante, recargar, campo URL, ir, abrir externo
+    - Se activa automáticamente cuando se lanza un proyecto con URL detectada
+    - Si el sitio bloquea iframes (X-Frame-Options) muestra botón para abrir externo
+
+Toggle TTS en la barra de pestañas:
+  Activa/desactiva síntesis de voz de los eventos del pipeline.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 20. CONFIGURACIÓN (soda_config.json)
+────────────────────────────────────────────────────────────────────────────────
+
+{
+  "telegram_chat_id":    ID del chat Telegram emparejado
+  "auto_confirm":        true = no pide confirmación en checkpoints
+  "ai_routing":          cadenas de fallback por proveedor
+  "ai_phase_provider":   proveedor asignado por fase del pipeline
+  "runtime_smoke_check": true = ejecuta smoke test al lanzar proyecto
+  "custom_providers":    proveedores adicionales (ej. Gemini Flash vía openai_compat)
+  "tts_enabled":         false (TTS en UI, desactivado por defecto)
+  "tts_voice":           nombre de la voz activa
+  "tts_speed":           velocidad TTS (float, 0.5-2.0)
+  "stt_language":        "es" (idioma de reconocimiento de voz)
+  "tts_telegram_enabled": true (TTS en Telegram, activado por defecto)
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 21. VARIABLES DE ENTORNO (.env)
+────────────────────────────────────────────────────────────────────────────────
+
+Variables requeridas:
+  ANTHROPIC_API_KEY      — API key de Anthropic (Claude)
+  GEMINI_API_KEY         — API key de Google (Gemini)
+  OLLAMA_BASE_URL        — URL de Ollama (default: http://localhost:11434)
+
+Variables opcionales:
+  TELEGRAM_BOT_TOKEN     — token del bot de Telegram
+  PERPLEXITY_API_KEY     — Perplexity AI (experimental)
+  OPENAI_API_KEY         — OpenAI (compatible con algunos drivers)
+  GITHUB_TOKEN           — GitHub integration (Fase B+)
+
+El .env se carga explícitamente en dos entry points:
+  - ui/server.py          → load_dotenv(Path(...).parent / ".env")
+  - kernel/orchestrator.py → load_dotenv(Path(...).parent / ".env")
+
+IMPORTANTE: sin load_dotenv() explícito, las keys NO se cargan desde la UI.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 22. DEPENDENCIAS (requirements.txt)
+────────────────────────────────────────────────────────────────────────────────
+
+Servidor web y comunicación:
+  fastapi>=0.115.0          — framework web
+  uvicorn>=0.30.0           — servidor ASGI
+  starlette>=0.40.0         — base de FastAPI
+  aiofiles>=23.0.0          — I/O asíncrono de archivos
+  httpx>=0.27.0             — cliente HTTP async
+
+IAs en la nube:
+  anthropic>=0.40.0         — SDK de Anthropic (Claude)
+  google-genai>=1.5.0       — SDK de Google (Gemini)
+  ollama>=0.4.0             — cliente Ollama (Qwen local)
+
+Infraestructura:
+  chromadb>=0.5.0           — base de datos vectorial (RAG/KnowledgeBase)
+  psutil>=5.9.0             — métricas del sistema (RAM, CPU)
+  docker>=7.0.0             — Docker SDK Python (validación de sintaxis)
+  python-dotenv>=1.0.0      — carga de variables de entorno
+  pydantic>=2.5.0           — validación de datos
+
+Interfaz:
+  pywebview>=4.4.1          — ventana nativa de escritorio (Edge Chromium)
+  copilotkit>=0.1.0         — integración CopilotKit (agente conversacional)
+
+Comunicación móvil:
+  python-telegram-bot>=22.0 — bot de Telegram
+
+TTS (opcionales, para síntesis de voz):
+  f5-tts                    — motor de síntesis F5-TTS
+  soundfile                 — I/O de audio (reemplaza torchcodec en Windows)
+  torch                     — PyTorch (requerido por F5-TTS)
+  torchaudio                — audio de PyTorch
+
+Utilidades adicionales (indirectas):
+  qrcode                    — generación de códigos QR (conectividad)
+  pillow                    — procesamiento de imágenes (icono de app, QR)
+  numpy                     — procesamiento de audio (silence trimming)
+  cached_path               — descarga de modelos desde HuggingFace
+
+Herramientas del sistema (no Python):
+  ffmpeg (en PATH)          — conversión de audio WAV → OGG Opus (Telegram TTS)
+  Docker Desktop            — sandbox para validación de sintaxis Python
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 23. CÓMO INICIAR SODA
+────────────────────────────────────────────────────────────────────────────────
+
+  # Ventana nativa (pywebview + Edge Chromium):
+  python -m ui.launcher
+
+  # Navegador del sistema:
+  python -m ui.launcher --browser
+
+  # Tests (47 tests, ~7s, sin API keys ni Docker):
+  python -m pytest tests/ -v
+
+Tests incluidos:
+  tests/test_unit.py     — 28 tests de componentes determinísticos
+  tests/test_pipeline.py — 19 tests de pipeline completo con drivers mockeados
+
+Los tests stub dependencias opcionales no instaladas (docker, anthropic, etc.)
+via sys.modules antes del import.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 24. DECISIONES DE ARQUITECTURA CRÍTICAS (NO CAMBIAR SIN ANÁLISIS)
+────────────────────────────────────────────────────────────────────────────────
+
+  1. _notify() timeout=0.05s
+     → Si se aumenta, bloquea el pipeline.
+     → Es fire-and-forget intencional.
+
+  2. load_dotenv() explícito en cada entry point
+     → Sin esto, las API keys NO se cargan desde la UI webview.
+     → NO eliminar ni mover a un único punto centralizado.
+
+  3. DockerSandbox usa npipe (Windows)
+     → NO usar unix socket. Windows 11 no tiene /var/run/docker.sock.
+
+  4. field "dependencias" en architecture.json
+     → Deben ser nombres exactos del campo "nombre" de otros módulos.
+     → Rutas de archivo y librerías externas NO van aquí.
+     → El DependencyGraph filtraría cualquier nombre que no exista como módulo.
+
+  5. Qwen como primera línea de generación
+     → Es gratuito y rápido para archivos simples.
+     → La escalación a cloud solo ocurre cuando Qwen falla 3 veces.
+     → NO saltear Qwen para todos los archivos, solo los clasificados como complejos.
+
+  6. validated=False no aborta el pipeline
+     → Diseño intencional: un archivo difícil no debe detener todo el proyecto.
+     → El reporte final lista todos los archivos no validados.
+
+  7. Temperatura de Claude deprecated
+     → Claude 4.x no acepta el parámetro temperature en la API.
+     → El driver lo acepta por compatibilidad pero no lo envía.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ FIN DEL DOCUMENTO
+ SODA — Sistema Orquestado de Desarrollo Autónomo
+ Versión documentada: 2026-04-25
+================================================================================

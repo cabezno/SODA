@@ -27,4 +27,8 @@ Rules:
 - Be precise about which existing modules are affected
 - If a module doesn't exist in the architecture, list it under new_modules
 - requires_regeneration is true if code must be rewritten, false if it's a config/param change
+- regeneration_scope values:
+    "full"    → all affected_modules must be regenerated from scratch
+    "partial" → only the specific files listed in archivos_principales of affected_modules need changes (not full module regen)
+    "none"    → no code regeneration needed (config or documentation change only)
 - Return only valid JSON, no markdown wrapper

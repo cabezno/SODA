@@ -1,0 +1,45 @@
+PLAN DE IMPLEMENTACIÓN: SODA-CONTAINER-SYSTEM (Runtimes Aislados)
+================================================================
+
+OBJETIVO:
+Migrar todas las tareas de ejecución, validación y testing de SODA hacia contenedores Docker especializados, eliminando la dependencia de herramientas instaladas en el sistema host (Windows/WSL).
+
+FASE 1: INFRAESTRUCTURA Y GESTIÓN (BAJO RIESGO)
+-----------------------------------------------
+1. Crear el `RuntimeManager` (kernel/execution/runtime_manager.py):
+   * Responsable de leer `runtimes/registry.json`.
+   * Verificar la existencia de las imágenes de Docker locales.
+   * Ejecutar los comandos de construcción (`docker build`) para los runtimes faltantes.
+2. Script de Pre-construcción:
+   * Crear `scripts/build_runtimes.py` para que el usuario pueda preparar todos los entornos antes de iniciar un proyecto.
+
+FASE 2: INTEGRACIÓN EN EL SANDBOX (RIESGO MEDIO)
+------------------------------------------------
+1. Refactorizar `kernel/docker_sandbox.py`:
+   * Modificar el método `run_container` para que acepte un parámetro `runtime_key` (ej. 'python', 'node').
+   * Implementar lógica de FALLBACK: Si el runtime específico no está construido, intentar usar la imagen genérica actual (`python:3.11-slim`) para no detener el pipeline.
+   * Mapeo de volúmenes: Asegurar que el montaje del workspace sea consistente entre el host y el contenedor.
+
+FASE 3: ORQUESTACIÓN Y SELECCIÓN (RIESGO MEDIO)
+-----------------------------------------------
+1. Actualizar `kernel/orchestrator.py`:
+   * Al iniciar un proyecto, detectar el `language` principal a partir del `blueprint`.
+   * Pasar el `runtime_key` correspondiente al `CodeGenerator` y al `DockerSandbox`.
+2. Integración con el `StackDetector`:
+   * Usar el componente existente para auto-seleccionar el runtime más adecuado en proyectos de "Modificación" o "Refundación".
+
+FASE 4: VALIDACIÓN Y SMOKE TESTS (BAJO RIESGO)
+----------------------------------------------
+1. Actualizar `kernel/execution/smoke_tester.py`:
+   * Añadir una prueba de "Salud de Runtimes" que verifique que Docker puede lanzar un comando simple (`hello-world`) en cada uno de los 3 runtimes principales (Python, Node, Go).
+
+FASE 5: CIERRE Y LIMPIEZA
+-------------------------
+1. Desactivar el uso de binarios locales:
+   * Configurar un flag en `.env` (`USE_LOCAL_RUNTIMES=false`) para forzar que SODA falle si intenta usar el host por error.
+2. Documentación de mantenimiento:
+   * Crear `docs/RUNTIMES.md` con instrucciones para añadir nuevos lenguajes (ej. Rust, Java).
+
+CRONOGRAMA DE SEGURIDAD:
+- Cada cambio en la FASE 2 y 3 debe ir acompañado de la ejecución de `pytest tests/test_unit.py` para asegurar que las clases base de SODA siguen funcionando.
+- No se eliminará el código de ejecución local hasta que la FASE 4 sea validada al 100%.

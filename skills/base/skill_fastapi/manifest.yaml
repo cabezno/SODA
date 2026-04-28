@@ -1,16 +1,23 @@
 name: skill_fastapi
 category: backend_framework
-description: FastAPI-based REST backend with async support, Pydantic models, and automatic OpenAPI docs
+description: FastAPI-based REST backend with async support, Pydantic models, and automatic
+  OpenAPI docs
 applies_to_roles:
-  - code_generator
-  - global_architect
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
 activation_keywords:
-  - fastapi
-  - api
-  - backend
-  - rest
-  - python web
-  - endpoints
-  - server
-  - http
-version: "1.0"
+- fastapi
+- api
+- backend
+- rest
+- python web
+- endpoints
+- server
+- http
+version: '1.0'

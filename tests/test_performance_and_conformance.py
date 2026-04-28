@@ -15,7 +15,7 @@ from kernel.intelligence.conformance_verifier import ConformanceVerifier
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -342,3 +342,71 @@ class TestConformanceVerifier:
         user_msg = driver.call.call_args.kwargs["user_message"]
         assert "truncado" in user_msg
         assert len(user_msg) < 15_000
+
+    # ── v2 paths: topology + master_contract ─────────────────────────────
+
+    def test_verify_with_topology_uses_archivos_principales(self, tmp_path):
+        """topology.modulos[].archivos_principales is the v2 source of file paths."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "api.py").write_text("class APIService: pass")
+
+        driver = _make_driver("COMPLIANT")
+        tracker = PerformanceTracker()
+        verifier = ConformanceVerifier(driver, tracker)
+
+        topology = {"modulos": [{"id": "api_service", "archivos_principales": ["api.py"]}]}
+        # Empty legacy arch — verifier must use topology
+        result = run(verifier.verify_project({"modulos": []}, source, topology=topology))
+
+        assert result["checked"] == 1
+        assert tracker._conformance_compliant == 1
+
+    def test_verify_with_master_contract_enriches_prompt(self, tmp_path):
+        """master_contract typed interfaces are included in the Haiku prompt."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "auth.py").write_text("class AuthService: pass")
+
+        driver = _make_driver("COMPLIANT")
+        verifier = ConformanceVerifier(driver)
+
+        master_contract = {
+            "modules": [{
+                "id": "auth_service",
+                "interfaces": [{"name": "login", "parameters": {"user": "str"}, "returns": "bool"}],
+                "archivos_principales": ["auth.py"],
+            }]
+        }
+        arch = {"modulos": [{"nombre": "auth_service", "archivos": ["auth.py"]}]}
+        result = run(verifier.verify_project(arch, source, master_contract=master_contract))
+
+        assert result["checked"] == 1
+        # Typed interface should appear in the user message sent to Haiku
+        user_msg = driver.call.call_args.kwargs["user_message"]
+        assert "login" in user_msg
+
+    def test_verify_topology_and_master_contract_combined(self, tmp_path):
+        """When both topology and master_contract are provided, topology drives file paths
+        and master_contract enriches the interface check."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "svc.py").write_text("def process(data): return data")
+
+        driver = _make_driver("COMPLIANT")
+        tracker = PerformanceTracker()
+        verifier = ConformanceVerifier(driver, tracker)
+
+        topology = {"modulos": [{"id": "svc", "archivos_principales": ["svc.py"]}]}
+        master_contract = {
+            "modules": [{
+                "id": "svc",
+                "interfaces": [{"name": "process", "parameters": {"data": "dict"}, "returns": "dict"}],
+                "archivos_principales": ["svc.py"],
+            }]
+        }
+        result = run(verifier.verify_project({"modulos": []}, source,
+                                             master_contract=master_contract, topology=topology))
+
+        assert result["checked"] == 1
+        assert tracker._conformance_compliant == 1

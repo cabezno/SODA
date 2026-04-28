@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,7 @@ class ContractResult(BaseModel):
     final_issues: AuditReport | None = None
     total_tokens_used: int = 0
     total_cost_usd: float = 0.0
+    failed_reason: str = ""
 
 
 class ContractRefinementLoop:
@@ -49,15 +50,24 @@ class ContractRefinementLoop:
         architect: Architect,
         auditor: ContractAuditor,
         max_attempts: int = 3,
+        notify_fn: Optional[Callable] = None,
     ):
         self.architect = architect
         self.auditor = auditor
         self.max_attempts = max_attempts
+        self._notify = notify_fn or (lambda msg, level="LOG", meta=None: None)
+
+    def _broadcast(self, msg: str, level: str = "HEALTH_WARN", meta: dict | None = None) -> None:
+        try:
+            self._notify(msg, level, meta or {})
+        except Exception:
+            pass
 
     async def execute(
         self,
         blueprint: dict,
         complexity: ComplexityLevel,
+        topology: dict | None = None,
         active_skills: list | None = None,
         active_profile: dict | None = None,
         goal_tree: dict | None = None,
@@ -65,15 +75,15 @@ class ContractRefinementLoop:
         """Run the full generate → audit → refine cycle."""
         attempts: list[RefinementAttempt] = []
         current_contract: MasterContract | None = None
+        last_exc_msg: str = ""
 
         for attempt_num in range(self.max_attempts):
             try:
-                # Generate if we don't have a contract yet (first call, or after
-                # a failed generation). Refine only if a previous contract exists.
                 if current_contract is None:
                     current_contract = await self.architect.generate_master_contract(
                         blueprint=blueprint,
                         complexity=complexity,
+                        topology=topology,
                         active_skills=active_skills,
                         active_profile=active_profile,
                         goal_tree=goal_tree,
@@ -87,19 +97,41 @@ class ContractRefinementLoop:
                         attempt_number=attempt_num + 1,
                     )
             except Exception as exc:
-                # Architect failed (API error, bad JSON, schema validation) —
-                # record as a failed attempt and continue if we have attempts left
+                last_exc_msg = f"{type(exc).__name__}: {exc}"
+                self._broadcast(
+                    f"Arquitecto v2: fallo al generar contrato (intento {attempt_num+1}/{self.max_attempts}): {last_exc_msg}",
+                    "HEALTH_WARN",
+                    {"phase": "master_contract", "attempt": attempt_num + 1, "error": last_exc_msg},
+                )
                 if attempt_num == self.max_attempts - 1:
                     return ContractResult(
                         status="requires_user_intervention",
                         contract=current_contract,
                         attempts=attempts,
                         final_issues=attempts[-1].audit_report if attempts else None,
+                        failed_reason=last_exc_msg,
                     )
                 # On non-final failures, skip to next attempt (no contract to audit)
                 continue
 
-            audit_report = await self.auditor.audit(current_contract)
+            try:
+                audit_report = await self.auditor.audit(current_contract)
+            except Exception as exc:
+                last_exc_msg = f"{type(exc).__name__}: {exc}"
+                self._broadcast(
+                    f"Arquitecto v2: fallo en auditor (intento {attempt_num+1}/{self.max_attempts}): {last_exc_msg}",
+                    "HEALTH_WARN",
+                    {"phase": "master_contract", "attempt": attempt_num + 1, "error": last_exc_msg},
+                )
+                if attempt_num == self.max_attempts - 1:
+                    return ContractResult(
+                        status="requires_user_intervention",
+                        contract=current_contract,
+                        attempts=attempts,
+                        final_issues=attempts[-1].audit_report if attempts else None,
+                        failed_reason=last_exc_msg,
+                    )
+                continue
 
             attempts.append(RefinementAttempt(
                 attempt_number=attempt_num + 1,
@@ -129,4 +161,5 @@ class ContractRefinementLoop:
             contract=current_contract,
             attempts=attempts,
             final_issues=attempts[-1].audit_report if attempts else None,
+            failed_reason=last_exc_msg,
         )

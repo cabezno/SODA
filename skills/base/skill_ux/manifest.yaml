@@ -1,0 +1,27 @@
+name: skill_ux
+category: domain_discipline
+description: UX/UI design principles, information architecture, accessibility, usability heuristics, and design systems
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: full
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+  - ux
+  - ui
+  - user experience
+  - design
+  - interface
+  - wireframe
+  - prototype
+  - accessibility
+  - wcag
+  - usability
+  - information architecture
+  - design system
+  - component library
+version: "1.0"

@@ -19,6 +19,19 @@ Estás refinando un contrato maestro existente basándote en feedback específic
 - Si renombrás un DataType, actualizá todas las referencias en method signatures
 - Si agregás un event_channel, asegurate que el payload_schema exista en data_types
 
+## Recordatorio de campos críticos del schema
+
+Los campos que con mayor frecuencia generan errores de validación:
+
+- `project_id` — obligatorio, snake_case
+- `modules[].purpose` — obligatorio, mínimo 20 caracteres (NO uses "description" aquí)
+- `modules[].interfaces` — obligatorio, lista de objetos `{name, description, methods[{name, parameters, returns, description (≥10), example_usage, is_async}]}`
+- `modules[].goal_ids` — obligatorio, mínimo 1 elemento
+- `modules[].layer` — obligatorio: `"domain"` | `"application"` | `"infrastructure"` | `"presentation"`
+- `data_types[].description` — mínimo 10 caracteres
+- `extension_points[].type` — solo: `"middleware_slot"` | `"event_channel"` | `"metadata_field"` | `"plugin"` | `"hook"` | `"filter"`
+- `event_channels[].name` — debe contener un punto (ej: `"user.created"`)
+
 ## Convenciones (recordatorio)
 
 - Module IDs: snake_case

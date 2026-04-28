@@ -1,0 +1,56 @@
+profiles:
+  - id: python
+    http_probe: true
+    requires_venv: true
+    run_keywords: [python, uvicorn, flask, django, gunicorn, fastapi]
+    install_keywords: [pip]
+    file_markers: [requirements.txt, pyproject.toml, setup.py, Pipfile]
+
+  - id: node
+    http_probe: true
+    requires_venv: false
+    run_keywords: [npm , yarn , pnpm , node , npx ]
+    install_keywords: [npm, yarn, pnpm]
+    file_markers: [package.json, yarn.lock, pnpm-lock.yaml]
+
+  - id: dotnet
+    http_probe: true
+    run_keywords: [dotnet]
+    install_keywords: [dotnet]
+    file_markers: ["*.csproj", "*.fsproj", "*.vbproj"]
+
+  - id: go
+    http_probe: false
+    run_keywords: [go run, go build]
+    install_keywords: [go ]
+    file_markers: [go.mod, go.sum]
+
+  - id: rust
+    http_probe: false
+    run_keywords: [cargo]
+    install_keywords: [cargo]
+    file_markers: [Cargo.toml, Cargo.lock]
+
+  - id: static
+    http_probe: false
+    run_keywords: [.html]
+    install_keywords: []
+    file_markers: ["*.html", index.html]
+
+  - id: java
+    http_probe: true
+    run_keywords: [java , mvn , gradle , ./gradlew, ./mvnw]
+    install_keywords: [mvn, gradle]
+    file_markers: [pom.xml, build.gradle, "*.jar"]
+
+  - id: ruby
+    http_probe: true
+    run_keywords: [ruby , rails , bundle exec]
+    install_keywords: [bundle, gem]
+    file_markers: [Gemfile, Gemfile.lock]
+
+  - id: php
+    http_probe: true
+    run_keywords: [php , artisan]
+    install_keywords: [composer]
+    file_markers: [composer.json, artisan, index.php]

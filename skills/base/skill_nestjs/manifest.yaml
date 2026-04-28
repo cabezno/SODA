@@ -1,0 +1,23 @@
+name: skill_nestjs
+category: backend_framework
+description: NestJS TypeScript backend with dependency injection, decorators, modules, and Guards/Interceptors
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- nestjs
+- nest
+- nest.js
+- @nestjs
+- nestjs api
+- nestjs backend
+- nestjs module
+- nestjs controller
+- nestjs service
+version: '1.0'

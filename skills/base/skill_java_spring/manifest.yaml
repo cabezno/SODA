@@ -1,0 +1,22 @@
+name: skill_java_spring
+category: backend_framework
+description: Java Spring Boot REST API with JPA, Maven, and layered architecture
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- java
+- spring
+- spring boot
+- jpa
+- maven
+- gradle
+- hibernate
+- microservice java
+version: '1.0'

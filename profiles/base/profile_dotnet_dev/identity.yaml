@@ -1,0 +1,20 @@
+activation_signals:
+- csharp
+- c#
+- dotnet
+- .net
+- asp.net
+- blazor
+- entity framework
+- ef core
+description: Builds C# .NET Web APIs and applications with Entity Framework Core and
+  clean architecture
+display_name: .NET Developer
+experience_projects: 4
+name: profile_dotnet_dev
+skills_included:
+- skill_csharp_dotnet
+- skill_postgresql
+- skill_rest_api
+- skill_jwt_auth
+version: '1.0'

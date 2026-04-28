@@ -153,12 +153,17 @@ def _read_dir(directory: Path, max_bytes: int, max_age_seconds: int) -> str:
 
 
 class LogCollector:
-    """Discovers and reads recent log entries from tools and the project workspace."""
+    """Discovers and reads recent log entries from tools and the project workspace.
+
+    System-wide log directories are scanned with a short time window (default 5 min)
+    to avoid contaminating one project's context with errors from a previous run.
+    Workspace logs are always preferred and not time-limited.
+    """
 
     def __init__(
         self,
         max_bytes_per_tool: int = 3_000,
-        max_age_minutes: int = 30,
+        max_age_minutes: int = 5,  # short window prevents cross-project contamination
     ) -> None:
         self.max_bytes_per_tool = max_bytes_per_tool
         self.max_age_seconds    = max_age_minutes * 60

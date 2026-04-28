@@ -1,0 +1,20 @@
+name: skill_php_laravel
+category: backend_framework
+description: PHP Laravel REST API with Eloquent ORM, migrations, and resource controllers
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- php
+- laravel
+- eloquent
+- artisan
+- composer
+- blade
+version: '1.0'

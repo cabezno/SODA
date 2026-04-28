@@ -1,0 +1,28 @@
+name: skill_cpp_cmake
+category: native_compiled
+description: C++ projects with CMake build system, MSVC/GCC/Clang, Win32/cross-platform
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: full
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- c++
+- cpp
+- cmake
+- win32
+- winapi
+- msvc
+- mingw
+- clang
+- native
+- systems programming
+- opengl
+- directx
+- qt
+- imgui
+version: '1.0'

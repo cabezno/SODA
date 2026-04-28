@@ -1,0 +1,19 @@
+{
+  "runtimes": {
+    "python": {
+      "image_tag": "soda-runtime-python",
+      "dockerfile": "runtimes/python-uv/Dockerfile",
+      "tools": ["uv", "ruff", "pytest"]
+    },
+    "node": {
+      "image_tag": "soda-runtime-node",
+      "dockerfile": "runtimes/node-ts/Dockerfile",
+      "tools": ["pnpm", "vitest", "tsx"]
+    },
+    "go": {
+      "image_tag": "soda-runtime-go",
+      "dockerfile": "runtimes/go/Dockerfile",
+      "tools": ["golangci-lint", "gotest"]
+    }
+  }
+}

@@ -20,6 +20,8 @@ build/
 projects/*/chromadb/
 projects/*/logs/
 projects/*/backups/
+.tmp.drivedownload/
+.tmp.driveupload/
 data/
 tasks.db
 .soda_memory/
@@ -33,3 +35,14 @@ soda_config.json
 # OS
 .DS_Store
 Thumbs.db
+\
+# SODA runtime and logs
+.soda_backups/
+.soda_archive/
+.webview_cache/
+debug/
+projects/
+OLLAMA/
+SODA-PROJECT - copia/
+*.log
+*.bat\

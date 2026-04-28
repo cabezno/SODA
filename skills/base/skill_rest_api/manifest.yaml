@@ -1,16 +1,22 @@
 name: skill_rest_api
 category: api_design
-description: RESTful API design patterns — resource naming, HTTP verbs, status codes, pagination, error responses
+description: RESTful API design patterns — resource naming, HTTP verbs, status codes,
+  pagination, error responses
 applies_to_roles:
-  - code_generator
-  - global_architect
-  - requirements_interviewer
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
 activation_keywords:
-  - rest
-  - api
-  - http
-  - endpoints
-  - crud
-  - resources
-  - json
-version: "1.0"
+- rest
+- api
+- http
+- endpoints
+- crud
+- resources
+- json
+version: '1.0'

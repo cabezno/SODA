@@ -1,0 +1,27 @@
+name: skill_openai
+category: ai_integration
+description: Integration with OpenAI API — GPT-4o, embeddings, function calling, streaming,
+  and assistant threads
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- openai
+- gpt
+- gpt-4
+- gpt-4o
+- chatgpt
+- ai assistant
+- llm
+- language model
+- embeddings
+- text generation
+- openai api
+- chat completion
+version: '1.0'

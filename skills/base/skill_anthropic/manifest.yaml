@@ -1,0 +1,23 @@
+name: skill_anthropic
+category: ai_integration
+description: Integration with Anthropic Claude API — claude-sonnet, claude-haiku,
+  streaming, tool use, vision
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- anthropic
+- claude
+- claude api
+- claude sonnet
+- claude haiku
+- claude opus
+- claude integration
+- anthropic api
+version: '1.0'

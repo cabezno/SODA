@@ -1,0 +1,35 @@
+        # fix_duration: native F5-TTS uses UTF-8 byte length, which over-allocates for
+        # accented Spanish chars (ó = 2 bytes, 1 phoneme → stretched audio).
+        # We calculate from character count with a conservative rate so audio never clips.
+        try:
+            _ref_info = sf.info(ref_file)
+            _ref_sec = min(_ref_info.duration, 12.0)
+        except Exception:
+            _ref_sec = 3.0
+        _gen_sec = max(0.5, len(clean) / (_CHARS_PER_SEC * speed))
+        _fix_dur = _ref_sec + _gen_sec
+
+        wav_np, sr, _ = model.infer(
+            ref_file=ref_file,
+            ref_text=ref_text,
+            gen_text=clean,
+            speed=speed,
+            fix_duration=_fix_dur,
+            nfe_step=_NFE_STEP,
+            cfg_strength=_CFG_STRENGTH,
+            sway_sampling_coef=_SWAY_COEF,
+            target_rms=_TARGET_RMS,
+            cross_fade_duration=_CROSS_FADE,
+            remove_silence=True,
+            show_info=lambda *_: None,
+        )
+
+        # Trim leading/trailing silence on the numpy array.
+        # Equivalent to pydub's remove_silence_for_generated_wav but without disk I/O.
+        # Threshold ≈ -50 dBFS; keeps _SILENCE_MARGIN_MS ms of context around speech.
+        margin = int(_SILENCE_MARGIN_MS / 1000 * sr)
+        mask = np.abs(wav_np) > _SILENCE_AMP
+        if mask.any():
+            first = max(0, int(np.argmax(mask)) - margin)
+            last  = min(len(wav_np), int(len(wav_np) - np.argmax(mask[::-1])) + margin)
+            wav_np = wav_np[first:last]

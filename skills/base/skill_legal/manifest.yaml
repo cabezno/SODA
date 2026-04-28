@@ -1,0 +1,26 @@
+name: skill_legal
+category: domain_discipline
+description: Legal document templates, privacy policies, terms of service, contract clauses, and compliance frameworks
+applies_to_roles:
+  code_generator:
+    load_level: summary
+  global_architect:
+    load_level: full
+  reviewer:
+    load_level: full
+  docs_generator:
+    load_level: full
+activation_keywords:
+  - legal
+  - privacy policy
+  - terms of service
+  - gdpr
+  - ccpa
+  - compliance
+  - contract
+  - nda
+  - intellectual property
+  - data protection
+  - cookie policy
+  - disclaimer
+version: "1.0"

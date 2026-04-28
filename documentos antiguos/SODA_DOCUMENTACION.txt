@@ -1,0 +1,1321 @@
+================================================================================
+  SODA — BlackMagicBox Software Orchestration & Development Agent
+  Documentación técnica completa — Sistema multi-agente de generación de software
+================================================================================
+
+Versión del sistema: SODA v2
+Plataforma: Windows 11 nativo (Python 3.11.9)
+Última actualización: 2026-04-24
+
+________________________________________________________________________________
+ÍNDICE
+________________________________________________________________________________
+
+  1. QUÉ ES SODA
+  2. ARQUITECTURA GENERAL Y DIAGRAMA DE COMUNICACIONES
+  3. LAS TRES IAs Y SUS ROLES
+  4. EL PIPELINE COMPLETO — PASO A PASO
+  5. TEMPERATURA COPILOT — CONTROL DE CALIDAD
+  6. LOOP DE GENERACIÓN: QWEN + COPILOT + SUPERVISOR
+  7. CORRECCIÓN AUTOMÁTICA DE ERRORES
+  8. OPERACIONES POST-GENERACIÓN (MODIFY / REFOUND)
+  9. ARQUITECTO V2 — MASTERCONTRACT
+ 10. SISTEMA DE OBJETIVOS (GOAL TREE)
+ 11. LINAJE Y RAMAS (LINEAGE & BRANCHING)
+ 12. BOT DE TELEGRAM
+ 13. TODAS LAS FUNCIONALIDADES DE LA INTERFAZ HTML
+ 14. API ENDPOINTS DEL SERVIDOR
+ 15. SISTEMA DE SKILLS Y PERFILES
+ 16. MONITOR DE SALUD DEL CONTEXTO
+ 17. FLUJO COMPLETO PARA CADA OPERACIÓN PRINCIPAL
+
+
+________________________________________________________________________________
+1. QUÉ ES SODA
+________________________________________________________________________________
+
+SODA (Software Orchestration & Development Agent) es un sistema multi-agente
+de generación automática de software completo. Dado una descripción en lenguaje
+natural, SODA produce un proyecto funcional con código, dependencias, tests,
+documentación y los archivos de configuración necesarios para ejecutarlo.
+
+SODA NO es un simple wrapper de IA. Es un orquestador determinístico escrito
+en Python puro que coordina tres modelos de IA diferentes (Gemini, Claude, Qwen),
+aplica múltiples fases de revisión y corrección, y gestiona el ciclo de vida
+completo del proyecto desde el análisis hasta el despliegue.
+
+Características principales:
+  - Generación completa de software en múltiples lenguajes y frameworks
+  - Revisión iterativa de código con retroalimentación en bucle cerrado
+  - Corrección automática de errores de instalación y arranque
+  - Sistema de objetivos trazables (qué archivo implementa qué funcionalidad)
+  - Historial y linaje de proyectos con soporte de ramas
+  - Control por temperatura (velocidad vs calidad del código generado)
+  - Bot de Telegram para control remoto del pipeline
+  - Interfaz web con editor Monaco, consola en tiempo real y chat IA
+
+
+________________________________________________________________________________
+2. ARQUITECTURA GENERAL Y DIAGRAMA DE COMUNICACIONES
+________________________________________________________________________________
+
+                         ┌─────────────────────────────┐
+                         │        USUARIO              │
+                         │  (UI Web / Telegram / API)  │
+                         └──────────────┬──────────────┘
+                                        │ descripción del proyecto
+                                        ▼
+                         ┌─────────────────────────────┐
+                         │     SodaOrchestrator        │
+                         │       (Python puro)         │
+                         │  orchestrator.py — entry    │
+                         └──┬──────┬──────┬────────────┘
+                            │      │      │
+              ┌─────────────┘      │      └──────────────┐
+              │                    │                     │
+              ▼                    ▼                     ▼
+    ┌──────────────┐    ┌──────────────────┐    ┌──────────────┐
+    │    GEMINI    │    │    CLAUDE        │    │    QWEN      │
+    │  (Google)    │    │  (Anthropic)     │    │  (Ollama)    │
+    │              │    │                  │    │              │
+    │ Fases:       │    │ Fases:           │    │ Fases:       │
+    │ - CAP        │    │ - REQ            │    │ - DEV        │
+    │ - WISDOM     │    │ - Arquitecto v2  │    │   (código)   │
+    │ - ARCH       │    │ - Verificación   │    │              │
+    │ - EVOLUTION  │    │ - Corrección     │    │ Genera cada  │
+    │ - Visual     │    │   boot           │    │ archivo del  │
+    │   Inspector  │    │ - Docs           │    │ proyecto     │
+    │ - Fixer      │    │ - Modify/Impact  │    │              │
+    └──────────────┘    └──────────────────┘    └──────────────┘
+              │                    │                     │
+              └─────────────┬──────┘──────────┬──────────┘
+                            │                 │
+                            ▼                 ▼
+               ┌────────────────────┐  ┌───────────────────┐
+               │  COPILOT           │  │  SUPERVISOR       │
+               │  (Revisor de       │  │  (Claude final    │
+               │  código — bucle    │  │  pass — valida    │
+               │  con Qwen)         │  │  última versión)  │
+               └────────────────────┘  └───────────────────┘
+                            │
+                            ▼
+               ┌────────────────────────────────────────┐
+               │          RESULTADO FINAL               │
+               │  Workspace con código listo,           │
+               │  dependencias instalables,             │
+               │  tests generados, documentación        │
+               └────────────────────────────────────────┘
+
+COMUNICACIÓN ENTRE COMPONENTES:
+  - Python orquesta: nunca hay llamadas directas IA→IA
+  - Cada fase Python prepara el prompt, llama a la IA correspondiente
+    y procesa la respuesta antes de pasarla a la siguiente fase
+  - Los resultados de cada fase se persisten en metadata.json y archivos
+    del workspace (blueprint.json, architecture.json, goal_tree.json, etc.)
+  - Los errores de una fase alimentan el prompt de corrección de la siguiente
+  - El sistema es sin estado conversacional externo: cada llamada a la IA
+    es independiente; el contexto se construye desde los archivos persistidos
+
+
+________________________________________________________________________________
+3. LAS TRES IAs Y SUS ROLES
+________________________________________________________________________________
+
+────────────────────────────────────────────────
+GEMINI (Google) — El Planificador / Arquitecto
+────────────────────────────────────────────────
+Modelo usado: Gemini 2.5 Pro / Gemini 2.5 Flash
+
+Responsabilidades:
+  a) CAPABILITIES PHASE: Lee la descripción del usuario y selecciona qué
+     skills activar (ej: skill_react, skill_sqlite, skill_jwt_auth) y qué
+     perfil de desarrollador usar (ej: profile_web_fullstack).
+     Prompt: prompts/gemini/skill_matcher.md + profile_matcher.md
+
+  b) WISDOM PHASE: Detecta ambigüedades, puntos de atención, trade-offs
+     y sugerencias de mejora en el blueprint. Enriquece el perfil con lo
+     que aprendió. Muestra en el UI el panel "Wisdom".
+     Prompt: prompts/gemini/wisdom_agent.md
+
+  c) REQUIREMENTS PHASE: Genera el blueprint.json completo con:
+     nombre del proyecto, funcionalidades, stack sugerido, módulos
+     principales, estimación de complejidad, supuestos y advertencias.
+     Prompt: prompts/gemini/requirements_interviewer.md
+
+  d) ARCHITECTURE PHASE: Genera architecture.json con:
+     lista de módulos, sus archivos principales, dependencias entre módulos,
+     endpoints, contratos de interfaz y decisiones de diseño.
+     IMPORTANTE: el campo "dependencias" contiene solo nombres de módulos
+     del mismo array (nunca rutas de archivos ni librerías externas).
+     Prompt: prompts/gemini/global_architect.md
+
+  e) EVOLUTION PHASE: Al finalizar el proyecto captura los learnings en
+     el perfil del desarrollador para enriquecer proyectos futuros.
+     Prompt: prompts/gemini/profile_evolution.md
+
+  f) VISUAL INSPECTOR: Si el proyecto tiene frontend, Gemini Flash analiza
+     screenshots para detectar problemas visuales y sugiere correcciones.
+
+  g) CODE FIXER: Gemini actúa como fallback del BootAgent para corregir
+     errores de instalación/arranque si Claude no está disponible.
+     Prompt: prompts/gemini/code_fixer.md
+
+────────────────────────────────────────────────
+CLAUDE (Anthropic) — El Constructor / Verificador
+────────────────────────────────────────────────
+Modelos usados (seleccionados por complejidad del proyecto):
+  - Proyectos simples:  claude-haiku-4-5-20251001 (temp: 0.2, max: 6000 tokens)
+  - Proyectos medios:   claude-sonnet-4-6         (temp: 0.2, max: 8000 tokens)
+  - Proyectos complejos: claude-opus-4-7           (temp: 0.2, max: 12000 tokens)
+
+Responsabilidades:
+  a) REQUIREMENTS INTERVIEWER: Genera el blueprint cuando Gemini no está
+     disponible o el proyecto lo requiere.
+     Prompt: prompts/claude/requirements_interviewer.md
+
+  b) ARQUITECTO V2 — MASTERCONTRACT: Claude genera el MasterContract,
+     un contrato arquitectónico formal más detallado que architecture.json.
+     Incluye: extensión points, tipos de error, canales de eventos,
+     convenciones de nombres, relaciones entre módulos con goal IDs.
+     El modelo exacto se selecciona según la complejidad clasificada.
+     Prompt: prompts/claude/architect_simple/medium/complex.md
+
+  c) CONTRACT REFINEMENT: Si el ContractAuditor rechaza el MasterContract,
+     Claude lo refina basándose en el feedback del auditor.
+     Hasta 3 intentos máximo. Prompt: prompts/claude/architect_refinement.md
+
+  d) CONFORMANCE VERIFIER: Claude Haiku verifica que los archivos generados
+     por Qwen cumplan el contrato arquitectónico. Marca los archivos
+     no conformes para regeneración.
+     Prompt: prompts/claude/conformance_verifier.md
+
+  e) SUPERVISOR (último round Copilot): En la última pasada del loop
+     Copilot, Claude actúa como supervisor de calidad. Si detecta problemas,
+     fuerza una pasada extra de corrección sobre Qwen.
+
+  f) BOOT AGENT FIXER: Cuando el proyecto falla al instalar o arrancar,
+     Claude lee los errores exactos y los archivos afectados y genera
+     correcciones que se aplican automáticamente.
+     Prompt: prompts/claude/code_fixer.md
+
+  g) DOCS GENERATOR: Claude genera la documentación final del proyecto
+     (README, referencia de API, guía de instalación).
+     Prompt: prompts/claude/docs_generator.md
+
+  h) GOAL INTERPRETER: Interpreta solicitudes de modificación del usuario
+     y devuelve un ModificationPlan con el tipo de cambio y alcance.
+     Prompt: prompts/claude/goal_interpreter.md
+
+  i) IMPACT ANALYZER: Calcula el impacto directo y transitivo de un cambio
+     en la arquitectura del proyecto.
+     Prompt: prompts/claude/impact_analyzer.md
+
+  j) REFOUNDATION: Genera un resumen condensado del proyecto para poder
+     relanzar el pipeline con contexto comprimido.
+     Prompt: prompts/claude/refoundation.md
+
+────────────────────────────────────────────────
+QWEN 2.5-coder:7b (Ollama — local) — El Programador
+────────────────────────────────────────────────
+Modelo: qwen2.5-coder:7b vía Ollama (HTTP localhost)
+
+Responsabilidades:
+  a) CODE GENERATION (DEV PHASE): Genera cada archivo del proyecto uno
+     por uno. Qwen es el modelo de generación principal porque corre
+     localmente (sin costo de API) y es rápido para código.
+     Prompt: prompts/ollama/code_generator.md
+
+  b) REGENERACIÓN CON FEEDBACK: Cuando el Copilot encuentra problemas en
+     el código generado, Qwen recibe el feedback detallado y regenera
+     el archivo con las correcciones indicadas.
+
+  c) ESCALACIÓN: Si Qwen falla 3 veces consecutivas en generar un archivo,
+     el sistema escala automáticamente a Gemini (3 intentos), y si
+     también falla, a Claude (3 intentos). Total: 9 niveles de escalación.
+     Si los 9 niveles fallan, el archivo se guarda con validated=False
+     y el pipeline continúa (nunca aborta por un archivo).
+
+
+________________________________________________________________________________
+4. EL PIPELINE COMPLETO — PASO A PASO
+________________________________________________________________________________
+
+Cuando el usuario ingresa una descripción y presiona "Ejecutar", SODA ejecuta
+las siguientes fases en orden. Cada fase persiste su resultado antes de
+continuar, por lo que el pipeline es reanudable si se interrumpe.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 0 — INICIALIZACIÓN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Python crea un Project con ID único (ej: "mi_proyecto")
+  2. Crea el workspace en projects/mi_proyecto/
+  3. Persiste estado inicial en metadata.json
+  4. Registra el inicio en el sistema de linaje
+  5. Notifica al UI: "Proyecto iniciado. Temperatura Copilot: media (3 pasadas)"
+  6. Detecta y aplica nivel de intensidad (bajo/medio/alto/crítico)
+  7. Detecta y aplica tipo de proyecto (software/análisis/marketing/etc.)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 1 — CAP (Capabilities) — GEMINI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Gemini lee la descripción del usuario
+  2. Selecciona skills activas del catálogo:
+     skill_fastapi, skill_react, skill_sqlite, skill_jwt_auth,
+     skill_rest_api, skill_vue, skill_php_laravel, skill_postgresql, etc.
+  3. Selecciona perfil de desarrollador:
+     profile_web_fullstack, profile_backend_api, profile_general_dev, etc.
+  4. Copilot sugiere mejoras al conjunto de skills si detecta gaps
+  5. Si el usuario acepta sugerencias, se actualizan skills y perfil
+  6. Resultado: project.skills y project.profile definidos
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 2 — WISDOM — GEMINI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Gemini analiza la descripción con el contexto de skills/perfil
+  2. Detecta:
+     - Ambigüedades: partes poco claras de la especificación
+     - Complejidades: aspectos técnicamente difíciles
+     - Trade-offs: decisiones con pros y contras
+     - Sugerencias: mejoras opcionales al proyecto
+  3. El UI muestra el panel "Wisdom" con estos hallazgos
+  4. El pipeline continúa (el usuario puede responder o ignorar)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 3 — REQ (Requirements) — CLAUDE (o Gemini)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Claude genera el blueprint.json completo con:
+     - nombre_proyecto: identificador limpio
+     - descripcion: resumen técnico del proyecto
+     - funcionalidades: lista detallada con nombre, descripción, prioridad
+     - stack_sugerido: backend, frontend, base de datos, otros
+     - modulos_principales: lista de módulos de alto nivel
+     - estimacion_complejidad: simple / media / compleja
+     - supuestos: decisiones tomadas automáticamente
+     - advertencias: riesgos o requisitos externos
+     - comando_instalacion: cómo instalar el proyecto
+     - comando_ejecucion: cómo arrancar el proyecto
+  2. Persiste blueprint.json en el workspace
+  3. Emite CHECKPOINT al UI: "Blueprint listo"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 4 — ARCH (Architecture) — GEMINI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Gemini lee el blueprint y genera architecture.json con:
+     - stack: stack tecnológico detallado
+     - modulos: array de módulos, cada uno con:
+         * nombre: identificador del módulo
+         * responsabilidad: qué hace exactamente
+         * archivos_principales: qué archivos genera
+         * dependencias: nombres de otros módulos (NO rutas)
+         * endpoints: rutas HTTP si aplica
+     - estructura_directorios: árbol del proyecto
+     - contratos: interfaces entre módulos
+     - decisiones_clave: justificación de decisiones de diseño
+     - advertencias: consideraciones de producción
+  2. Persiste architecture.json en el workspace
+
+  Luego, en paralelo, Arquitecto v2 (Claude) genera master_contract.json
+  (ver Sección 9 — ARQUITECTO V2)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 5 — PLAN — Python puro
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Python lee architecture.json
+  2. Construye un grafo de dependencias (DAG) entre módulos
+  3. Aplica ordenamiento topológico de Kahn para determinar el orden
+     de generación (los módulos base primero, los dependientes después)
+  4. Agrupa módulos en niveles de ejecución (L0, L1, L2, L3...)
+     donde todos los módulos del mismo nivel se pueden generar en paralelo
+  5. Construye el GoalTree: árbol jerárquico de objetivos donde cada
+     archivo a generar es un nodo con un ID único trazable
+  6. Persiste execution_plan.json y goal_tree.json en el workspace
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 6 — DESIGN — Claude / Gemini
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Si el proyecto tiene frontend, se genera una especificación de diseño
+     con paleta de colores, tipografía, layout y componentes
+  2. Esta especificación se inyecta en el contexto de generación de
+     componentes de UI para que Qwen produzca código consistente
+  3. Persiste design_spec.json en el workspace
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 7 — DEV (Development) — QWEN + COPILOT + CLAUDE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Por cada módulo en cada nivel de ejecución:
+  → Ver Sección 6 — LOOP DE GENERACIÓN para el detalle completo
+
+  Al terminar todos los módulos:
+  1. Python marca el GoalTree con los archivos implementados
+  2. Emite CHECKPOINT: "Fase de desarrollo completa"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 8 — VERIFY — CLAUDE HAIKU
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Claude Haiku lee cada archivo generado
+  2. Verifica conformidad con el MasterContract (Arquitecto v2):
+     - ¿El archivo implementa lo que su contrato especifica?
+     - ¿Las interfaces entre módulos son correctas?
+     - ¿Los nombres siguen las convenciones del contrato?
+  3. Marca archivos como conformes o no conformes
+  4. Los no conformes se pasan a regeneración dirigida si el número
+     de errores supera el umbral
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 9 — IMPORT VALIDATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Python analiza todos los imports de los archivos generados
+  2. Verifica que los módulos importados existan en el workspace
+  3. Detecta dependencias circulares
+  4. Genera import_validation_report.json
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 10 — SECURITY REVIEW — Claude
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Claude analiza el código en busca de vulnerabilidades OWASP Top 10:
+     - SQL injection, XSS, CSRF, hardcoded secrets, insecure dependencies
+  2. Genera security_report.json con hallazgos y severidades
+  3. Si hay vulnerabilidades críticas, se regeneran los archivos afectados
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 11 — TEST GENERATION — Claude
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Claude genera tests automáticos para las funcionalidades principales
+  2. Los tests se agregan al workspace del proyecto
+  3. Cubre: tests unitarios, tests de integración básicos
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 12 — API CONTRACT — Python + Claude
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Si el proyecto tiene frontend + backend separados:
+     - Lee los endpoints definidos en architecture.json
+     - Verifica que el frontend consuma exactamente esos endpoints
+     - Verifica que el backend los implemente
+  2. Si hay discrepancias, Claude corrige los archivos involucrados
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 13 — AUDIT — Claude
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Auditoría completa de calidad de código:
+     - Consistencia de estilo
+     - Completitud de funcionalidades según blueprint
+     - Correctitud de lógica de negocio
+  2. Genera reporte de auditoría
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 14 — VALIDATION — Python + Docker
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. ProjectValidator ejecuta validaciones determinísticas:
+     - Sintaxis de archivos
+     - Estructura de directorios esperada
+     - Archivos requeridos presentes
+  2. DockerSandbox ejecuta los tests del proyecto en contenedor aislado
+  3. Si la validación detecta módulos fallidos:
+     → Se activa FASE 14b: TARGETED REGENERATION (ver Sección 7)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 15 — BOOT AGENT — BootAgent + Claude/Gemini
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  → Ver Sección 7 — CORRECCIÓN AUTOMÁTICA DE ERRORES para el detalle
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 16 — VISUAL INSPECTION — Gemini Flash
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Si el proyecto tiene UI, captura screenshot del navegador
+  2. Gemini Flash analiza la imagen y detecta problemas visuales:
+     - Layout roto, elementos superpuestos, colores incorrectos
+     - Texto ilegible, componentes faltantes
+  3. Si detecta problemas, regenera los módulos visuales afectados
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 17 — DOCS — Claude
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Claude genera documentación completa del proyecto:
+     - README con descripción, instalación, uso
+     - Referencia de API (si aplica)
+     - Guía de contribución
+     - Variables de entorno requeridas
+  2. Guarda README.txt en el workspace
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FASE 18 — EVOLUTION — Gemini
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Gemini analiza lo que aprendió del proyecto
+  2. Actualiza el perfil del desarrollador con:
+     - Nuevas tecnologías vistas
+     - Patrones exitosos
+     - Ajustes de preferencias
+  3. Guarda learnings en la base de conocimiento vectorial (ChromaDB)
+  4. Estado del proyecto → DONE
+
+
+________________________________________________________________________________
+5. TEMPERATURA COPILOT — CONTROL DE CALIDAD
+________________________________________________________________________________
+
+La temperatura Copilot controla cuántas veces el código es revisado y
+corregido antes de pasar al siguiente módulo.
+
+  ┌─────────┬───────────────┬───────────────────────────────────────────────┐
+  │ Nivel   │ Configuración │ Qué significa                                 │
+  ├─────────┼───────────────┼───────────────────────────────────────────────┤
+  │ BAJA    │ 1 pasada      │ Qwen genera → se acepta directamente.         │
+  │         │ 0 regen. fase │ Rápido y barato en tokens. Para prototipos.   │
+  ├─────────┼───────────────┼───────────────────────────────────────────────┤
+  │ MEDIA   │ 3 pasadas     │ Qwen genera → Copilot revisa → Qwen corrige   │
+  │ (defecto│ 1 regen. fase │ → Copilot revisa → Qwen corrige → Supervisor. │
+  │ )       │               │ Balance entre calidad y tiempo. RECOMENDADO.  │
+  ├─────────┼───────────────┼───────────────────────────────────────────────┤
+  │ ALTA    │ 5 pasadas     │ Hasta 5 rondas de revisión por módulo.        │
+  │         │ 2 regen. fase │ Más correcciones de fase si la validación falla│
+  │         │               │ Código más refinado. Más lento y costoso.     │
+  └─────────┴───────────────┴───────────────────────────────────────────────┘
+
+"Pasadas de código": cuántas veces se revisa cada módulo en el DEV loop.
+"Regeneraciones de fase": cuántas veces se puede regenerar toda la fase de
+validación si falla (temperatura ALTA permite 2 reintentos completos).
+
+La temperatura se elige:
+  - En la interfaz HTML: selector "🤖 Copilot:" en el formulario principal
+  - En el tab "Desde Código": selector "Temperatura Copilot"
+  - En el chat CopilotKit: el asistente pregunta antes de crear el proyecto
+  - Por Telegram: el bot pregunta durante la creación del proyecto
+  - Por API: parámetro copilot_temperature en POST /api/run
+
+
+________________________________________________________________________________
+6. LOOP DE GENERACIÓN: QWEN + COPILOT + SUPERVISOR
+________________________________________________________________________________
+
+Este es el corazón del DEV phase. Por cada módulo del proyecto:
+
+ROUND 1 (siempre ocurre):
+──────────────────────────
+  1. Python construye el prompt con:
+     - Responsabilidad del módulo
+     - Archivos a generar con sus rutas
+     - Blueprint del proyecto
+     - Skills activas (conocimiento del framework)
+     - Perfil del desarrollador
+     - Especificación de diseño (si hay frontend)
+     - Contexto de módulos ya generados (dependencias)
+     - Feedback de la pasada anterior (si la hay)
+
+  2. Qwen genera todos los archivos del módulo de una vez
+
+  3. Para cada archivo generado, Python aplica saneamiento automático:
+     - Si es package.json:
+         * Corrige nombres de paquetes malformados
+           (ej: @framer-motion/framer-motion → framer-motion)
+         * Reemplaza versiones "undefined" o vacías por "*"
+         * Corrige versiones inexistentes de paquetes conocidos:
+           (@types/jest, nodemailer, next-auth, @electron-toolkit/*, etc.)
+     - Si es archivo Python:
+         * Inyecta metadata de trazabilidad (goal_id, hash, filepath)
+         * Vincula el archivo con su objetivo en el GoalTree
+
+  4. Python escribe los archivos al disco
+
+  5. Copilot (revisor IA) analiza el código generado:
+     - Lee todos los archivos del módulo
+     - Verifica correctitud, seguridad, estilo
+     - Devuelve: has_suggestion (bool) + lista de cambios
+
+  6a. Si Copilot NO encuentra problemas → módulo terminado, siguiente módulo
+  6b. Si Copilot SÍ encuentra problemas y quedan rondas disponibles:
+       → Python agrega el feedback al prompt de la siguiente ronda
+       → Volver a paso 1 (con el feedback ya cargado)
+
+ROUND FINAL (última ronda según temperatura):
+──────────────────────────────────────────────
+  Si es la última ronda Y el Copilot encontró problemas en rondas anteriores:
+  1. Claude actúa como SUPERVISOR: lee el código final y verifica
+  2. Si el supervisor detecta problemas residuales:
+     → Python ejecuta UNA ronda extra de corrección con Qwen
+     → Escribe los archivos corregidos al disco
+  3. El módulo queda marcado como completo
+
+ESCALACIÓN (si Qwen falla):
+─────────────────────────────
+  Si Qwen no puede generar un archivo válido en 3 intentos:
+  1. Escala a Gemini: 3 intentos con Gemini
+  2. Si Gemini falla: Escala a Claude: 3 intentos con Claude
+  3. Si Claude también falla: guarda el archivo con validated=False
+     y el pipeline continúa con el resto de los módulos (nunca aborta)
+
+
+________________________________________________________________________________
+7. CORRECCIÓN AUTOMÁTICA DE ERRORES
+________________________________________________________________________________
+
+SODA tiene dos sistemas de corrección automática que se activan cuando
+el proyecto generado tiene errores en tiempo de instalación o ejecución.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7a. TARGETED REGENERATION (errores de validación de código)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Se activa cuando la fase de validación (FASE 14) detecta módulos fallidos.
+
+  1. Python identifica qué módulos tienen errores de validación
+  2. Determina si la concentración de errores justifica regenerar
+  3. Para cada módulo a regenerar:
+     a. Lee todos los archivos de los módulos que NO fallan (contexto)
+     b. Construye prompt con:
+        - Errores exactos detectados
+        - Análisis del Copilot sobre la causa raíz
+        - Contexto de módulos vecinos funcionando
+     c. Genera el módulo nuevamente con Claude (modelo según complejidad)
+     d. Escribe los nuevos archivos al disco
+  4. Actualiza el GoalTree con los nuevos archivos
+  5. Guarda estado del proyecto
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7b. BOOT AGENT AUTO-FIX (errores de instalación y arranque)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Se activa cuando npm install, pip install, o el servidor falla al arrancar.
+
+MAX_ROUNDS = 3 (3 intentos completos de instalación + arranque)
+
+Cada ronda:
+
+  PASO 1: DETECCIÓN DE STACK
+    Python detecta automáticamente el tipo de proyecto leyendo qué archivos
+    existen en el workspace:
+      - package.json → Node.js (npm install --legacy-peer-deps)
+      - requirements.txt / pyproject.toml → Python (pip install)
+      - go.mod → Go (go mod tidy)
+      - Cargo.toml → Rust (cargo build)
+      - composer.json → PHP (composer install)
+      - .csproj → .NET (dotnet build)
+
+  PASO 2: BOOTSTRAP DE ENTORNO
+    Antes de instalar, Python copia automáticamente:
+      .env.example → .env.local (para Next.js)
+      .env.example → .env (para Python/Laravel)
+    Evita que el proyecto arranque sin variables de entorno.
+
+  PASO 3: INSTALACIÓN
+    - Ejecuta el comando de instalación
+    - Timeout: 120 segundos
+    - Si falla → extrae errores y va a PASO 5
+
+  PASO 4: ARRANQUE
+    - Ejecuta el comando de arranque
+    - Timeout: 30 segundos (solo para verificar que levanta)
+    - Si levanta exitosamente → BootReport final_ok=True, fin
+    - Si falla → extrae errores y va a PASO 5
+
+  PASO 5: EXTRACCIÓN DE ERRORES
+    - Parsea la salida del proceso con regex
+    - Mapea cada error a su archivo fuente + número de línea
+    - Recopila logs del sistema (LogCollector)
+    - Clasifica errores: ImportError, SyntaxError, ModuleNotFoundError,
+      ERESOLVE (npm), ETARGET (npm), etc.
+
+  PASO 6: CORRECCIÓN CON IA
+    - Envía a Claude (o Gemini si Claude no disponible):
+        * Los errores exactos con contexto
+        * El contenido de los archivos afectados
+        * El tipo de stack detectado
+    - Claude genera correcciones para cada archivo
+    - Python aplica las correcciones al disco
+    - Volver a PASO 3 (siguiente ronda)
+
+  Si las 3 rondas fallan:
+    - BootReport con final_ok=False
+    - El proyecto queda en estado "development" (no DONE)
+    - El usuario puede reintentar manualmente o pedir auto-fix desde la UI
+
+
+________________________________________________________________________________
+8. OPERACIONES POST-GENERACIÓN (MODIFY / REFOUND)
+________________________________________________________________________________
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MODIFY — Modificar un proyecto existente
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+El usuario pide cambios sobre un proyecto ya generado. Ejemplo:
+"Agregá autenticación JWT" / "Cambiá la base de datos a PostgreSQL"
+
+  1. BUILD REFERENCE REPORT
+     Claude analiza la solicitud:
+     - ¿Hay referencias a URLs, archivos o versiones específicas?
+     - ¿Las referencias son válidas o ambiguas?
+     - Emite advertencias si detecta referencias rotas
+
+  2. GOAL INTERPRETER (Claude)
+     Clasifica el tipo de cambio:
+     - non_structural: cambio en lógica/UI, mismos módulos
+     - structural: cambios en arquitectura, nuevas dependencias
+     - scope: ampliación del alcance del proyecto
+     - new_module: se agrega un módulo nuevo al DAG
+     Devuelve: ModificationPlan con afectados, requires_regeneration, change_type
+
+  3. IMPACT ANALYZER (Claude)
+     Calcula el impacto:
+     - directly_affected: módulos que cambian directamente
+     - transitively_affected: módulos que dependen de los afectados
+     - risk_level: HIGH / MEDIUM / LOW
+     Devuelve: ImpactReport
+
+  4. BRANCHING (si el cambio es estructural)
+     Si change_type ∈ {structural, scope, new_module} Y requires_regeneration:
+     - BranchManager crea una copia del workspace en una rama nueva
+     - Registra en el historial de linaje
+     - Ejecuta el pipeline en la rama
+     - Compara ambas versiones (original vs modificada)
+     - Presenta al usuario puntuaciones para cada versión
+
+  5. REGENERACIÓN DIRIGIDA
+     Solo se regeneran los módulos afectados (no todo el proyecto).
+     Se usa el contexto de los módulos NO afectados para mantener
+     la coherencia.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFOUND — Refundar (relanzar) un proyecto
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cuando el proyecto tiene tantos cambios acumulados que es más eficiente
+empezar de nuevo con el aprendizaje del proyecto actual.
+
+  1. SUMMARIZE (Claude)
+     Genera una descripción condensada del proyecto en su estado actual:
+     - Decisiones tomadas
+     - Stack definido
+     - Funcionalidades implementadas
+     - Cambios aplicados
+     Devuelve: refounded_description + key_decisions
+
+  2. NUEVO PIPELINE
+     Llama a run() con la descripción condensada como input
+     El nuevo proyecto hereda el contexto del anterior pero parte de cero
+     en el código.
+
+  3. LINAJE
+     El nuevo proyecto registra al anterior como parent en el historial.
+     Se puede trazear la genealogía completa de proyectos.
+
+
+________________________________________________________________________________
+9. ARQUITECTO V2 — MASTERCONTRACT
+________________________________________________________________________________
+
+El MasterContract es un contrato arquitectónico formal generado por Claude
+que complementa el architecture.json de Gemini. Se persiste como
+master_contract.json en el workspace.
+
+CLASIFICACIÓN DE COMPLEJIDAD (Python puro — sin IA):
+  El sistema analiza el blueprint y puntúa:
+  - estimated_modules: cantidad de módulos
+  - estimated_loc: líneas de código estimadas
+  - stack_count: número de stacks tecnológicos
+  - external_integrations: servicios externos integrados
+  - requires_realtime: tiempo real (WebSockets, SSE)
+  - requires_multi_tenant: multitenancy
+  - requires_compliance: regulaciones (GDPR, HIPAA, PCI-DSS, SOX)
+  - auth_complexity: simple / moderate / complex
+  - regulated_industry: industria regulada
+  - handles_sensitive_data: datos sensibles
+
+  Resultado:
+    SIMPLE → Claude Haiku   (proyectos pequeños, 1 stack, pocos módulos)
+    MEDIUM → Claude Sonnet  (proyectos medianos, complejidad moderada)
+    COMPLEX → Claude Opus   (proyectos grandes, multi-stack, regulados)
+
+CONTENIDO DEL MASTERCONTRACT:
+  - project_name, description
+  - modules: lista con id, name, responsabilidad, goal_ids (IDs del GoalTree)
+  - extension_points: puntos de extensión (mínimo 3):
+      * middleware_slot: ranura para middleware cross-cutting
+      * event_channel: canal para eventos de dominio (formato: "entidad.accion")
+      * metadata_field: campo de metadata extensible en entidades
+  - error_types: tipos de error estandarizados (mínimo 3):
+      * SystemError (code: SYSTEM_ERROR, http: 500, recoverable: false)
+      * ValidationError (code: VALIDATION_ERROR, http: 422, recoverable: true)
+      * NotFoundError (code: NOT_FOUND, http: 404, recoverable: true)
+  - event_channels: canales de comunicación entre módulos
+  - naming_conventions: convenciones de nombres (snake_case, PascalCase, etc.)
+  - complexity_level, model_used
+
+LOOP DE REFINAMIENTO (ContractRefinementLoop):
+  Intento 1:
+    → Architect genera MasterContract
+    → ContractAuditor valida:
+       - CompletenessValidator: ¿tiene 3+ extension_points, 3+ error_types?
+       - ConsistencyValidator: ¿los goal_ids existen en el GoalTree?
+       - ExtensibilityValidator: ¿tiene los 3 tipos requeridos de extension points?
+       - NamingValidator: ¿los IDs de módulos son snake_case?
+    → Si pasa → Estado: APPROVED
+    → Si falla → feedback al Architect
+
+  Intento 2 (si falló):
+    → Architect recibe el feedback y refina el contrato
+    → ContractAuditor vuelve a validar
+    → Si pasa → Estado: APPROVED
+    → Si falla → Intento 3
+
+  Intento 3 (si falló):
+    → Última oportunidad de refinamiento
+    → Si pasa con advertencias → Estado: APPROVED_WITH_WARNINGS
+    → Si falla → Estado: REQUIRES_USER_INTERVENTION (el pipeline continúa)
+
+NORMALIZACIÓN AUTOMÁTICA (antes de validación Pydantic):
+  Si Claude genera menos de los mínimos requeridos, Python agrega
+  automáticamente placeholders para que no falle la validación de schema.
+  El auditor luego los detecta como "incompletos" y lo reporta.
+
+
+________________________________________________________________________________
+10. SISTEMA DE OBJETIVOS (GOAL TREE)
+________________________________________________________________________________
+
+Cada proyecto tiene un árbol jerárquico de objetivos que traza qué archivo
+implementa qué funcionalidad.
+
+ESTRUCTURA DE UN NODO:
+  {
+    "id": "servicio_api__frontend_src_services_apiclient_ts",
+    "parent_id": "module__servicio_api",
+    "type": "objective",          // o "category" para módulos
+    "description": "Implementa frontend/src/services/apiClient.ts",
+    "status": "implemented",      // o "planned"
+    "implemented_by": ["frontend/src/services/apiClient.ts"],
+    "dependencies": ["module__vue_core"],
+    "metadata": {
+      "module": "Servicio API",
+      "filepath": "frontend/src/services/apiClient.ts"
+    },
+    "hash": "a6afcf0009076374"    // hash del contenido del archivo
+  }
+
+CÓMO SE USA:
+  - El UI lo muestra en la sidebar izquierda como árbol expandible
+  - Permite saber exactamente cuántos objetivos están implementados vs planeados
+  - El hash permite detectar cambios en archivos entre modificaciones
+  - La metadata_injector inyecta el goal_id en el código fuente mismo
+    (como comentario de metadata) para trazabilidad bidireccional
+  - Se persiste en goal_tree.json y se actualiza después de cada fase
+
+TRAZABILIDAD BIDIRECCIONAL:
+  - En código fuente: `# --- METADATA SODA | goal_id: X | hash: Y ---`
+  - En goal_tree.json: el nodo con ese ID apunta al archivo
+  - Permite saber dado un archivo → qué objetivo implementa
+  - Permite saber dado un objetivo → en qué archivo está
+
+
+________________________________________________________________________________
+11. LINAJE Y RAMAS (LINEAGE & BRANCHING)
+________________________________________________________________________________
+
+LINAJE (ProjectLineage):
+  Log append-only de todo lo que sucede con cada proyecto:
+  - record_start(project_id, description, parent_id): registro de inicio
+  - record_complete(project_id, status): fin del pipeline
+  - record_branch(project_id, branch_id): cuando se crea una rama
+  Permite trazear la historia completa: original → modificaciones → ramas → refundaciones
+
+BRANCHING (BranchManager):
+  Cuando una modificación es estructural:
+  1. create_branch(project_id): copia todo el workspace a una subcarpeta
+     projects/mi_proyecto/branches/branch_20260424_120000/
+  2. El pipeline corre en la rama (no modifica el original)
+  3. Se ejecutan ambas versiones y se comparan
+  4. promote_branch(branch_id): si el usuario acepta, reemplaza el original
+
+INTENSIDAD DE EJECUCIÓN (IntensityOrchestrator):
+  Python clasifica cada solicitud por complejidad de ejecución:
+  - Level 1 (low):      1 agente paralelo, sin revisión, sin árbitro
+  - Level 2 (medium):   2 agentes paralelos, sin revisión, sin árbitro
+  - Level 3 (high):     2 agentes paralelos, con revisión, sin árbitro
+  - Level 4 (critical): 3 agentes paralelos, con revisión, con árbitro
+  Esto controla cuántos módulos se pueden generar en paralelo y qué
+  nivel de verificación se aplica.
+
+
+________________________________________________________________________________
+12. BOT DE TELEGRAM
+________________________________________________________________________________
+
+El bot (@Soda_black_bot) permite controlar SODA desde Telegram sin abrir la UI.
+
+CONFIGURACIÓN:
+  - Variable de entorno: TELEGRAM_BOT_TOKEN
+  - Se parean con /pair desde la UI o con el comando de pairing en Telegram
+  - Config guardada en soda_config.json
+
+COMANDOS DISPONIBLES:
+  /start          → Mensaje de bienvenida e instrucciones
+  /pair <código>  → Vincula esta sesión de Telegram con SODA
+  /status         → Estado actual del pipeline (fase, % de avance, proyecto)
+  /projects       → Lista de proyectos recientes con su estado
+  /crear          → Inicia el wizard de creación de proyecto:
+                    1. Bot pregunta nombre del proyecto
+                    2. Bot pregunta descripción
+                    3. Bot pregunta temperatura (baja/media/alta)
+                    4. Bot inicia el pipeline
+  /abrir          → Abre un proyecto existente para modificar
+  /aprobar        → Aprueba una acción que el pipeline está esperando
+  /rechazar       → Rechaza una acción pendiente
+  /cancel         → Cancela la operación en curso
+  /mas_tiempo     → Solicita más tiempo de ejecución
+  /fin o /terminar→ Finaliza la sesión actual
+  /help           → Lista de todos los comandos
+
+BOTONES INLINE (en mensajes del bot):
+  [▶ Ejecutar]    → Lanza el proyecto generado (POST /api/launch)
+  [🔧 Auto-Fix]  → Ejecuta el loop de corrección automática
+
+NOTIFICACIONES AUTOMÁTICAS DEL BOT:
+  El bot envía mensajes a Telegram cuando:
+  - Inicia el pipeline
+  - Completa cada fase importante
+  - Detecta errores críticos
+  - El proyecto está listo (DONE) con el comando de ejecución
+
+
+________________________________________________________________________________
+13. TODAS LAS FUNCIONALIDADES DE LA INTERFAZ HTML
+________________________________________________________________________________
+
+URL base: http://localhost:8000
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB PRINCIPAL — Panel de trabajo activo
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BARRA SUPERIOR:
+  - Logotipo SODA / BMB
+  - Badge del modelo activo (Qwen/Claude/Gemini)
+  - Nombre del proyecto en ejecución
+  - Pills de estado de IAs (Qwen ●, Claude ●, Gemini ●)
+  - Track de fases: CAP → WISDOM → REQ → ARCH → PLAN → DEV → DONE
+  - Toggle Auto-Confirm (⚡): aprueba automáticamente decisiones binarias
+  - Botón Telegram: abre config del bot
+  - Botón Costos: abre panel de tokens y costos
+
+BARRA DE INPUT:
+  - Nombre del proyecto (input, validación: letras/números/guiones)
+  - 🤖 Copilot: selector de temperatura (Baja / Media / Alta) [NUEVO]
+  - Descripción del proyecto (textarea expandible)
+  - Botón "Ejecutar"
+
+BARRA DE PROGRESO:
+  - Porcentaje de avance
+  - Fase actual en texto
+  - Tiempo transcurrido
+
+SIDEBAR IZQUIERDA:
+  - Árbol de objetivos expandible (GoalTree):
+    * Muestra módulos y archivos con íconos de estado
+    * Verde ✓ = implementado, gris = planificado
+    * Click en un nodo → abre el archivo en el editor
+  - Lista de archivos con indicadores de validación
+  - Panel de hardware: CPU%, RAM%, VRAM% en barras
+
+ÁREA PRINCIPAL:
+  - Tab "📝 Código": editor Monaco (lectura) con syntax highlighting
+  - Tab "🤖 CopilotKit": chat con IA embebido (iframe /copilot)
+
+PANELES DINÁMICOS (aparecen según el estado del pipeline):
+  - COPILOT BOX (🤖): visible durante la revisión de código
+    * Título: "COPILOT AUDITANDO — [fase]"
+    * Mensaje del copilot con su análisis
+    * Cambio sugerido en código monospace
+    * Botones: [Aplicar] [Rechazar]
+
+  - QUESTION BOX: visible cuando el pipeline hace una pregunta
+    * Texto de la pregunta
+    * Input de respuesta
+    * Botones: [Responder] [Saltar]
+
+  - WISDOM PANEL: visible después de la fase Wisdom
+    * Tags de: Ambigüedades, Complejidades, Trade-offs, Sugerencias
+
+  - LAUNCH PANEL: visible cuando el proyecto está listo
+    * "PROYECTO LISTO"
+    * Campo editable con el comando de ejecución
+    * Botón "▶ Instalar y Ejecutar"
+    * Ruta del workspace
+
+CONSOLA DE LOGS (parte inferior):
+  - Stream en tiempo real de eventos del pipeline
+  - Colores por tipo: START (cyan), DONE (verde), FAILED (rojo),
+    CHECKPOINT (amarillo), AI_WORKING (violeta), FILE_GENERATED (azul),
+    COPILOT_SUGGESTION (violeta), HEALTH_WARN (naranja), etc.
+  - Timestamp en cada entrada
+
+CHIPS DE MÓDULOS (sobre la consola):
+  - Un chip por módulo en el nivel de ejecución actual
+  - Animación "running" mientras se genera
+  - Verde cuando termina
+
+CHAT DEL PROYECTO (panel inferior derecho, se desbloquea al terminar):
+  - /ask: preguntarle algo al proyecto generado
+  - /modify [descripción]: pedir una modificación
+  - /refound: refundar el proyecto
+
+MONITOR DE COSTO (panel flotante top-right):
+  - Tokens consumidos (input / output)
+  - Costo total estimado en USD
+  - Tabla por driver: modelo, tokens, latencia, costo
+  - Alertas de presupuesto con colores (verde/amarillo/rojo)
+  - Link para abrir SODA Copilot en tab separado
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB NUEVO PROYECTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - Nombre del proyecto (input con validación)
+  - Descripción del proyecto (textarea)
+  - Botón "Generar proyecto"
+  - Área de errores
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB DESDE CÓDIGO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. INPUT DE ARCHIVO
+     - Campo nombre de archivo (ej: app.py, index.js)
+     - Editor Monaco para pegar código existente
+     - Botón "Analizar"
+
+  2. RESULTADO DEL ANÁLISIS (aparece tras analizar)
+     - Badge de lenguaje detectado
+     - Frameworks identificados
+     - Resumen de qué hace el código
+     - Lista de sugerencias clickeables (pre-llenan el campo de intención)
+
+  3. CONFIGURACIÓN DEL PROYECTO
+     - Campo intención: qué construir a partir de este código
+     - Nombre del proyecto
+     - Temperatura Copilot (selector: Baja/Media/Alta)
+     - Botón "🚀 Crear proyecto desde este código"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB ABRIR PROYECTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. SELECTOR DE RUTA
+     - Input de ruta o archivo
+     - Botón "Examinar" (abre selector nativo del OS)
+     - Botón "Analizar"
+
+  2. OVERVIEW DEL PROYECTO (tras analizar)
+     - Propósito detectado
+     - Stack tecnológico
+     - Calidad general
+     - Funcionalidades identificadas
+
+  3. ACCIONES DISPONIBLES (grid de botones)
+     - Reparar: corregir errores del proyecto
+     - Optimizar: mejorar rendimiento/calidad
+     - Migrar: cambiar a otro lenguaje/framework
+     - Extender: agregar funcionalidades
+     - Testear: generar tests
+
+  4. MIGRACIÓN (si se selecciona)
+     - Selector de lenguaje/framework destino
+
+  5. CONFIGURACIÓN
+     - Textarea de intención/descripción del cambio
+     - Nombre del nuevo proyecto
+     - Botón "🚀 Procesar proyecto"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB TERMINAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - Selector de proyecto activo
+  - Terminal xterm.js (WebSocket tiempo real)
+  - Input de comando + botones: Ejecutar / Detener / Limpiar / Diagnosticar
+  - Panel de Diagnóstico IA (al hacer "Diagnosticar"):
+    * Badge de severidad del error
+    * Análisis de causa raíz
+    * Correcciones sugeridas
+    * Archivos recomendados a revisar
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB ESTADO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - Tarjetas de drivers IA (Claude, Gemini, Qwen):
+    * Indicador de salud (ok/error/advertencia)
+    * Modelo configurado
+    * Latencia promedio
+    * Costo total de la sesión
+
+  - Lista de procesos activos:
+    * Nombre, comando, PID
+    * Botón "Matar proceso"
+
+  - Errores de ejecución recientes:
+    * Badge de fase
+    * ID de proyecto
+    * Timestamp
+    * Mensaje de error
+
+  - Tabla de métricas de uso:
+    * Fecha, driver, modelo, tokens entrada/salida, latencia, costo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TAB API KEYS & IAs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - Tarjeta por proveedor (Claude, Gemini, Ollama, custom):
+    * Input de API key (oculto)
+    * Selector de modelo
+    * Botón "Probar conexión"
+    * Indicador de estado de conexión
+
+  - Sección Telegram:
+    * Input de bot token
+    * Botón "Parear"
+
+  - Botón "Agregar proveedor custom" (modal):
+    * Nombre, Base URL, Modelo, API Key
+
+  - Botón "Guardar cambios"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COPILOTKIT CHAT (/copilot)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  URL directa: http://localhost:8000/copilot
+  También accesible: Tab "🤖 CopilotKit" en el panel principal
+
+  - Chat conversacional con IA (React + CopilotKit)
+  - El asistente SIEMPRE pregunta la temperatura antes de crear un proyecto
+  - Opciones que explica: baja/media/alta con sus características
+  - Acción disponible: create_project (nombre, descripción, temperatura)
+  - Responde preguntas generales sobre el proyecto en español
+
+
+________________________________________________________________________________
+14. API ENDPOINTS DEL SERVIDOR
+________________________________________________________________________________
+
+BASE URL: http://localhost:8000
+
+PIPELINE PRINCIPAL:
+  POST /api/run                → Iniciar nuevo proyecto
+                                 Body: {description, project_name, copilot_temperature}
+  GET  /api/status             → Estado actual del pipeline
+  POST /api/modify             → Modificar proyecto existente
+                                 Body: {project_id, request}
+  POST /api/refound            → Refundar proyecto
+                                 Body: {project_id}
+  POST /api/answer             → Responder pregunta del pipeline
+                                 Body: {answer}
+  POST /api/answer/extend      → Ampliar respuesta
+  GET  /api/lineage            → Historial completo de proyectos
+  GET  /api/lineage/{id}/branches → Ramas del proyecto
+
+CÓDIGO EXISTENTE:
+  POST /api/analyze_code       → Analizar código existente
+                                 Body: {code, filename}
+  POST /api/run_from_code      → Generar desde código existente
+                                 Body: {code, filename, intent, project_name, copilot_temperature}
+  POST /api/autofix            → Ejecutar auto-fix en proyecto
+                                 Body: {project_id}
+
+PROYECTOS:
+  GET  /api/project/{id}       → Metadata del proyecto
+  GET  /api/projects/{id}/files       → Lista de archivos fuente
+  GET  /api/projects/{id}/goal_tree   → Árbol de objetivos
+  GET  /api/projects/{id}/runtime_health → Salud del proceso en ejecución
+  GET  /api/projects/{id}/runtime_smoke  → Resultados de smoke test
+
+EJECUCIÓN:
+  POST /api/launch             → Instalar y arrancar el proyecto generado
+                                 Body: {project_id, command}
+  GET  /api/processes          → Procesos activos (nombre, PID, estado)
+  POST /api/kill/{project_id}  → Matar proceso del proyecto
+  GET  /api/execution_errors   → Errores recientes de todos los proyectos
+  GET  /api/execution_errors/{id} → Errores de un proyecto específico
+
+TERMINAL WEBSOCKET:
+  WS   /ws/terminal/{session_id} → Sesión de terminal interactiva
+  GET  /api/terminal/sessions     → Sesiones activas
+  DELETE /api/terminal/{session_id} → Cerrar sesión
+  POST /api/terminal/diagnose     → Diagnóstico IA de errores del terminal
+
+PROYECTO EXTERNO:
+  GET  /api/open_project/browse           → Explorar sistema de archivos
+  POST /api/open_project/analyze          → Analizar proyecto externo
+  POST /api/open_project/run             → Procesar proyecto externo
+  GET  /api/open_project/migration_targets → Destinos de migración disponibles
+
+TELEGRAM:
+  GET  /api/telegram/pair      → Generar código de pairing
+  GET  /api/telegram/status    → Estado de configuración del bot
+
+IA Y CONFIGURACIÓN:
+  GET  /api/ai/status          → Estado de todos los proveedores IA
+  GET  /api/ai/providers       → Lista de proveedores configurados
+  POST /api/ai/providers       → Agregar proveedor custom
+  DELETE /api/ai/providers/{n} → Eliminar proveedor
+  GET  /api/ai/test/{provider} → Probar conectividad de un proveedor
+  POST /api/ollama/start       → Iniciar Ollama localmente
+
+  GET  /api/config             → Leer soda_config.json
+  POST /api/config             → Actualizar soda_config.json
+  GET  /api/env                → Variables de entorno configuradas
+  POST /api/env                → Actualizar variable de entorno
+  GET  /api/health             → Health check del servidor
+  GET  /api/stats              → Estadísticas de RAM y recursos
+  GET  /api/ram_total          → RAM total del sistema
+
+  POST /api/event              → Emitir evento WebSocket al frontend
+  GET  /api/copilotkit         → Endpoint CopilotKit (SDK)
+  GET  /copilot                → Sirve la UI React del chat
+
+
+________________________________________________________________________________
+15. SISTEMA DE SKILLS Y PERFILES
+________________________________________________________________________________
+
+SKILLS (skills/base/):
+  Paquetes de conocimiento que enriquecen el contexto de generación.
+  Cada skill tiene:
+  - manifest.yaml: nombre, descripción, tags, versión
+  - system_prompt.md: instrucciones de sistema para la IA
+  - knowledge/*.md: documentación del framework/tecnología
+
+  Skills disponibles:
+  - skill_fastapi:      FastAPI + Pydantic + uvicorn
+  - skill_sqlite:       SQLite + SQLAlchemy
+  - skill_react:        React 18 + hooks + TypeScript
+  - skill_jwt_auth:     JWT authentication flow
+  - skill_rest_api:     REST API design patterns
+  - skill_vue:          Vue 3 + Vite + TypeScript
+  - skill_php_laravel:  Laravel 11 + Eloquent + Artisan
+  - skill_postgresql:   PostgreSQL + migraciones
+  - skill_ui_design:    Tailwind CSS + componentes UI
+  - skill_ux:           UX patterns + accesibilidad
+
+PERFILES (profiles/base/):
+  Personalizan el estilo de código y las preferencias del "desarrollador simulado".
+  Cada perfil tiene:
+  - identity.yaml: nombre, experiencia, enfoque
+  - experience/: áreas de expertise
+  - style/: preferencias de código (naming, estructura, patterns)
+
+  Perfiles disponibles:
+  - profile_web_fullstack:  Full-stack moderno, React + Node/Python
+  - profile_backend_api:    Backend puro, APIs REST, bases de datos
+  - profile_general_dev:    Generalista, múltiples lenguajes
+
+CÓMO SE USAN:
+  1. Gemini selecciona las skills y el perfil en la FASE CAP
+  2. ContextBuilder carga los archivos de las skills seleccionadas
+  3. Se inyectan en el prompt del generador de código (Qwen)
+  4. Qwen genera código con el conocimiento específico del framework
+     en lugar de código genérico
+
+
+________________________________________________________________________________
+16. MONITOR DE SALUD DEL CONTEXTO
+________________________________________________________________________________
+
+ContextHealthMonitor supervisa pasivamente todas las llamadas a IA.
+
+UMBRALES CALIBRADOS:
+  - TOKEN_WARN_THRESHOLD: 80,000 tokens (80% del límite de 100k)
+  - SLOW_CALL_S: 30 segundos (Qwen normal: 15-25s)
+  - ERROR_RATE_WARN: 0.50 (50% de error rate antes de alertar)
+  - ROLLING_WINDOW: 15 llamadas (ventana para calcular métricas)
+
+  NOTA: El umbral de error rate está en 0.50 (no 0.30) deliberadamente
+  para no disparar falsos positivos durante la escalación Qwen×3→Claude
+  (donde 3 fallos de Qwen seguidos de 1 éxito de Claude dan 75% de error
+  momentáneo). Si se baja este umbral, el monitor alertaría en cada
+  escalación normal.
+
+QUÉ MONITOREA:
+  - Latencia de cada llamada por modelo
+  - Tasa de error (llamadas fallidas / total)
+  - Tokens consumidos por llamada
+  - Detecta llamadas lentas (> 30s) y alerta
+  - Detecta degradación de tasa de éxito por driver
+
+QUÉ HACE CON LOS DATOS:
+  - Emite alertas HEALTH_WARN al UI (naranja en consola)
+  - Alimenta el panel "Estado" de la interfaz con métricas en tiempo real
+  - NO pausa el pipeline — es 100% pasivo
+
+
+________________________________________________________________________________
+17. FLUJO COMPLETO PARA CADA OPERACIÓN PRINCIPAL
+________________________________________________________________________________
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CREAR PROYECTO NUEVO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Usuario ingresa nombre + descripción + temperatura en la UI
+  2. UI envía POST /api/run con los parámetros
+  3. Python crea SodaOrchestrator(copilot_temperature=X)
+  4. Python inicia asyncio.create_task para el pipeline
+  5. Pipeline ejecuta Fases 0-18 (ver Sección 4)
+  6. En cada evento: UI recibe actualización via WebSocket y actualiza la consola
+  7. Al finalizar: panel Launch aparece con el comando de ejecución
+  8. Usuario presiona "▶ Instalar y Ejecutar"
+  9. BootAgent instala dependencias y levanta el servidor
+  10. UI muestra la URL del proyecto en ejecución
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GENERAR DESDE CÓDIGO EXISTENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Usuario pega código en el editor del tab "Desde Código"
+  2. Clic "Analizar" → POST /api/analyze_code
+  3. Gemini analiza el código: detecta lenguaje, frameworks, propósito
+  4. UI muestra resumen + sugerencias de intención
+  5. Usuario elige intención, nombre, temperatura
+  6. Clic "🚀 Crear" → POST /api/run_from_code
+  7. Python abre el código como contexto base del pipeline
+  8. Ejecuta el pipeline igual que "Crear Proyecto Nuevo"
+  9. El código existente se incluye como contexto en la generación
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MODIFICAR PROYECTO EXISTENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. El proyecto debe estar en estado DONE
+  2. Usuario escribe /modify [descripción del cambio] en el chat del proyecto
+  3. UI envía POST /api/modify con project_id y request
+  4. GoalInterpreter (Claude) clasifica el cambio
+  5. ImpactAnalyzer (Claude) calcula impacto
+  6. Si es estructural: BranchManager crea una rama, pipeline corre en la rama
+  7. Si no es estructural: se regeneran solo los módulos afectados
+  8. Usuario recibe resultado con los cambios aplicados
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABRIR Y MEJORAR PROYECTO EXTERNO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Usuario va al tab "Abrir Proyecto"
+  2. Selecciona carpeta con "Examinar"
+  3. Clic "Analizar" → POST /api/open_project/analyze
+  4. SODA detecta stack, calidad, funcionalidades del proyecto
+  5. Usuario elige acción: reparar / optimizar / migrar / extender / testear
+  6. Clic "🚀 Procesar" → POST /api/open_project/run
+  7. SODA aplica la acción seleccionada sobre el proyecto externo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AUTO-FIX DE PROYECTO CON ERRORES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. El proyecto está generado pero falla al instalar o correr
+  2. Opciones para iniciar auto-fix:
+     a. UI: botón en el Launch Panel / botón en Estado
+     b. Telegram: botón inline [🔧 Auto-Fix]
+     c. API: POST /api/autofix con {project_id}
+  3. BootAgent ejecuta hasta 3 rondas de fix:
+     - Intenta instalar → captura errores → Claude los corrige → reintenta
+  4. El resultado se muestra en la consola en tiempo real
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CREAR PROYECTO POR TELEGRAM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Usuario envía /crear al bot
+  2. Bot responde: "¿Cuál es el nombre del proyecto?"
+  3. Usuario responde con el nombre
+  4. Bot responde: "¿Cuál es la descripción del proyecto?"
+  5. Usuario escribe la descripción
+  6. Bot responde: "¿Qué temperatura de Copilot querés?
+     baja (1 revisión, rápido) / media (3 revisiones, recomendado) / alta (ilimitado)"
+  7. Usuario elige la temperatura
+  8. Bot envía POST /api/run al servidor local
+  9. Bot notifica el progreso con mensajes periódicos
+  10. Al terminar: Bot envía mensaje con botones [▶ Ejecutar] [🔧 Auto-Fix]
+
+================================================================================
+  Fin del documento — SODA v2 — BlackMagicBox
+================================================================================

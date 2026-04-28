@@ -1,0 +1,19 @@
+name: profile_java_dev
+display_name: Java Developer
+description: Builds Java backend services with Spring Boot, JPA, and Maven following enterprise patterns
+activation_signals:
+  - java
+  - spring boot
+  - jpa
+  - maven
+  - gradle
+  - spring
+  - enterprise java
+  - microservice java
+skills_included:
+  - skill_java_spring
+  - skill_postgresql
+  - skill_rest_api
+  - skill_jwt_auth
+experience_projects: 0
+version: "1.0"

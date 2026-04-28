@@ -1,0 +1,20 @@
+name: profile_fullstack_js
+display_name: Fullstack JavaScript Developer
+description: Builds fullstack apps with Node.js/Express backend and React/Vue frontend, sharing TypeScript types
+activation_signals:
+  - javascript fullstack
+  - node react
+  - node vue
+  - mern
+  - mean
+  - fullstack javascript
+  - fullstack js
+  - js stack
+skills_included:
+  - skill_nodejs
+  - skill_typescript
+  - skill_react
+  - skill_mongodb
+  - skill_postgresql
+experience_projects: 0
+version: "1.0"

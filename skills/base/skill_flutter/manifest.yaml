@@ -1,0 +1,23 @@
+name: skill_flutter
+category: mobile_framework
+description: Flutter/Dart cross-platform mobile app with Bloc/Riverpod state management and Material 3
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- flutter
+- dart
+- pubspec
+- flutter sdk
+- ios
+- cross-platform mobile
+- flutter app
+- riverpod
+- bloc
+version: '1.0'

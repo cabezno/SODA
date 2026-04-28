@@ -2,17 +2,23 @@ name: skill_react
 category: frontend_framework
 description: React 18 frontend with functional components, hooks, and Vite build tooling
 applies_to_roles:
-  - code_generator
-  - global_architect
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
 activation_keywords:
-  - react
-  - frontend
-  - ui
-  - spa
-  - componentes
-  - javascript
-  - typescript
-  - web app
-  - interface
-  - dashboard
-version: "1.0"
+- react
+- frontend
+- ui
+- spa
+- componentes
+- javascript
+- typescript
+- web app
+- interface
+- dashboard
+version: '1.0'

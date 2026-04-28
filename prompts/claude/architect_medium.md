@@ -42,26 +42,115 @@ Un contrato maestro en formato JSON que cumpla con el schema MasterContract.
 
 Cada módulo debe mapear a múltiples goal_ids cuando aplique. Los goal_ids cubren todo el árbol de objetivos sin dejar goals huérfanos. Si no hay árbol de objetivos disponible, generá goal IDs jerarquizados (ej: `goal_auth`, `goal_auth_login`, `goal_auth_logout`).
 
-## Schema MasterContract
+## Schema MasterContract — ESTRUCTURA EXACTA REQUERIDA
 
-```
+```json
 {
-  "project_id": "string (snake_case)",
+  "project_id": "string en snake_case (ej: 'my_project')",
   "project_name": "string",
   "version": "1.0.0",
   "complexity_level": "medium",
   "model_used": "string",
-  "modules": [ { "id", "name", "purpose" (≥20 chars), "interfaces", "goal_ids" (≥1), "layer", "depends_on", "data_types_used", "extension_points" } ],
-  "data_types": [ { "name" (PascalCase), "kind", "fields"?, "description" (≥10 chars), "used_by_modules" } ],
-  "event_channels": [ { "name" (dotted), "payload_schema", "publishers", "subscribers", "description" } ],
-  "extension_points": [ { "id", "type", "location", "contract" (≥20 chars), "description", "example_use_case" } ],
-  "error_types": [ { "name", "code" (UPPER_SNAKE), "message_template", "recoverable", "http_status"?, "raised_by_modules" } ],
-  "constants": [ { "name" (UPPER_SNAKE), "value", "type", "description", "used_in_modules" } ],
-  "architectural_decisions": [ { "id", "title", "context", "decision", "consequences", "alternatives_considered" } ],
+  "modules": [
+    {
+      "id": "string en snake_case",
+      "name": "string descriptivo",
+      "purpose": "string mínimo 20 caracteres describiendo responsabilidad",
+      "interfaces": [
+        {
+          "name": "string (ej: 'UserServiceInterface')",
+          "description": "string",
+          "methods": [
+            {
+              "name": "string en snake_case",
+              "parameters": {"param_name": "type"},
+              "returns": "string",
+              "raises": ["ExceptionType"],
+              "description": "string mínimo 10 caracteres",
+              "example_usage": "service.method(arg)",
+              "is_async": true
+            }
+          ],
+          "events_emitted": ["user.created"],
+          "events_consumed": []
+        }
+      ],
+      "depends_on": ["other_module_id"],
+      "data_types_used": ["DataTypeName"],
+      "extension_points": ["ep_id"],
+      "goal_ids": ["goal_id"],
+      "layer": "application"
+    }
+  ],
+  "data_types": [
+    {
+      "name": "PascalCase",
+      "kind": "object",
+      "fields": {"field_name": "type"},
+      "description": "string mínimo 10 caracteres",
+      "used_by_modules": ["module_id"]
+    }
+  ],
+  "event_channels": [
+    {
+      "name": "dotted.notation (ej: 'user.created')",
+      "payload_schema": "DataTypeName",
+      "publishers": ["module_id"],
+      "subscribers": ["module_id"],
+      "description": "string",
+      "is_reserved": false
+    }
+  ],
+  "extension_points": [
+    {
+      "id": "ep_unique_id",
+      "type": "middleware_slot",
+      "location": "string",
+      "contract": "string",
+      "description": "string",
+      "example_use_case": "string"
+    }
+  ],
+  "error_types": [
+    {
+      "name": "PascalCase (ej: 'UserNotFoundError')",
+      "code": "UPPER_SNAKE_CASE (ej: 'USER_NOT_FOUND')",
+      "message_template": "User {user_id} not found",
+      "recoverable": false,
+      "retry_strategy": null,
+      "http_status": 404,
+      "raised_by_modules": ["module_id"]
+    }
+  ],
+  "constants": [
+    {
+      "name": "UPPER_SNAKE_CASE",
+      "value": "string",
+      "type": "string|int|float|bool",
+      "description": "string",
+      "used_in_modules": []
+    }
+  ],
+  "architectural_decisions": [
+    {
+      "id": "adr_001",
+      "title": "string",
+      "context": "string",
+      "decision": "string",
+      "consequences": ["string"],
+      "alternatives_considered": ["string"]
+    }
+  ],
   "assumptions": ["string"],
   "metadata": {}
 }
 ```
+
+## Valores válidos para campos con enum
+
+- `modules[].layer`: `"domain"` | `"application"` | `"infrastructure"` | `"presentation"`
+- `extension_points[].type`: `"middleware_slot"` | `"event_channel"` | `"metadata_field"` | `"plugin"` | `"hook"` | `"filter"`
+- `data_types[].kind`: `"primitive"` | `"object"` | `"enum"` | `"union"` | `"list"`
 
 ## Formato de output
 

@@ -7,7 +7,7 @@ from kernel.integrity.contract_auditor import ContractAuditor
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _ext(id_="ext_01", ext_type="middleware_slot") -> dict:

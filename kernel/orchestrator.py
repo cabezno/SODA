@@ -1,11 +1,12 @@
 import asyncio
 import json
+import re
 import sys
 import requests
 from enum import Enum
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -36,16 +37,18 @@ from kernel.lineage.branching import BranchManager
 from kernel.intelligence.copilot_consultant import CopilotConsultant
 from kernel.integrity.goal_integrity_validator import GoalIntegrityValidator
 from kernel.knowledge.chromadb_manager import ChromaDBManager, KnowledgeOrchestrator
-from kernel.execution.docker_sandbox import DockerSandbox
+from kernel.docker_sandbox import DockerSandbox
 from kernel.communication.telegram_gateway import TelegramGateway
 from kernel.communication.user_interaction import get_gateway
 from kernel.execution.project_runner import ProjectRunner
+from kernel.execution.stack_detector import StackDetector
 from kernel.execution.smoke_tester import SmokeTester
 from kernel.execution.service_orchestrator import ServiceOrchestrator
 from kernel.outputs.output_generator import OutputGenerator
 from kernel.git_manager import GitManager
 from kernel.goals.goal_tree import GoalTree
 from kernel.orchestration.intensity_orchestrator import IntensityOrchestrator
+from kernel.orchestration.phase_mixin import PhaseMixin
 from kernel.drivers.driver_factory import build_driver
 from kernel.projects.project_types import ProjectTypeRegistry
 from kernel.projects.project_manager import ProjectManager
@@ -57,6 +60,7 @@ from kernel.validation.import_dependency_validator import ImportDependencyValida
 from kernel.validation.api_contract_enforcer import APIContractEnforcer
 from kernel.security.security_reviewer import SecurityReviewer
 from kernel.testing.test_generator import TestGenerator
+from kernel.testing.functional_test_generator import FunctionalTestGenerator
 from kernel.execution.boot_agent import BootAgent
 from kernel.learning.behavior_observer import BehaviorObserver
 from kernel.learning.knowledge_base import KnowledgeBase
@@ -69,6 +73,7 @@ from kernel.watchdog_mgr import ProjectWatchdog
 from kernel.persistence.requirements_store import RequirementsStore
 from kernel.monitoring.performance_tracker import PerformanceTracker
 from kernel.intelligence.conformance_verifier import ConformanceVerifier
+from kernel.logging.error_reporter import PhaseReporter, fmt_response
 
 
 class ProjectState(Enum):
@@ -92,6 +97,7 @@ class Project:
     workspace: Optional[Path] = None
     blueprint: dict = field(default_factory=dict)
     architecture: dict = field(default_factory=dict)
+    topology: dict = field(default_factory=dict)  # topology.json — new v2 format
     skills: list = field(default_factory=list)
     profile: str = ""
     project_type: str = ""
@@ -110,10 +116,12 @@ COPILOT_TEMPERATURE = {
 }
 
 
-class SodaOrchestrator:
+class SodaOrchestrator(PhaseMixin):
     MAX_LOCAL_RETRIES = 3
 
     def __init__(self, copilot_temperature: str = "media"):
+        self._current_phase: str = "idle"
+        self._active_project = None  # set to the Project object during run()
         temp = copilot_temperature.lower().strip() if copilot_temperature else "media"
         cfg = COPILOT_TEMPERATURE.get(temp, COPILOT_TEMPERATURE["media"])
         self._copilot_max_passes = cfg["code_passes"]
@@ -182,6 +190,12 @@ class SodaOrchestrator:
             context_builder=self.builder,
             notify_fn=self._notify,
         )
+        self.functional_test_generator = FunctionalTestGenerator(
+            claude_driver=self.claude,
+            gemini_driver=self.gemini,
+            context_builder=self.builder,
+            notify_fn=self._notify,
+        )
         self.boot_agent = BootAgent(
             claude_driver=self.claude,
             gemini_driver=self.gemini,
@@ -197,10 +211,31 @@ class SodaOrchestrator:
         self.code_gen.coach = self.coach
         self._ui_url = "http://127.0.0.1:8000/api/event"
         self.code_gen.notify = self._notify
+        self.code_gen._notify_fn = self._notify
         self.perf_tracker = PerformanceTracker()
         self.code_gen.tracker = self.perf_tracker
-        self.conformance_verifier = ConformanceVerifier(self.claude, self.perf_tracker)
+        self.conformance_verifier = ConformanceVerifier(self.claude, self.perf_tracker, notify_fn=self._notify)
         self._load_custom_providers()
+
+    def cleanup_context(self):
+        """Limpieza profunda de recursos y contexto (Capa 1, 2 y 3)."""
+        print("  [CLEANUP] Iniciando purga integral de contexto...")
+        
+        # Capa 1: Limpiar Builder y Cache
+        if hasattr(self, "builder") and hasattr(self.builder, "reset"):
+            self.builder.reset()
+            
+        # Capa 3: Reset de Motores y Drivers
+        if hasattr(self, "claude") and hasattr(self.claude, "clear_history"):
+            self.claude.clear_history()
+        if hasattr(self, "gemini") and hasattr(self.gemini, "clear_history"):
+            self.gemini.clear_history()
+        
+        # Capa Hardware: IDLE Mode (Apagar Docker y Descargar VRAM)
+        from kernel.resource_monitor import ResourceMonitor
+        ResourceMonitor.set_mode("IDLE", ollama_model=self.ollama.active_model or "qwen2.5-coder:14b")
+        
+        print("  [CLEANUP] Sistema purificado y listo para el proximo proyecto.")
 
     def _load_custom_providers(self) -> None:
         """Register any custom AI providers saved in soda_config.json into ai_hub."""
@@ -400,6 +435,7 @@ class SodaOrchestrator:
             "reference_report": project.reference_report,
             "created_at": project.created_at,
             "workspace": str(project.workspace) if project.workspace else "",
+            "copilot_temperature": getattr(self, "_copilot_temperature", "media"),
         }
         workspace = self._workspace(project)
         (workspace / "metadata.json").write_text(
@@ -444,7 +480,32 @@ class SodaOrchestrator:
         project.goal_tree = tree.to_dict()
 
     def _apply_intensity_level(self, project: Project) -> None:
-        level = self.intensity.choose_level(project.description)
+        # Build enriched text: description + relevant blueprint fields when available
+        text_parts = [project.description]
+        if project.blueprint:
+            bp = project.blueprint
+            # Add stack tech names (auth, payment, websocket libs surface intensity keywords)
+            stack = bp.get("stack_sugerido", {})
+            if isinstance(stack, dict):
+                text_parts.extend(str(v) for v in stack.values())
+            elif isinstance(stack, list):
+                text_parts.extend(str(v) for v in stack)
+            # Add feature list
+            for feat in bp.get("funcionalidades", []):
+                text_parts.append(str(feat))
+            # Add project type and integrations
+            text_parts.append(str(bp.get("tipo_proyecto", "")))
+            for integ in bp.get("integraciones", []):
+                text_parts.append(str(integ))
+            # Module count: many modules → raise baseline
+            module_count = len(bp.get("modulos", []))
+            if module_count >= 8:
+                text_parts.append("microservice distributed api auth docker queue")
+            elif module_count >= 4:
+                text_parts.append("api crud dashboard integration")
+
+        enriched_text = " ".join(text_parts)
+        level = self.intensity.choose_level(enriched_text)
         if project.intensity_level == level:
             return
         project.intensity_level = level
@@ -558,19 +619,53 @@ class SodaOrchestrator:
             result = await call_fn()
         return _str(result)
 
-    async def _call_claude(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+    async def _dispatch_call(
+        self,
+        driver,
+        provider_name: str,
+        display_name: str,
+        role: str,
+        task: str,
+        project=None,
+        **driver_kwargs,
+    ) -> str:
+        """Unified 5-step provider dispatch: context → payload → call → normalize → health.
+
+        All _call_* methods delegate here so skill/profile/RAG loading, health
+        recording, and error normalization live in exactly one place.
+        """
         import time
         sc = self.skill_manager.load_context(project.skills, role=role) if project else None
         pc = self.profile_manager.load_context(project.profile) if project else None
         rag = self.knowledge_orchestrator.query(project.description, role=role) if project else None
         task = self._augment_task_with_project_context(task, project)
-        payload = self.builder.build_payload("claude", role, task, skills_context=sc, profile_context=pc, rag_context=rag)
-        self._notify(f"Claude — {role}", "AI_WORKING", {"ai": "Claude", "model": "claude-sonnet-4-6", "role": role})
+        payload = self.builder.build_payload(
+            provider_name, role, task,
+            skills_context=sc, profile_context=pc, rag_context=rag,
+        )
+        model_label = (
+            getattr(driver, "active_model", None)
+            or getattr(driver, "model", display_name)
+        )
+        self._notify(
+            f"{display_name} ({model_label}) — {role}",
+            "AI_WORKING",
+            {"ai": display_name, "model": model_label, "role": role},
+        )
         t0 = time.monotonic()
-        result = await self._retry_transient("Claude", lambda: self.claude.prompt(payload["system"], payload["user"]))
-        self._check_driver_error(result, "Claude", role)
-        self.health.record(role, "claude", time.monotonic() - t0, result, not result.startswith("ERROR:") and not result.lstrip().startswith("Error"))
+        result = await self._retry_transient(
+            display_name,
+            lambda: driver.call(payload["system"], payload["user"], **driver_kwargs),
+        )
+        # _retry_transient already normalises via _str(); guard kept for safety
+        if not isinstance(result, str):
+            result = result.content if hasattr(result, "content") else str(result)
+        self._check_driver_error(result, display_name, role)
+        self.health.record(role, provider_name, time.monotonic() - t0, result, not result.startswith("ERROR:"))
         return result
+
+    async def _call_claude(self, role: str, task: str, project: Optional["Project"] = None) -> str:
+        return await self._dispatch_call(self.claude, "claude", "Claude", role, task, project)
 
     async def _call_gemini(
         self,
@@ -580,53 +675,40 @@ class SodaOrchestrator:
         response_format: str = "text",
         max_tokens: int = 8192,
     ) -> str:
-        import time
-        sc = self.skill_manager.load_context(project.skills, role=role) if project else None
-        pc = self.profile_manager.load_context(project.profile) if project else None
-        rag = self.knowledge_orchestrator.query(project.description, role=role) if project else None
-        task = self._augment_task_with_project_context(task, project)
-        payload = self.builder.build_payload("gemini", role, task, skills_context=sc, profile_context=pc, rag_context=rag)
-        model_name = self.gemini.active_model or "Gemini"
-        self._notify(f"Gemini ({model_name}) — {role}", "AI_WORKING", {"ai": "Gemini", "model": model_name, "role": role})
-        t0 = time.monotonic()
-        result = await self._retry_transient(
-            "Gemini",
-            lambda: self.gemini.call(
-                payload["system"], payload["user"],
-                response_format=response_format,
-                max_tokens=max_tokens,
-            ),
+        return await self._dispatch_call(
+            self.gemini, "gemini", "Gemini", role, task, project,
+            response_format=response_format, max_tokens=max_tokens,
         )
-        if not isinstance(result, str):
-            result = result.content  # DriverResponse → str
-        self._check_driver_error(result, "Gemini", role)
-        self.health.record(role, "gemini", time.monotonic() - t0, result, not result.startswith("ERROR:") and not result.lstrip().startswith("Error"))
-        return result
 
     async def _call_ollama(self, role: str, task: str, project: Optional["Project"] = None) -> str:
-        import time
-        sc = self.skill_manager.load_context(project.skills, role=role) if project else None
-        pc = self.profile_manager.load_context(project.profile) if project else None
-        rag = self.knowledge_orchestrator.query(project.description, role=role) if project else None
-        task = self._augment_task_with_project_context(task, project)
-        payload = self.builder.build_payload("ollama", role, task, skills_context=sc, profile_context=pc, rag_context=rag)
-        self._notify(f"Qwen ({self.ollama.model}) — {role}", "AI_WORKING", {"ai": "Qwen", "model": self.ollama.model, "role": role})
-        t0 = time.monotonic()
-        result = await self._retry_transient("Qwen", lambda: self.ollama.prompt(payload["system"], payload["user"]))
-        self._check_driver_error(result, "Qwen", role)
-        self.health.record(role, "ollama", time.monotonic() - t0, result, not result.startswith("ERROR:") and not result.lstrip().startswith("Error"))
-        return result
+        return await self._dispatch_call(self.ollama, "ollama", "Qwen", role, task, project)
 
     async def _call_with_fallback(self, primary: str, role: str, task: str, project=None) -> str:
-        """Try primary AI; on capacity error cascade through the fallback chain."""
+        """Try primary AI; on capacity error cascade through the fallback chain.
+
+        Known providers (claude/gemini/ollama) use their dedicated methods with full
+        skill/profile/RAG context. Any other provider registered in ai_hub is called
+        generically via its driver's call() interface.
+        """
         from kernel.utils.ai_fallback import is_capacity_error, error_code
-        callers = {
+        _known = {
             "claude": ("Claude", self._call_claude),
             "gemini": ("Gemini", self._call_gemini),
             "ollama": ("Qwen", self._call_ollama),
         }
         chain_names = self.ai_hub.get_chain(primary)
-        chain = [callers[name] for name in chain_names if name in callers]
+        chain: list = []
+        for name in chain_names:
+            if name in _known:
+                chain.append(_known[name])
+            else:
+                driver = self.ai_hub.get(name)
+                if driver is not None:
+                    def _make_generic(drv, pname):
+                        async def _generic(r, t, p):
+                            return await self._dispatch_call(drv, pname, pname.capitalize(), r, t, p)
+                        return (pname.capitalize(), _generic)
+                    chain.append(_make_generic(driver, name))
 
         if not chain:
             chain = [("Claude", self._call_claude), ("Gemini", self._call_gemini)]
@@ -651,17 +733,17 @@ class SodaOrchestrator:
         for attempt in range(1, self.MAX_LOCAL_RETRIES + 1):
             print(f"  [Qwen] Attempt {attempt}/{self.MAX_LOCAL_RETRIES}...")
             result = await self._call_ollama(role, task, project)
-            if not result.lstrip().startswith("Error"):
+            if not result.startswith("ERROR:"):
                 return result
             print(f"  [!] Failed attempt {attempt}: {result[:80]}")
         print("  [^^] Escalating to Claude Sonnet...")
         result = await self._call_claude(role, task, project)
-        if not result.lstrip().startswith("Error"):
+        if not result.startswith("ERROR:"):
             return result
         if is_capacity_error(result):
             print("  [^^] Claude capacity error — trying Gemini as last resort...")
             result = await self._call_gemini(role, task, project)
-            if not result.lstrip().startswith("Error"):
+            if not result.startswith("ERROR:"):
                 return result
         project.state = ProjectState.AWAITING_CHECKPOINT
         self._save_state(project)
@@ -732,509 +814,59 @@ class SodaOrchestrator:
             )
             return None
 
-    # --- Phases ---
+    def _handle_copilot_review(
+        self,
+        review: Optional[Dict],
+        phase: str,
+        *,
+        allow_rephase: bool = False,
+    ) -> Dict:
+        """Classify a normalized Copilot review and decide the minimum intervention strategy.
 
-    async def _phase_wisdom(self, project: Project) -> None:
-        print("\n[FASE 0.5] Wisdom — analyzing description...")
-        self._notify("Analizando descripción...", "PHASE_START", {"phase": "wisdom"})
-
-        # Web research: enrich context with real-time information when Perplexity is configured
-        if self.web_researcher.is_configured():
-            research_query = f"Best practices and common patterns for: {project.description[:200]}"
-            self._notify("Investigando referencias web...", "LOG", {"phase": "wisdom"})
-            research_result = await self.web_researcher.search(research_query)
-            if research_result.excerpt and research_result.status_code in (200, 0):
-                project.description += f"\n\n[WEB_RESEARCH]\n{research_result.excerpt[:1500]}"
-                self._notify(
-                    f"Investigación web incorporada ({research_result.source}).",
-                    "LOG",
-                    {"source": research_result.source, "citations": research_result.citations[:3]},
-                )
-
-        observations = await self.wisdom_agent.analyze(
-            project.description, project.skills, project.profile
-        )
-        if observations:
-            for obs in observations:
-                print(f"  [{obs.type.upper()}] {obs.message}")
-                self._notify(obs.message, "WISDOM", {"type": obs.type, "suggestion": obs.suggestion})
-        else:
-            self._notify("Sin observaciones — descripción clara.", "WISDOM", {"type": "ok", "suggestion": ""})
-        print(f"  [OK] {len(observations)} observation(s)")
-
-        # Pause once for all ambiguities — batched into a single question to avoid stalling N×15min
-        needs_answer = [o for o in observations if o.type in ("ambiguity", "missing_requirement")]
-        if needs_answer:
-            items = "\n".join(
-                f"  {i+1}. {(o.suggestion.strip() or o.message)[:160]}"
-                for i, o in enumerate(needs_answer)
-            )
-            combined = f"SODA tiene {len(needs_answer)} duda(s) sobre tu proyecto:\n{items}\n\nResponde con aclaraciones o escribí 'continuar' para saltar."
-            print(f"  [?] Asking user (batched {len(needs_answer)} items)")
-            answer = await self.user_interaction.ask(combined, self._notify)
-            if answer.strip() and answer.strip().lower() not in ("continuar", "continue", "skip", "saltar"):
-                project.description += f"\n\nAclaraciones del usuario: {answer.strip()}"
-                self._notify(f"Aclaraciones incorporadas: {answer[:120]}", "LOG", {})
-
-    async def _phase_capabilities(self, project: Project) -> None:
-        print("\n[FASE 0] Capabilities — matching skills and profile...")
-        self._notify("Buscando skills y perfil...", "PHASE_START", {"phase": "capabilities"})
-        project.state = ProjectState.CAPABILITIES
-
-        skills = await self.skill_manager.select(project.description)
-        profile = await self.profile_manager.select(project.description, skills)
-
-        project.skills = skills
-        project.profile = profile
-
-        print(f"  [OK] Skills: {skills}")
-        print(f"  [OK] Profile: {profile}")
-        self._notify(
-            f"Perfil: {profile} | Skills: {', '.join(skills) or 'ninguno'}",
-            "CAPABILITIES",
-            {"skills": skills, "profile": profile},
-        )
-
-        # Copilot review: are the chosen capabilities right?
-        cap_sug = await self.copilot_consultant.review_capabilities(skills, profile, project.description)
-        change = await self._copilot_suggest("capabilities", cap_sug)
-        if change:
-            project.description += f"\n\nSUGERENCIA COPILOT (capabilities): {change}"
-
-        self._save_state(project)
-
-    async def _phase_requirements(self, project: Project) -> None:
-        print("\n[FASE 1] Requirements — interviewing with Claude Sonnet...")
-        self._notify("Analizando requerimientos...", "PHASE_START", {"phase": "requirements"})
-        project.state = ProjectState.REQUIREMENTS
-
-        # Enrich description with similar past projects from vector memory
-        history_hint = self.knowledge_orchestrator.enrich_context_with_history(project.description)
-        task_input = project.description
-        if history_hint:
-            task_input = f"{project.description}\n\n{history_hint}"
-            self._notify("Memoria vectorial: proyectos similares encontrados.", "LOG", {})
-
-        MAX_COPILOT_REGEN = self._copilot_phase_regen
-        for regen in range(MAX_COPILOT_REGEN + 1):
-            max_attempts = 3
-            for attempt in range(max_attempts):
-                response = await self._call_for_role("claude", "requirements_interviewer", task_input, project)
-                project.blueprint = self._extract_json(response)
-                if "raw" not in project.blueprint and "nombre_proyecto" in project.blueprint:
-                    break
-                self._notify(
-                    f"Advertencia: blueprint malformado (intento {attempt+1}/{max_attempts}). Reintentando...",
-                    "HEALTH_WARN", {"phase": "requirements", "raw_preview": str(response)[:200]},
-                )
-
-            if "raw" in project.blueprint and "nombre_proyecto" not in project.blueprint:
-                raise ValueError("No se pudo generar un blueprint JSON válido tras 3 intentos.")
-
-            # Copilot review — only on non-final iterations to avoid unbounded recursion
-            if regen < MAX_COPILOT_REGEN:
-                suggestion = await self.copilot_consultant.review_blueprint(project.blueprint, project.description)
-                change = await self._copilot_suggest("requirements", suggestion)
-                if change:
-                    project.description += f"\n\nSUGERENCIA COPILOT APLICADA: {change}"
-                    self._apply_project_type(project)
-                    self._apply_capability_packs(project)
-                    task_input = project.description
-                    self._notify("Regenerando blueprint con la sugerencia de Copilot...", "LOG", {})
-                    continue
-            break
-
-        # Validate and auto-repair blueprint structure
-        bp_val = BlueprintValidator().validate(project.blueprint)
-        if bp_val.auto_fixes:
-            project.blueprint = bp_val.fixed_architecture
-            self._notify(
-                f"Blueprint auto-corregido: {len(bp_val.auto_fixes)} ajuste(s).",
-                "LOG", {"fixes": bp_val.auto_fixes},
-            )
-        for w in bp_val.warnings:
-            self._notify(w, "HEALTH_WARN", {"phase": "requirements_validation"})
-        if not bp_val.is_valid:
-            raise ValueError(f"Blueprint inválido: {'; '.join(bp_val.errors)}")
-
-        nombre = project.blueprint.get("nombre_proyecto", project.id)
-        out = self._workspace(project) / "blueprint.json"
-        out.write_text(json.dumps(project.blueprint, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"  [OK] Blueprint -> {out}")
-        self._notify("Blueprint listo.", "CHECKPOINT", {"number": 1, "project_name": nombre})
-        self._save_state(project)
-
-    async def _phase_architecture(self, project: Project) -> None:
-        print("\n[FASE 2] Architecture — designing with Gemini Pro...")
-        self._notify("Diseñando arquitectura...", "PHASE_START", {"phase": "architecture"})
-
-        project.state = ProjectState.ARCHITECTURE
-        blueprint_str = json.dumps(project.blueprint, ensure_ascii=False)
-        req_block = RequirementsStore(project.workspace).as_constraint_block()
-        if req_block:
-            blueprint_str = req_block + "\n" + blueprint_str
-
-        max_attempts = 3
-        last_response = ""
-        for attempt in range(max_attempts):
-            last_response = await self._call_gemini(
-                "global_architect", blueprint_str, project,
-                response_format="json",
-                max_tokens=16384,
-            )
-            project.architecture = self._extract_json(last_response)
-            if "raw" not in project.architecture and "modulos" in project.architecture:
-                break
-            preview = last_response[:300].replace("\n", " ")
-            print(f"  [ARCH] Intento {attempt+1} fallido. Respuesta: {preview}")
-            self._notify(
-                f"Advertencia: arquitectura malformada (intento {attempt+1}/{max_attempts}). Reintentando...",
-                "HEALTH_WARN",
-                {"phase": "architecture", "attempt": attempt + 1, "raw_preview": last_response[:300]},
-            )
-
-        if "modulos" not in project.architecture:
-            self._notify(
-                "Gemini falló 3 veces generando arquitectura — escalando a Claude...",
-                "HEALTH_WARN",
-                {"phase": "architecture"},
-            )
-            claude_response = await self._call_claude("global_architect", blueprint_str, project)
-            project.architecture = self._extract_json(claude_response)
-            if "modulos" not in project.architecture:
-                raise ValueError("No se pudo generar una arquitectura JSON válida (Gemini×3 + Claude fallback).")
-
-        # Structural validation + auto-repair (paths, deps, contracts, config)
-        arch_val = ArchitectureValidator().validate(project.architecture, project.blueprint)
-        if arch_val.auto_fixes:
-            project.architecture = arch_val.fixed_architecture
-            print(f"  [VALID] {len(arch_val.auto_fixes)} corrección(es) automática(s):")
-            for fix in arch_val.auto_fixes:
-                print(f"    • {fix}")
-            self._notify(
-                f"Arquitectura auto-corregida: {len(arch_val.auto_fixes)} ajuste(s).",
-                "LOG", {"fixes": arch_val.auto_fixes},
-            )
-        for w in arch_val.warnings:
-            self._notify(w, "HEALTH_WARN", {"phase": "architecture_validation"})
-            print(f"  [WARN] {w}")
-        if not arch_val.is_valid:
-            raise ValueError(f"Arquitectura inválida tras correcciones: {'; '.join(arch_val.errors)}")
-
-        # Copilot Consultant Hook — single advisory pass, no regeneration loop
-        suggestion = await self.copilot_consultant.review_architecture(project.architecture, project.blueprint)
-        change = await self._copilot_suggest("architecture", suggestion)
-        if change:
-            # Incorporate feedback inline — no recursive call
-            project.architecture["_copilot_note"] = change
-            self._notify("Sugerencia Copilot incorporada en arquitectura (sin regenerar).", "LOG", {})
-
-        out = self._workspace(project) / "architecture.json"
-        out.write_text(json.dumps(project.architecture, indent=2, ensure_ascii=False), encoding="utf-8")
-        self._build_goal_tree(project)
-        print(f"  [OK] Architecture -> {out}")
-        self._notify("Arquitectura lista.", "CHECKPOINT", {"number": 2})
-
-        # Record architecture pattern for learning
-        try:
-            modulos = project.architecture.get("modulos", [])
-            self.observer.record_architecture(
-                provider="gemini",
-                project_type=str(project.blueprint.get("tipo_proyecto", "")),
-                description_summary=project.description[:300],
-                module_count=len(modulos),
-                stack=project.blueprint.get("stack_sugerido", {}),
-                architecture_snippet=json.dumps({"modulos": [m.get("nombre") for m in modulos]})[:800],
-                project_id=project.project_id,
-            )
-        except Exception:
-            pass
-
-        self._save_state(project)
-
-        # ── Arquitecto v2 (convivencia temporal) ─────────────────────────────
-        # architecture.json (legacy "modulos" format) is generated above and
-        # consumed by Planning/Development. master_contract.json is generated
-        # here in PARALLEL as the new contract format for future migration.
-        #
-        # TODO: Once Planning/Development migrate to consume master_contract.json,
-        # remove the Gemini global_architect call above and make this the primary
-        # architecture phase. The GoalTree should also be built from the blueprint
-        # *before* this call so the Architect receives validated goal IDs.
-        await self._phase_master_contract(project)
-
-    async def _phase_master_contract(self, project: Project) -> None:
-        """Generate master_contract.json using Arquitecto v2 (parallel to legacy arch).
-
-        This is a PARALLEL output that does not affect the existing pipeline.
-        architecture.json (legacy) continues to drive Planning and Development.
-        master_contract.json is the new contract format — future phases will migrate
-        to consume it instead of architecture['modulos'].
-
-        Failures here are non-fatal: logged and skipped to not block the pipeline.
+        Returns dict with keys:
+          strategy  — "annotate" | "regenerate" | "rephase" | "ignore"
+          applied   — True when strategy != "ignore"
+          notes     — human-readable summary for logging
+          changes   — list of concrete changes from the review
         """
-        try:
-            from kernel.intelligence.complexity_classifier import ProjectComplexityClassifier
-            from kernel.intelligence.architect import Architect
-            from kernel.integrity.contract_auditor import ContractAuditor
-            from kernel.orchestration.contract_refinement_loop import ContractRefinementLoop
+        _ignore: Dict = {"strategy": "ignore", "applied": False, "notes": "", "changes": []}
+        if not review or not review.get("has_suggestion"):
+            return _ignore
 
-            self._notify(
-                "Arquitecto v2: clasificando complejidad del proyecto...",
-                "LOG",
-                {"phase": "master_contract"},
-            )
+        changes: list = review.get("changes") or []
+        if not changes:
+            return _ignore
 
-            classifier = ProjectComplexityClassifier()
-            assessment = classifier.classify(project.blueprint)
+        strategy: str = review.get("repair_mode", "annotate")
+        severity: str = review.get("severity", "medium")
+        confidence: float = float(review.get("confidence", 0.5))
+        message: str = review.get("message", "")
 
-            self._notify(
-                f"Arquitecto v2: proyecto clasificado como '{assessment.level.value}' "
-                f"(score {assessment.score}). {assessment.reasoning.splitlines()[0]}",
-                "LOG",
-                {"complexity": assessment.level.value, "score": assessment.score},
-            )
-            print(
-                f"  [ARCH-V2] Complejidad: {assessment.level.value} | "
-                f"Modelo: {assessment.level.value}"
-            )
+        # Low confidence → downgrade to annotate regardless of repair_mode
+        if confidence < 0.3:
+            strategy = "annotate"
 
-            loop = ContractRefinementLoop(
-                architect=Architect(self.claude),
-                auditor=ContractAuditor(goal_tree={}),
-                max_attempts=3,
-            )
+        # rephase only allowed when the caller explicitly opts in
+        if strategy == "rephase" and not allow_rephase:
+            strategy = "regenerate"
 
-            active_skills = [
-                {"name": s} if isinstance(s, str) else s
-                for s in (project.skills or [])
-            ]
-
-            result = await loop.execute(
-                blueprint=project.blueprint,
-                complexity=assessment.level,
-                active_skills=active_skills,
-                active_profile={},
-                goal_tree={},
-            )
-
-            if result.status in ("approved", "approved_with_warnings"):
-                contract_path = self._workspace(project) / "master_contract.json"
-                contract_path.write_text(
-                    result.contract.model_dump_json(indent=2),
-                    encoding="utf-8",
-                )
-                attempt_count = len(result.attempts)
-                self.perf_tracker.record_contract_result(
-                    status=result.status,
-                    attempts=attempt_count,
-                    model=result.contract.model_used,
-                )
-                self._notify(
-                    f"Arquitecto v2: contrato maestro aprobado "
-                    f"(status={result.status}, intentos={attempt_count}).",
-                    "LOG",
-                    {
-                        "phase": "master_contract",
-                        "status": result.status,
-                        "attempts": attempt_count,
-                        "complexity": assessment.level.value,
-                        "path": str(contract_path),
-                    },
-                )
-                print(f"  [ARCH-V2] master_contract.json -> {contract_path}")
-                self._git_commit(
-                    project,
-                    f"feat: master contract approved "
-                    f"(complexity: {assessment.level.value}, attempts: {attempt_count})",
-                )
-                if result.status == "approved_with_warnings":
-                    warning_count = len(result.attempts[-1].audit_report.all_warnings)
-                    self._notify(
-                        f"Arquitecto v2: {warning_count} warning(s) en el contrato maestro.",
-                        "HEALTH_WARN",
-                        {"warnings": [w.description for w in result.attempts[-1].audit_report.all_warnings]},
-                    )
-
-            else:
-                # requires_user_intervention
-                error_count = len(result.final_issues.all_errors) if result.final_issues else 0
-                self.perf_tracker.record_contract_result(
-                    status="requires_user_intervention",
-                    attempts=len(result.attempts),
-                )
-                self._notify(
-                    f"Arquitecto v2: contrato maestro no aprobado tras {len(result.attempts)} intento(s). "
-                    f"{error_count} error(s) sin resolver. Pipeline continúa con architecture.json (legacy).",
-                    "HEALTH_WARN",
-                    {
-                        "phase": "master_contract",
-                        "status": "requires_user_intervention",
-                        "attempts": len(result.attempts),
-                    },
-                )
-                print(f"  [ARCH-V2] ⚠ Contrato maestro no aprobado — pipeline continúa con legacy arch.")
-
-        except Exception as exc:
-            # Non-fatal: log and continue. Legacy architecture.json is still valid.
-            self._notify(
-                f"Arquitecto v2 (non-fatal): {exc}",
-                "LOG",
-                {"phase": "master_contract", "error": str(exc)},
-            )
-            print(f"  [ARCH-V2] Non-fatal error, skipping master contract: {exc}")
-
-    async def _phase_planning(self, project: Project) -> ExecutionPlan:
-        print("\n[FASE 3] Planning — building module DAG...")
-        self._notify("Construyendo plan de ejecución...", "PHASE_START", {"phase": "planning"})
-        project.state = ProjectState.PLANNING
-        modulos = project.architecture.get("modulos", [])
-        if not modulos:
-            raise ValueError("Architecture has no modules defined.")
-        graph = DependencyGraph(modulos)
-        plan = graph.build_execution_plan()
-        if plan.broken_edges:
-            self._notify(
-                f"Dependencias circulares detectadas y resueltas: {plan.broken_edges}",
-                "HEALTH_WARN",
-                {"broken_edges": [list(e) for e in plan.broken_edges]},
-            )
-        plan_data = {"levels": plan.levels, "order": plan.order, "parallelizable": plan.parallelizable}
-        out = self._workspace(project) / "execution_plan.json"
-        out.write_text(json.dumps(plan_data, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(graph.summary())
-        print(f"  [OK] Plan -> {out}")
-        total_files = sum(
-            len(m.get("archivos_principales", []))
-            for m in modulos
-            if m["nombre"] in {n for level in plan.levels for n in level}
+        notes = (
+            f"[Copilot/{phase}] severity={severity} confidence={confidence:.2f} "
+            f"→ {strategy}: {message}"
         )
-        # Copilot review: execution order
-        plan_sug = await self.copilot_consultant.review_plan(plan.levels, project.architecture)
-        await self._copilot_suggest("planning", plan_sug)  # advisory only — no regeneration needed
+        self._notify(
+            notes,
+            "COPILOT_SUGGESTION",
+            {"phase": phase, "strategy": strategy, "severity": severity, "changes": changes},
+        )
+        return {
+            "strategy": strategy,
+            "applied": strategy != "ignore",
+            "notes": notes,
+            "changes": changes,
+        }
 
-        self._notify("Plan listo.", "CHECKPOINT", {
-            "number": 3,
-            "levels": plan.levels,
-            "total_modules": sum(len(l) for l in plan.levels),
-            "total_files": total_files,
-        })
-        self._save_state(project)
-        return plan
-
-    async def _phase_design(self, project: Project) -> None:
-        """FASE 3.5 — Generate design_spec.json for frontend projects (between PLAN and DEV)."""
-        self._notify("Generando especificación de diseño UI...", "PHASE_START", {"phase": "design"})
-        workspace = self._workspace(project)
-        try:
-            spec = self.ui_design_agent.generate_spec(project.blueprint, project.architecture)
-            self.ui_design_agent.save_spec(spec, workspace)
-            self._notify(
-                f"Diseño generado: {spec.design_system}, {spec.layout_pattern}, dark={spec.dark_mode}",
-                "PHASE_DONE",
-                {"phase": "design", "design_system": spec.design_system, "layout": spec.layout_pattern},
-            )
-            print(f"  [OK] Design spec → {workspace / 'design_spec.json'}")
-        except Exception as exc:
-            self._notify(f"UIDesignAgent falló (no crítico): {exc}", "LOG", {})
-            print(f"  [WARN] UIDesignAgent failed: {exc}")
-
-    async def _phase_development(self, project: Project, plan: ExecutionPlan, interactive_mode: bool = False) -> None:
-        print("\n[FASE 4] Development — generating code...")
-        self._notify("Generando código...", "PHASE_START", {"phase": "development"})
-
-        project.state = ProjectState.DEVELOPMENT
-        intensity_profile = self.intensity.choose_profile(project.description)
-        modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
-        source_dir = self._workspace(project) / "source"
-        source_dir.mkdir(exist_ok=True)
-        from kernel.execution.html_template_injector import inject_for_project as _inject_html
-        _inject_html(source_dir, project.blueprint, project.architecture)
-        design_injector = DesignContextInjector(self._workspace(project))
-
-        # Build skills and profile context once for the whole DEV phase
-        skills_context: Optional[str] = None
-        profile_context: Optional[str] = None
-        try:
-            if project.skills:
-                skills_context = self.skill_manager.load_context(project.skills, role="code_generator") or None
-            if project.profile:
-                profile_context = self.profile_manager.load_context(project.profile) or None
-        except Exception as _e:
-            self._notify(f"Skills/profile context no disponible: {_e}", "LOG", {})
-
-        # Tracks generated code per module so downstream modules get real context
-        module_generated_code: dict[str, dict[str, str]] = {}
-
-        nombres_en_nivel = [
-            [n for n in level if n in modulos_by_name]
-            for level in plan.levels
-        ]
-        for i, level in enumerate(plan.levels):
-            nombres = nombres_en_nivel[i]
-            tag = f"[parallel x{len(nombres)}]" if len(nombres) > 1 else "[sequential]"
-            print(f"\n  Level {i} {tag}: {' | '.join(nombres)}")
-
-            if interactive_mode:
-                answer = await self.user_interaction.ask(
-                    f"Listo para generar Nivel {i} ({', '.join(nombres)}). ¿Continuar? (sí/no/saltar)",
-                    self._notify
-                )
-                if answer.strip().lower() in ("no", "n"):
-                    raise RuntimeError("Ejecución pausada por el usuario en modo interactivo.")
-                elif answer.strip().lower() in ("saltar", "skip"):
-                    self._notify(f"Saltando Nivel {i} a petición del usuario.", "LOG", {})
-                    continue
-
-            for nombre in nombres:
-                self._notify(f"Generando módulo: {nombre}", "MODULE_START", {"module": nombre, "level": i})
-            tasks = [
-                self._dev_qwen_copilot_loop(
-                    modulos_by_name[nombre], project, source_dir,
-                    dependency_context=module_generated_code,
-                    skills_context=skills_context,
-                    profile_context=profile_context,
-                    design_injector=design_injector,
-                )
-                for nombre in nombres
-            ]
-            results_per_module = await asyncio.gather(*tasks)
-            for nombre, generated_files in zip(nombres, results_per_module):
-                # Accumulate generated code so the next level can use it as context
-                module_generated_code[nombre] = {gf.filepath: gf.content for gf in generated_files}
-                if intensity_profile.review_required or intensity_profile.arbiter_required:
-                    await self._intensity_copilot_loop(
-                        nombre, modulos_by_name[nombre], generated_files,
-                        source_dir, project, intensity_profile,
-                    )
-                self._notify(f"Módulo listo: {nombre}", "MODULE_DONE", {"module": nombre, "level": i})
-
-            # Lightweight syntax verification after each level (non-blocking)
-            await self._verify_level_syntax(source_dir, nombres, project)
-
-        print(f"\n  [OK] Code generated -> {source_dir}")
-        self._save_goal_tree(project)
-        self._save_state(project)
-
-    async def _phase_verify(self, project: Project) -> None:
-        """Architectural conformance check: Haiku verifies every generated module
-        against its contract and fixes non-conformances in place. Non-fatal."""
-        try:
-            source_dir = self._workspace(project) / "source"
-            self._notify(
-                "Verificando conformidad arquitectónica con Haiku...",
-                "PHASE_START",
-                {"phase": "conformance_verify"},
-            )
-            await self.conformance_verifier.verify_project(project.architecture, source_dir)
-            self._notify(
-                "Verificación de conformidad completa.",
-                "PHASE_DONE",
-                {"phase": "conformance_verify"},
-            )
-        except Exception as exc:
-            print(f"  [VERIFY] Error (no crítico): {exc}")
-            self._notify(f"ConformanceVerifier falló (no crítico): {exc}", "LOG", {})
+    # --- Phases ---
 
     async def _dev_qwen_copilot_loop(
         self, module: dict, project: "Project", source_dir: Path,
@@ -1242,6 +874,8 @@ class SodaOrchestrator:
         skills_context: Optional[str] = None,
         profile_context: Optional[str] = None,
         design_injector: Optional["DesignContextInjector"] = None,
+        runtime_errors: str = "",
+        master_contract: Optional[dict] = None,
     ) -> list:
         """Qwen↔Copilot loop for DEV phase: Qwen generates, Copilot reviews code,
         Qwen regenerates with feedback. Max rounds set by copilot_temperature. Then Claude supervisor verifies."""
@@ -1263,17 +897,32 @@ class SodaOrchestrator:
                 skills_context=skills_context,
                 profile_context=profile_context,
                 design_context=design_context,
+                source_dir=source_dir,
+                runtime_errors=runtime_errors if round_idx == 0 else "",
+                master_contract=master_contract,
             )
-            # Write files after each round
+            # PASO 2: Write files — path always comes from the task (module.archivos_principales),
+            # never from LLM output. gf.filepath is set by generate_file() from the task JSON.
+            _expected_paths = set(module.get("archivos_principales", []))
             for gf in generated_files:
-                out = source_dir / gf.filepath
+                # Guard: if somehow filepath drifted from expected, force the expected path
+                save_path = gf.filepath
+                if _expected_paths and save_path not in _expected_paths:
+                    _corrected = next(iter(_expected_paths), save_path)
+                    self._notify(
+                        f"[E4.7 guard] filepath corregido: '{save_path}' → '{_corrected}'",
+                        "LOG",
+                        {"expected": _corrected, "got": save_path},
+                    )
+                    save_path = _corrected
+                out = source_dir / save_path
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text(gf.content, encoding="utf-8", errors="replace")
-                self._mark_goal_implemented(project, gf.goal_id, gf.filepath)
+                self._mark_goal_implemented(project, gf.goal_id, save_path)
                 self._notify(
-                    f"Archivo listo: {gf.filepath}",
+                    f"Archivo listo: {save_path}",
                     "FILE_GENERATED",
-                    {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
+                    {"filename": save_path, "code": gf.content, "validated": gf.validated},
                 )
 
             # Copilot code review — fires every round
@@ -1281,7 +930,9 @@ class SodaOrchestrator:
             code_sug = await self.copilot_consultant.review_module_code(
                 module["nombre"], files_content, project.blueprint
             )
-            if not code_sug or not code_sug.get("has_suggestion"):
+            phase_tag = f"dev/{module['nombre']}/rnd{round_idx + 1}"
+            handled = self._handle_copilot_review(code_sug, phase_tag)
+            if not handled["applied"]:
                 # No issues — loop is done
                 self._notify(
                     f"[Copilot/dev] Módulo {module['nombre']} OK en ronda {round_idx + 1}",
@@ -1290,28 +941,107 @@ class SodaOrchestrator:
                 )
                 break
 
-            # Todos los issues de Copilot → un bloque único para Qwen
-            changes = code_sug.get("changes") or []
-            if changes:
-                copilot_feedback = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(changes))
-            else:
-                copilot_feedback = code_sug.get("message", "")
-            self._notify(
-                f"[Copilot/dev] Ronda {round_idx + 1}: {code_sug.get('message', '')} ({len(changes)} cambio(s))",
-                "COPILOT_SUGGESTION",
-                {"module": module["nombre"], "round": round_idx + 1, "changes": changes},
+            # ── Copilot direct-fix pass ─────────────────────────────────────
+            # Copilot attempts to correct the files directly before asking Qwen to regenerate.
+            fixed_files = await self.copilot_consultant.fix_module_code(
+                module["nombre"], files_content, code_sug, project.blueprint
             )
+            if fixed_files:
+                # Merge fixes into current file map and write to disk
+                files_content.update(fixed_files)
+                for filepath, content in fixed_files.items():
+                    out = source_dir / filepath
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_text(content, encoding="utf-8", errors="replace")
+                self._notify(
+                    f"[Copilot/fix] {module['nombre']}: {len(fixed_files)} archivo(s) corregidos directamente",
+                    "COPILOT_APPLIED",
+                    {"module": module["nombre"], "fixed_files": list(fixed_files.keys()),
+                     "changes": handled["changes"]},
+                )
+                # Verify the direct fix resolved the issues
+                verify_sug = await self.copilot_consultant.verify_module_code(
+                    module["nombre"], files_content,
+                    "\n".join(handled["changes"]), project.blueprint
+                )
+                verify_handled = self._handle_copilot_review(
+                    verify_sug, f"dev/{module['nombre']}/verify-fix"
+                )
+                if not verify_handled["applied"]:
+                    # Fix is clean — no need for Qwen to regenerate
+                    self._notify(
+                        f"[Copilot/fix] {module['nombre']}: verificado OK tras corrección directa",
+                        "COPILOT_APPLIED",
+                        {"module": module["nombre"], "phase": "verify-fix"},
+                    )
+                    break
+                # Fix still has issues — feed remaining problems to Qwen
+                copilot_feedback = "\n".join(
+                    f"  {i+1}. {c}" for i, c in enumerate(verify_handled["changes"])
+                )
+            else:
+                # Copilot could not produce a direct fix — use feedback for Qwen regeneration
+                copilot_feedback = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(handled["changes"]))
 
             if round_idx == MAX_ROUNDS - 1:
-                # Last round reached — Claude supervisor verifies final state
+                # Last round reached — Claude supervisor does final verification + fix
                 verify_sug = await self.copilot_consultant.verify_module_code(
                     module["nombre"], files_content, copilot_feedback, project.blueprint
                 )
-                if verify_sug and verify_sug.get("has_suggestion"):
+                sup_handled = self._handle_copilot_review(
+                    verify_sug, f"dev/{module['nombre']}/supervisor"
+                )
+                if sup_handled["applied"]:
+                    # Supervisor found remaining issues — Copilot direct fix as last resort
+                    sup_fixed = await self.copilot_consultant.fix_module_code(
+                        module["nombre"], files_content, verify_sug, project.blueprint
+                    )
+                    if sup_fixed:
+                        files_content.update(sup_fixed)
+                        for filepath, content in sup_fixed.items():
+                            out = source_dir / filepath
+                            out.parent.mkdir(parents=True, exist_ok=True)
+                            out.write_text(content, encoding="utf-8", errors="replace")
+                        self._notify(
+                            f"[Copilot/supervisor] {module['nombre']}: {len(sup_fixed)} archivo(s) corregidos",
+                            "COPILOT_APPLIED",
+                            {"module": module["nombre"], "phase": "supervisor", "fixed_files": list(sup_fixed.keys())},
+                        )
+                    else:
+                        # Fall back to Qwen regeneration with supervisor feedback
+                        supervisor_feedback = "\n".join(
+                            f"  {i+1}. {c}" for i, c in enumerate(sup_handled["changes"])
+                        )
+                        self._notify(
+                            f"[Copilot/supervisor] {module['nombre']}: regenerando con Qwen ({len(sup_handled['changes'])} cambio(s))",
+                            "COPILOT_APPLIED",
+                            {"module": module["nombre"], "phase": "supervisor", "changes": sup_handled["changes"]},
+                        )
+                        generated_files = await self.code_gen.generate_module(
+                            module, project.blueprint, project.architecture,
+                            copilot_feedback=supervisor_feedback,
+                            user_requirements=user_requirements,
+                            dependency_context=dependency_context,
+                            skills_context=skills_context,
+                            profile_context=profile_context,
+                            design_context=design_context,
+                            source_dir=source_dir,
+                        )
+                        for gf in generated_files:
+                            out = source_dir / gf.filepath
+                            out.parent.mkdir(parents=True, exist_ok=True)
+                            out.write_text(gf.content, encoding="utf-8", errors="replace")
+                            self._mark_goal_implemented(project, gf.goal_id, gf.filepath)
+                            self._notify(
+                                f"Archivo corregido (supervisor): {gf.filepath}",
+                                "FILE_GENERATED",
+                                {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
+                            )
+                else:
                     self._notify(
-                        f"[Copilot/supervisor] Pendiente en {module['nombre']}: {verify_sug.get('message', '')}",
-                        "COPILOT_SUGGESTION",
-                        {"module": module["nombre"], "phase": "supervisor", "proposed_change": verify_sug.get("proposed_change", "")},
+                        f"[Copilot/supervisor] {module['nombre']}: verificado sin issues pendientes.",
+                        "COPILOT_APPLIED",
+                        {"module": module["nombre"], "phase": "supervisor"},
                     )
 
         return generated_files
@@ -1510,6 +1240,7 @@ class SodaOrchestrator:
 
     async def resume(self, project_id: str, interactive_mode: bool = False) -> Project:
         """Resumes a project from its last saved state."""
+        self.perf_tracker.reset()
         workspace = self.projects_dir / project_id
         if not workspace.exists():
             raise FileNotFoundError(f"Proyecto no encontrado: {project_id}")
@@ -1576,36 +1307,21 @@ class SodaOrchestrator:
                 self._git_commit(project, "Fase 4: Desarrollo completado y validado")
                 
             if project.state.value not in ("done", "failed"):
-                validation_result = await self._phase_validation(project)
-
-                # Copilot review: suggest fix if build has errors
-                val_sug = await self.copilot_consultant.review_validation(validation_result, project.blueprint)
-                await self._copilot_suggest("validation", val_sug)
-
-                should_regen, modules_to_regen = self._should_regenerate_after_validation(validation_result, project)
-                if should_regen:
-                    self._notify(
-                        f"Se detectaron errores concentrados en {len(modules_to_regen)} módulo(s). Regenerando y revalidando.",
-                        "HEALTH_WARN",
-                        {"phase": "validation", "modules": modules_to_regen},
-                    )
-                    await self._phase_targeted_regeneration(
-                        project,
-                        modules_to_regen,
-                        validation_result.get("errors_final", ""),
-                    )
-                    validation_result = await self._phase_validation(project, skip_permission=True)
-                    self._git_commit(project, "Fase 4.5: Regeneración post-validación")
+                validation_result = await self._validate_and_maybe_regen(project)
 
                 # Docker Sandbox y Visual Inspector Hooks
-                self._notify("Ejecutando pruebas en Docker Sandbox...", "LOG", {})
+                self._notify("Ejecutando pruebas en Docker Sandbox...", "LOG", {"phase": "docker_sandbox"})
                 docker_test_results = self.docker_sandbox.run_tests(
-                    str(project.workspace), 
-                    self._get_install_command(project), 
+                    str(project.workspace),
+                    self._get_install_command(project),
                     self._get_run_command(project)
                 )
                 if not docker_test_results["success"]:
-                    self._notify("Pruebas TDD en Docker fallaron.", "HEALTH_WARN", docker_test_results)
+                    self._notify(
+                        "Pruebas TDD en Docker fallaron (advisory — no bloquea DONE).",
+                        "HEALTH_WARN",
+                        {"phase": "docker_sandbox", "advisory": True, **docker_test_results},
+                    )
                 
                 # Visual Inspector hook
                 await self._phase_visual_inspection(project)
@@ -1613,9 +1329,25 @@ class SodaOrchestrator:
                 await self._phase_docs(project)
                 self._git_commit(project, "Fase 5: Documentación generada")
 
-                project.state = ProjectState.DONE
+                _boot_report_resume: Optional[Dict] = None
+                _boot_report_path_resume = self._workspace(project) / "boot_report.json"
+                if _boot_report_path_resume.exists():
+                    try:
+                        _boot_report_resume = json.loads(_boot_report_path_resume.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+
+                if self._can_reach_done(validation_result, _boot_report_resume):
+                    project.state = ProjectState.DONE
+                    self.lineage.record_complete(project.id, "done")
+                else:
+                    project.state = ProjectState.FAILED
+                    self._notify(
+                        "Pipeline detenido: errores críticos en el código generado.",
+                        "PIPELINE_ERROR",
+                        {"failed_modules": validation_result.get("failed_modules", [])},
+                    )
                 self._save_state(project)
-                self.lineage.record_complete(project.id, "done")
                 await self._phase_evolution(project)
 
             run_command = self._get_run_command(project)
@@ -1628,7 +1360,13 @@ class SodaOrchestrator:
                     "HEALTH_WARN",
                     {"phase": "runtime", "runtime_smoke": runtime_smoke},
                 )
-            self._notify("Pipeline reanudado y completado.", "DONE", {
+            _resume_event = "DONE" if project.state == ProjectState.DONE else "FAILED"
+            _resume_msg = (
+                "Pipeline reanudado y completado."
+                if project.state == ProjectState.DONE
+                else "Pipeline reanudado con errores."
+            )
+            self._notify(_resume_msg, _resume_event, {
                 "project_id": project.id,
                 "run_command": run_command,
                 "install_command": install_command,
@@ -1640,7 +1378,7 @@ class SodaOrchestrator:
                 "runtime_health": runtime_health,
                 "runtime_smoke": runtime_smoke,
             })
-            
+
             try:
                 await self._phase_feedback_loop(project)
             except Exception as e:
@@ -1677,28 +1415,20 @@ class SodaOrchestrator:
         self._git_commit(project, f"Fase 1: Brief de {label} generado")
         print(f"\n[CHECKPOINT 1] Brief ready.")
 
-        # Phase 2: generate main output document via Claude
-        self._notify(f"Generando {output_type} con Claude…", "PHASE_START", {"phase": "output_generation"})
+        # Phase 2: generate main output document
+        self._notify(f"Generando {output_type}…", "PHASE_START", {"phase": "output_generation"})
         workspace = self._workspace(project)
         output_dir = workspace / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        skills_ctx = None
-        if project.skills:
-            from kernel.capabilities.skill_matcher import SkillMatcher
-            skills_ctx = SkillMatcher.load_skill_context(project.skills, role="code_generator")
-
-        payload = self.builder.build_payload(
-            provider="claude",
-            role=project.project_type,
-            task_content=(
+        result = await self._call_for_role(
+            "claude",
+            project.project_type,
+            (
                 f"Genera el {output_type} completo en Markdown para el siguiente proyecto de {label}.\n\n"
                 f"Blueprint:\n{project.blueprint}"
             ),
-            skills_context=skills_ctx,
-        )
-        result = await self._call_claude(
-            payload["system"], payload["user"], project=project, role=project.project_type
+            project,
         )
         report_path = output_dir / f"{output_type}.md"
         report_path.write_text(result, encoding="utf-8")
@@ -1709,8 +1439,6 @@ class SodaOrchestrator:
         )
 
         # Phase 3: generate output bundle (PDF / Excel if available)
-        if project.blueprint and project.architecture is None:
-            project.architecture = {}
         try:
             self.output_generator.generate_all(workspace, project.blueprint or {}, project.architecture or {})
         except Exception as e:
@@ -1736,11 +1464,14 @@ class SodaOrchestrator:
         print(f"\n[OK] Non-software pipeline complete. Workspace: {project.workspace}")
 
     async def run(self, description: str, project_name: Optional[str] = None, interactive_mode: bool = False) -> Project:
+        self.perf_tracker.reset()
         project = self._new_project(description, project_name)
         print(f"\n{'='*55}")
         print(f"SODA — Project: {project.id}")
         print(f"Description: {description[:80]}")
         print(f"{'='*55}")
+        self._active_project = project
+        self._current_phase = "capabilities"
         self.lineage.record_start(project.id, project.description)
         self._notify(
             f"Proyecto {project.id} iniciado. Temperatura Copilot: {self._copilot_temperature} "
@@ -1753,9 +1484,11 @@ class SodaOrchestrator:
         self._apply_capability_packs(project)
 
         try:
+            self._current_phase = "capabilities"
             await self._phase_capabilities(project)
             self.perf_tracker.record_gemini_phase("capabilities")
             self.lineage.record_capabilities(project.id, project.skills, project.profile)
+            self._current_phase = "wisdom"
             await self._phase_wisdom(project)
             self.perf_tracker.record_gemini_phase("wisdom")
             self._apply_project_type(project)
@@ -1766,22 +1499,28 @@ class SodaOrchestrator:
                 await self._run_non_software_pipeline(project)
                 return project
 
+            self._current_phase = "requirements"
             await self._phase_requirements(project)
             self._git_commit(project, "Fase 1: Blueprint generado")
             print(f"\n[CHECKPOINT 1] Blueprint ready.")
 
+            self._current_phase = "architecture"
             await self._phase_architecture(project)
             self.perf_tracker.record_gemini_phase("architecture")
             self._git_commit(project, "Fase 2: Arquitectura generada")
             print(f"\n[CHECKPOINT 2] Architecture ready.")
 
+            self._current_phase = "planning"
             plan = await self._phase_planning(project)
             print("\n[CHECKPOINT 3] Plan ready. Starting development...")
 
+            self._current_phase = "design"
             await self._phase_design(project)
+            self._current_phase = "development"
             await self._phase_development(project, plan, interactive_mode)
 
             # FASE 4.V: Verificación de conformidad arquitectónica (Haiku)
+            self._current_phase = "verify"
             await self._phase_verify(project)
             self._git_commit(project, "feat: conformance verify — Haiku corrigió no-conformidades")
 
@@ -1798,40 +1537,32 @@ class SodaOrchestrator:
             # FASE 4.2: Revisión de seguridad
             await self._phase_security_review(project)
 
-            # FASE 4.3: Generación de tests automáticos
+            # FASE 4.3: Generación de tests automáticos (contract-based + E2E)
             await self._phase_test_generation(project)
 
-            # FASE 4.4: Validación de contrato API frontend↔backend
+            # FASE 4.4: Ejecución de tests + triage de fallos
+            await self._phase_run_and_triage_tests(project)
+
+            # FASE 4.5: Validación de contrato API frontend↔backend
             await self._phase_api_contract(project)
 
             await self._phase_audit(project)
 
-            validation_result = await self._phase_validation(project)
-
-            should_regen, modules_to_regen = self._should_regenerate_after_validation(validation_result, project)
-            if should_regen:
-                self._notify(
-                    f"Se detectaron errores concentrados en {len(modules_to_regen)} módulo(s). Regenerando y revalidando.",
-                    "HEALTH_WARN",
-                    {"phase": "validation", "modules": modules_to_regen},
-                )
-                await self._phase_targeted_regeneration(
-                    project,
-                    modules_to_regen,
-                    validation_result.get("errors_final", ""),
-                )
-                validation_result = await self._phase_validation(project, skip_permission=True)
-                self._git_commit(project, "Fase 4.5: Regeneración post-validación")
+            validation_result = await self._validate_and_maybe_regen(project)
 
             # Docker Sandbox y Visual Inspector Hooks
-            self._notify("Ejecutando pruebas en Docker Sandbox...", "LOG", {})
+            self._notify("Ejecutando pruebas en Docker Sandbox...", "LOG", {"phase": "docker_sandbox"})
             docker_test_results = self.docker_sandbox.run_tests(
                 str(project.workspace),
                 self._get_install_command(project),
                 self._get_run_command(project)
             )
             if not docker_test_results["success"]:
-                self._notify("Pruebas TDD en Docker fallaron.", "HEALTH_WARN", docker_test_results)
+                self._notify(
+                    "Pruebas TDD en Docker fallaron (advisory — no bloquea DONE).",
+                    "HEALTH_WARN",
+                    {"phase": "docker_sandbox", "advisory": True, **docker_test_results},
+                )
 
             # FASE 5.1: Boot Agent — instala, arranca y auto-repara
             await self._phase_boot_agent(project)
@@ -1842,10 +1573,27 @@ class SodaOrchestrator:
             await self._phase_docs(project)
             self._git_commit(project, "Fase 5: Documentación generada")
 
-            project.state = ProjectState.DONE
+            # Read boot_report produced by _phase_boot_agent for the R6 DONE criterion
+            _boot_report: Optional[Dict] = None
+            _boot_report_path = self._workspace(project) / "boot_report.json"
+            if _boot_report_path.exists():
+                try:
+                    _boot_report = json.loads(_boot_report_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+            if self._can_reach_done(validation_result, _boot_report):
+                project.state = ProjectState.DONE
+                self.lineage.record_complete(project.id, "done")
+            else:
+                project.state = ProjectState.FAILED
+                self._notify(
+                    "Pipeline detenido: errores críticos en el código generado.",
+                    "PIPELINE_ERROR",
+                    {"failed_modules": validation_result.get("failed_modules", [])},
+                )
             self._save_state(project)
-            self.lineage.record_complete(project.id, "done")
-            
+
             # Guardar en memoria vectorial para enriquecer proyectos futuros
             if project.blueprint and project.architecture:
                 self.knowledge_orchestrator.store_completed_project(
@@ -1865,9 +1613,15 @@ class SodaOrchestrator:
             # Reporte final de efectividad del equipo IA
             self.perf_tracker.print_report()
 
+            _run_event = "DONE" if project.state == ProjectState.DONE else "FAILED"
+            _run_msg = (
+                "Pipeline completo."
+                if project.state == ProjectState.DONE
+                else "Pipeline detenido con errores."
+            )
             self._notify(
-                "Pipeline completo.",
-                "DONE",
+                _run_msg,
+                _run_event,
                 {
                     "project_id": project.id,
                     "run_command": run_command,
@@ -1885,7 +1639,7 @@ class SodaOrchestrator:
             print(f"\n[OK] Pipeline complete. Workspace: {project.workspace}")
 
             try:
-                await self._phase_feedback_loop(project)
+                await self._phase_feedback_loop(project, setup_result=setup_result)
             except Exception as e:
                 print(f"  [!] Feedback loop error (non-critical): {e}")
 
@@ -1994,19 +1748,22 @@ class SodaOrchestrator:
             await self._phase_audit(project)
 
             # ── Fase VALIDATION ──────────────────────────────────────────
-            validation_result = await self._phase_validation(project)
-            should_regen, modules_to_regen = self._should_regenerate_after_validation(validation_result, project)
-            if should_regen:
-                await self._phase_targeted_regeneration(project, modules_to_regen, validation_result.get("errors_final", ""))
-                validation_result = await self._phase_validation(project, skip_permission=True)
-                self._git_commit(project, "Fase 4.5: Regeneración post-validación")
+            validation_result = await self._validate_and_maybe_regen(project)
 
             await self._phase_docs(project)
             self._git_commit(project, "Fase 5: Documentación generada")
 
-            project.state = ProjectState.DONE
+            if self._can_reach_done(validation_result):
+                project.state = ProjectState.DONE
+                self.lineage.record_complete(project.id, "done")
+            else:
+                project.state = ProjectState.FAILED
+                self._notify(
+                    "Pipeline detenido: errores críticos en el código generado.",
+                    "PIPELINE_ERROR",
+                    {"failed_modules": validation_result.get("failed_modules", [])},
+                )
             self._save_state(project)
-            self.lineage.record_complete(project.id, "done")
 
             if project.blueprint and project.architecture:
                 self.knowledge_orchestrator.store_completed_project(
@@ -2021,9 +1778,15 @@ class SodaOrchestrator:
             setup_result    = await self._phase_setup_and_verify(project)
             runtime_smoke   = setup_result.get("smoke", self._get_runtime_smoke(project, run_command, install_command))
 
+            _ifc_event = "DONE" if project.state == ProjectState.DONE else "FAILED"
+            _ifc_msg = (
+                "Pipeline desde código existente completo."
+                if project.state == ProjectState.DONE
+                else "Pipeline desde código existente detenido con errores."
+            )
             self._notify(
-                "Pipeline desde código existente completo.",
-                "DONE",
+                _ifc_msg,
+                _ifc_event,
                 {
                     "project_id":     project.id,
                     "run_command":    run_command,
@@ -2045,38 +1808,47 @@ class SodaOrchestrator:
         return project
 
     def _get_run_command(self, project: Project) -> str:
-        """Extract run command from blueprint, handling both parsed and raw formats."""
+        """Derive run command: blueprint field (legacy) → filesystem detection."""
         bp = project.blueprint or {}
         cmd = bp.get("comando_ejecucion", "")
         if cmd:
             return cmd
-        raw = bp.get("raw", "")
-        if raw:
-            try:
-                import re
-                m = re.search(r'"comando_ejecucion"\s*:\s*"([^"]+)"', raw)
-                if m:
-                    return m.group(1)
-            except Exception:
-                pass
-        return ""
+        # Filesystem-first detection via BootAgent helper
+        return self._detect_run_command_from_fs(project)
 
     def _get_install_command(self, project: Project) -> str:
-        """Extract install command from blueprint."""
+        """Derive install command: blueprint field (legacy) → filesystem detection."""
         bp = project.blueprint or {}
         cmd = bp.get("comando_instalacion", "")
         if cmd:
             return cmd
-        raw = bp.get("raw", "")
-        if raw:
-            try:
-                import re
-                m = re.search(r'"comando_instalacion"\s*:\s*"([^"]+)"', raw)
-                if m:
-                    return m.group(1)
-            except Exception:
-                pass
-        return ""
+        return self._detect_install_command_from_fs(project)
+
+    def _detect_run_command_from_fs(self, project: Project) -> str:
+        """Detect the run command by inspecting files in the project workspace."""
+        from kernel.execution.boot_agent import _detect_commands
+        source_dir = self._workspace(project) / "source"
+        if not source_dir.exists():
+            source_dir = self._workspace(project)
+        arch = project.architecture or {}
+        try:
+            _, run_parts, _ = _detect_commands(source_dir, arch)
+            return " ".join(run_parts) if run_parts else ""
+        except Exception:
+            return ""
+
+    def _detect_install_command_from_fs(self, project: Project) -> str:
+        """Detect the install command by inspecting files in the project workspace."""
+        from kernel.execution.boot_agent import _detect_commands
+        source_dir = self._workspace(project) / "source"
+        if not source_dir.exists():
+            source_dir = self._workspace(project)
+        arch = project.architecture or {}
+        try:
+            install_parts, _, _ = _detect_commands(source_dir, arch)
+            return " ".join(install_parts) if install_parts else ""
+        except Exception:
+            return ""
 
     def _get_auto_confirm(self) -> bool:
         try:
@@ -2198,254 +1970,6 @@ class SodaOrchestrator:
             )
         return await self._call_with_fallback(primary, role, task, project)
 
-    async def _phase_audit(self, project: Project) -> None:
-        """Language-aware audit: check generated code against stack rules, fix with AI if needed."""
-        print("\n[FASE 4.2] Audit — language rules check...")
-        self._notify("Auditando código generado...", "PHASE_START", {"phase": "audit"})
-
-        source_dir = self._workspace(project) / "source"
-        if not source_dir.exists():
-            self._notify("Sin directorio source — auditoría omitida.", "LOG", {})
-            return
-
-        auditor = LanguageAuditor(
-            claude_driver=self.claude,
-            gemini_driver=self.gemini,
-            context_builder=self.builder,
-            notify_fn=self._notify,
-        )
-
-        audit_result = auditor.audit_project(source_dir, project.architecture, project.blueprint)
-
-        if not audit_result.violations:
-            self._notify("Auditoría: sin problemas.", "CHECKPOINT", {"phase": "audit", "score": 100})
-            return
-
-        # Apply AI fixes for errors and warnings
-        if audit_result.errors:
-            fixes = await auditor.request_ai_fix(
-                audit_result, source_dir, project.description, project.architecture
-            )
-            applied = 0
-            for fix in fixes:
-                filepath = (fix.get("file") or "").strip().lstrip("/\\")
-                code = fix.get("code", "")
-                reason = fix.get("reason", "")
-                if not filepath or not code:
-                    continue
-                target = source_dir / filepath
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(code, encoding="utf-8")
-                self._notify(
-                    f"[Audit] Corregido: {filepath}" + (f" — {reason}" if reason else ""),
-                    "FILE_GENERATED",
-                    {"filename": filepath, "code": code, "validated": False, "audit_fix": True},
-                )
-                applied += 1
-
-            if applied:
-                self._notify(
-                    f"Auditoría: {applied} archivo(s) corregido(s) por IA.",
-                    "CHECKPOINT",
-                    {"phase": "audit", "applied": applied, "score": audit_result.score},
-                )
-            else:
-                self._notify(
-                    f"Auditoría: {len(audit_result.errors)} error(es) sin corrección automática — "
-                    "se intentará en la fase de validación.",
-                    "HEALTH_WARN",
-                    {"phase": "audit", "violations": [v.to_dict() for v in audit_result.errors]},
-                )
-
-        # Save audit report
-        try:
-            report_path = self._workspace(project) / "audit_report.json"
-            report_path.write_text(
-                __import__("json").dumps(audit_result.to_dict(), indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
-
-    async def _phase_validation(self, project: Project, skip_permission: bool = False) -> dict:
-        from kernel.project_validator import ProjectValidator
-        from kernel.utils.env_checker import check_stack_tools
-        print("\n[FASE 4.5] Validation — env check + build + auto-fix...")
-        self._notify("Verificando entorno y corrigiendo código...", "PHASE_START", {"phase": "validation"})
-
-        workspace = self._workspace(project)
-        source_dir = workspace / "source"
-        if not source_dir.exists():
-            self._notify("Sin directorio source — omitiendo validación.", "LOG", {})
-            return {"skipped": True, "fixed": False, "rounds": 0}
-
-        install_cmd = self._get_install_command(project)
-        run_cmd = self._get_run_command(project)
-
-        # 1. Detect required runtime tools
-        tools = await check_stack_tools(run_cmd, install_cmd)
-        missing = [t for t in tools if not t.available]
-        for t in tools:
-            icon = "✓" if t.available else "✗"
-            self._notify(
-                f"{icon} {t.required_for}{': ' + t.version if t.available else ' — no encontrado'}",
-                "ENV_CHECK",
-                {"tool": t.name, "available": t.available, "version": t.version, "required_for": t.required_for},
-            )
-        if missing:
-            names = ", ".join(t.required_for for t in missing)
-            self._notify(
-                f"Herramientas faltantes: {names}. Instalálas manualmente para ejecutar el proyecto.",
-                "HEALTH_WARN",
-                {"missing_tools": [t.name for t in missing]},
-            )
-
-        # 2. Ask permission to install dependencies (unless auto_confirm)
-        needs_install = bool(install_cmd) or any(
-            x in (run_cmd or "").lower()
-            for x in ("pip", "npm", "dotnet", "go ", "cargo")
-        )
-        auto_confirm = self._get_auto_confirm()
-
-        if needs_install and not auto_confirm and not skip_permission:
-            answer = await self.user_interaction.ask(
-                "¿Instalar dependencias del proyecto y verificar el código? "
-                "(Activá 'Auto-sí' en la barra superior para no preguntar en el futuro.)",
-                self._notify,
-            )
-            if answer.strip().lower() in ("no", "n", "omitir", "skip", "cancelar"):
-                self._notify("Instalación omitida por el usuario.", "LOG", {})
-                return {"skipped": True, "fixed": False, "rounds": 0}
-        elif needs_install and auto_confirm:
-            self._notify("Auto-sí activado — instalando dependencias sin preguntar.", "LOG", {})
-
-        # 3. Run validation loop
-        validator = ProjectValidator(
-            claude_driver=self.claude,
-            gemini_driver=self.gemini,
-            context_builder=self.builder,
-            notify_fn=self._notify,
-        )
-
-        result = await validator.validate_and_fix(
-            source_dir=source_dir,
-            install_cmd=install_cmd,
-            run_cmd=run_cmd,
-            project_description=project.description,
-            workspace=workspace,
-            architecture=project.architecture,
-        )
-
-        if result.get("skipped"):
-            self._notify("Validación omitida (stack sin comando de build).", "LOG", {})
-        elif result.get("fixed"):
-            self._notify(
-                f"Código validado y funcional tras {result['rounds']} ronda(s).",
-                "CHECKPOINT",
-                {"phase": "validation", "rounds": result["rounds"], "success": True},
-            )
-        else:
-            self._notify(
-                f"Advertencia: errores de build pendientes tras {result['rounds']} ronda(s).",
-                "HEALTH_WARN",
-                {
-                    "phase": "validation",
-                    "rounds": result["rounds"],
-                    "failed_modules": result.get("failed_modules", []),
-                },
-            )
-
-        return result
-
-    # ── Nuevas fases post-DEV ─────────────────────────────────────────────────
-
-    async def _phase_import_validation(self, project: Project) -> None:
-        self._notify("Validando dependencias del manifiesto…", "PHASE_START", {"phase": "import_validation"})
-        source_dir = self._workspace(project) / "source"
-        if not source_dir.exists():
-            return
-        try:
-            report = self.import_validator.validate(source_dir, project.architecture)
-            self._save_phase_report(project, "import_validation_report.json", report.to_dict())
-        except Exception as e:
-            self._notify(f"ImportValidator falló (no crítico): {e}", "LOG", {})
-
-    async def _phase_security_review(self, project: Project) -> None:
-        self._notify("Revisando seguridad del código generado…", "PHASE_START", {"phase": "security_review"})
-        source_dir = self._workspace(project) / "source"
-        if not source_dir.exists():
-            return
-        try:
-            report = self.security_reviewer.review(source_dir, project.blueprint)
-            self._save_phase_report(project, "security_report.json", report.to_dict())
-            if not report.passed and (report.critical or report.high):
-                await self.security_reviewer.request_ai_suggestions(report, source_dir)
-        except Exception as e:
-            self._notify(f"SecurityReviewer falló (no crítico): {e}", "LOG", {})
-
-    async def _phase_test_generation(self, project: Project) -> None:
-        self._notify("Generando tests automáticos…", "PHASE_START", {"phase": "test_generation"})
-        source_dir = self._workspace(project) / "source"
-        if not source_dir.exists():
-            return
-        try:
-            # Build module_generated_code from disk
-            module_generated_code: dict[str, dict[str, str]] = {}
-            for mod in project.architecture.get("modulos", []):
-                nombre = mod.get("nombre", "")
-                files: dict[str, str] = {}
-                for fp in mod.get("archivos_principales", []):
-                    fpath = source_dir / fp
-                    if fpath.exists():
-                        try:
-                            files[fp] = fpath.read_text(encoding="utf-8", errors="ignore")
-                        except Exception:
-                            pass
-                if files:
-                    module_generated_code[nombre] = files
-
-            report = await self.test_generator.generate_for_project(
-                source_dir, project.architecture, project.blueprint, module_generated_code
-            )
-            self._save_phase_report(project, "test_generation_report.json", report.to_dict())
-            self._git_commit(project, "Fase 4.3: Tests automáticos generados")
-        except Exception as e:
-            self._notify(f"TestGenerator falló (no crítico): {e}", "LOG", {})
-
-    async def _phase_api_contract(self, project: Project) -> None:
-        self._notify("Verificando contrato API frontend↔backend…", "PHASE_START", {"phase": "api_contract"})
-        source_dir = self._workspace(project) / "source"
-        if not source_dir.exists():
-            return
-        try:
-            report = self.api_enforcer.enforce(source_dir, project.architecture, project.blueprint)
-            self._save_phase_report(project, "api_contract_report.json", report.to_dict())
-        except Exception as e:
-            self._notify(f"APIContractEnforcer falló (no crítico): {e}", "LOG", {})
-
-    async def _phase_boot_agent(self, project: Project) -> None:
-        self._notify("BootAgent: instalando y arrancando proyecto…", "PHASE_START", {"phase": "boot_agent"})
-        source_dir = self._workspace(project) / "source"
-        if not source_dir.exists():
-            return
-        try:
-            report = await self.boot_agent.run(source_dir, project.architecture, project.blueprint)
-            self._save_phase_report(project, "boot_report.json", report.to_dict())
-            if report.final_ok:
-                self._git_commit(project, "Fase 5.1: Proyecto arranca correctamente")
-        except Exception as e:
-            self._notify(f"BootAgent falló (no crítico): {e}", "LOG", {})
-
-    def _save_phase_report(self, project: Project, filename: str, data: dict) -> None:
-        try:
-            out = self._workspace(project) / filename
-            out.write_text(
-                __import__("json").dumps(data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
-
     def _should_regenerate_after_validation(self, result: dict, project: Project) -> tuple[bool, list[str]]:
         if not result or result.get("skipped") or result.get("fixed"):
             return False, []
@@ -2461,432 +1985,109 @@ class SodaOrchestrator:
 
         return True, failed_modules
 
-    async def _phase_targeted_regeneration(self, project: Project, module_names: list[str], errors_final: str = "") -> None:
-        modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
-        source_dir = self._workspace(project) / "source"
-        note = "\n\nREGENERACIÓN AUTOMÁTICA POR FALLO DE VALIDACIÓN"
-        if errors_final:
-            note += f"\nResumen de errores:\n{errors_final[:1000]}"
+    # Error taxonomy — three-category classification for validation and boot/smoke errors.
+    # BLOCKING_CODE_ERROR  → generated code is structurally broken; blocks DONE
+    # ADVISORY_RUNTIME     → missing 3rd-party dep or runtime env issue; does not block DONE
+    # ADVISORY_ENV         → infrastructure/Docker/network; does not block DONE
+    _ERROR_TAXONOMY: Dict[str, tuple] = {
+        "BLOCKING_CODE_ERROR": (
+            "SyntaxError",
+            "IndentationError",
+            "NameError",
+            "ImportError: cannot import name",
+        ),
+        "ADVISORY_RUNTIME": (
+            "ModuleNotFoundError",
+            "ConnectionRefusedError",
+            "OSError: [Errno 98]",
+            "Address already in use",
+            "ECONNREFUSED",
+            "ENOENT",
+            "Cannot find module",
+            "npm warn",
+        ),
+        "ADVISORY_ENV": (
+            "Docker",
+            "Timeout after",
+            "Permission denied",
+            "No such file or directory",
+            "connection_error",
+            "no_probe_target",
+        ),
+    }
 
-        self._notify(
-            f"Regeneración dirigida iniciada para {len(module_names)} módulo(s).",
-            "PHASE_START",
-            {"phase": "targeted_regeneration", "modules": module_names},
-        )
+    # Derived from taxonomy — backward-compat alias used by _can_reach_done.
+    _BLOCKING_ERROR_PATTERNS: tuple = _ERROR_TAXONOMY["BLOCKING_CODE_ERROR"]
 
-        # Build skills/profile context and read all already-generated files for cross-module context
-        skills_context: Optional[str] = None
-        profile_context: Optional[str] = None
-        try:
-            if project.skills:
-                skills_context = self.skill_manager.load_context(project.skills, role="code_generator") or None
-            if project.profile:
-                profile_context = self.profile_manager.load_context(project.profile) or None
-        except Exception:
-            pass
+    @staticmethod
+    def _classify_error(error_text: str) -> str:
+        """Return taxonomy category for error_text.
 
-        dependency_context: dict = {}
-        if source_dir.exists():
-            for mod in project.architecture.get("modulos", []):
-                mod_nombre = mod.get("nombre", "")
-                if mod_nombre in module_names:
-                    continue  # skip modules being regenerated — use the new version
-                files: dict[str, str] = {}
-                for fp in mod.get("archivos_principales", []):
-                    fpath = source_dir / fp
-                    if fpath.exists():
-                        try:
-                            files[fp] = fpath.read_text(encoding="utf-8", errors="ignore")
-                        except Exception:
-                            pass
-                if files:
-                    dependency_context[mod_nombre] = files
+        Returns one of: 'BLOCKING_CODE_ERROR', 'ADVISORY_RUNTIME', 'ADVISORY_ENV', 'UNKNOWN'.
+        First matching category wins.
+        """
+        for category, patterns in SodaOrchestrator._ERROR_TAXONOMY.items():
+            if any(pat in error_text for pat in patterns):
+                return category
+        return "UNKNOWN"
 
-        user_requirements = RequirementsStore(project.workspace).as_task_field()
-        for nombre in module_names:
-            if nombre not in modulos_by_name:
-                continue
+    def _can_reach_done(self, validation_result: Optional[Dict], boot_report: Optional[Dict] = None) -> bool:
+        """Return True if the validation result (and optional boot report) permit DONE.
 
-            original = modulos_by_name[nombre]
-            module = {
-                **original,
-                "responsabilidad": f"{original.get('responsabilidad', '').rstrip()}{note}",
-            }
-            self._notify(f"Regenerando: {nombre}", "MODULE_START", {"module": nombre})
-            generated_files = await self.code_gen.generate_module(
-                module, project.blueprint, project.architecture,
-                user_requirements=user_requirements,
-                dependency_context=dependency_context,
-                skills_context=skills_context,
-                profile_context=profile_context,
-            )
-            for gf in generated_files:
-                out = source_dir / gf.filepath
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(gf.content, encoding="utf-8", errors="replace")
-                self._notify(
-                    f"Actualizado: {gf.filepath}",
-                    "FILE_GENERATED",
-                    {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
-                )
-            self._notify(f"Módulo regenerado: {nombre}", "MODULE_DONE", {"module": nombre})
+        Blocking conditions:
+          1. BLOCKING_CODE_ERROR in build output (SyntaxError, NameError, etc.)
+          2. BootAgent ran on an HTTP stack and final_ok=False (structural boot crash)
 
-        self._save_state(project)
+        Tolerable: no result, skipped, fixed, ADVISORY_RUNTIME, ADVISORY_ENV, UNKNOWN,
+                   or boot failure on non-HTTP stack (CLI tools exit immediately by design).
+        """
+        # ── Build check criterion ──────────────────────────────────────────
+        if not validation_result:
+            build_ok = True
+        elif validation_result.get("skipped") or validation_result.get("fixed"):
+            build_ok = True
+        else:
+            errors = str(validation_result.get("errors_final", ""))
+            build_ok = not errors or self._classify_error(errors) != "BLOCKING_CODE_ERROR"
 
-    def _find_visual_modules(self, project: Project, issues: list[str]) -> list[str]:
-        """Return module names likely responsible for detected visual issues."""
-        ui_keywords = {"frontend", "ui", "view", "template", "page", "render", "html", "css", "react", "vue", "svelte", "static"}
-        modulos = project.architecture.get("modulos", [])
-        candidates = []
-        for mod in modulos:
-            nombre = mod.get("nombre", "").lower()
-            resp = mod.get("responsabilidad", "").lower()
-            if any(kw in nombre or kw in resp for kw in ui_keywords):
-                candidates.append(mod["nombre"])
-        # If no obvious UI modules, fall back to first module (entry-point)
-        if not candidates and modulos:
-            candidates = [modulos[0]["nombre"]]
-        return candidates
+        if not build_ok:
+            return False
 
-    async def _phase_visual_inspection(self, project: Project, max_fix_iterations: int = 2) -> None:
-        """Capture screenshot of running app, analyze with Gemini Flash vision, and regenerate UI modules if issues found."""
-        run_command = self._get_run_command(project)
-        install_command = self._get_install_command(project)
-        if not run_command:
-            return
-        stack = self.project_runner.detect_stack(run_command, install_command)
-        url = self.project_runner.infer_runtime_url(run_command, stack)
-        if not url:
-            return
+        # ── Boot criterion (only when BootAgent ran on an HTTP stack) ──────
+        if boot_report and not boot_report.get("skipped", True):
+            stack = boot_report.get("stack", "unknown")
+            if StackDetector.is_http_probe_applicable(stack) and not boot_report.get("final_ok", True):
+                return False
 
-        workspace = self._workspace(project)
-        source_dir = workspace / "source"
-        screenshot_dir = workspace / "_screenshots"
-        context = f"Project: {project.id}. Stack: {stack}. URL: {url}"
+        return True
 
-        for iteration in range(1 + max_fix_iterations):
-            screenshot_path = screenshot_dir / f"main_v{iteration}.png"
+    async def _validate_and_maybe_regen(self, project: Project, skip_permission: bool = False) -> dict:
+        """Shared validation+regen path used by run(), resume() and import_from_code().
+
+        Runs _phase_validation, consults Copilot for root-cause analysis, then decides
+        whether to trigger targeted regeneration. Ensures all entry points behave identically.
+        """
+        validation_result = await self._phase_validation(project, skip_permission=skip_permission)
+
+        val_sug = await self.copilot_consultant.review_validation(validation_result, project.blueprint)
+        handled = self._handle_copilot_review(val_sug, "validation")
+
+        should_regen, modules_to_regen = self._should_regenerate_after_validation(validation_result, project)
+        if should_regen:
             self._notify(
-                f"Visual Inspector: capturando screenshot (iteración {iteration + 1})…",
-                "LOG", {"phase": "visual_inspection", "iteration": iteration + 1},
-            )
-            capture = await self.vision_capturer.capture_url(url, screenshot_path)
-            if not capture.exists:
-                self._notify(
-                    f"Screenshot no disponible ({capture.error or 'app no corriendo'})",
-                    "LOG", {},
-                )
-                return
-
-            self._notify("Visual Inspector: analizando renderizado con Gemini Flash…", "LOG", {})
-            inspection = await self.visual_inspector.analyze(screenshot_path, context=context)
-
-            if not inspection.issues_detected:
-                self._notify(
-                    f"Visual Inspector: app renderiza correctamente. {inspection.ai_analysis}",
-                    "LOG",
-                    {"phase": "visual_inspection", "renders_correctly": True, "iteration": iteration + 1},
-                )
-                return
-
-            self._notify(
-                f"Visual Inspector detectó {len(inspection.issues_detected)} problema(s): "
-                + "; ".join(inspection.issues_detected[:3]),
+                f"Se detectaron errores concentrados en {len(modules_to_regen)} módulo(s). Regenerando y revalidando.",
                 "HEALTH_WARN",
-                {
-                    "phase": "visual_inspection",
-                    "renders_correctly": inspection.renders_correctly,
-                    "issues": inspection.issues_detected,
-                    "suggestions": inspection.suggestions,
-                    "summary": inspection.ai_analysis,
-                    "iteration": iteration + 1,
-                },
+                {"phase": "validation", "modules": modules_to_regen},
             )
+            errors_ctx = validation_result.get("errors_final", "")
+            if handled["applied"]:
+                numbered = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(handled["changes"]))
+                errors_ctx = f"ANÁLISIS COPILOT (causa raíz):\n{numbered}\n\nERRORES DE BUILD:\n{errors_ctx}"
+            await self._phase_targeted_regeneration(project, modules_to_regen, errors_ctx)
+            validation_result = await self._phase_validation(project, skip_permission=True)
+            self._git_commit(project, "Fase 4.5: Regeneración post-validación")
 
-            if iteration >= max_fix_iterations:
-                break
-
-            # Regenerate UI modules with visual feedback injected into task
-            ui_modules = self._find_visual_modules(project, inspection.issues_detected)
-            if not ui_modules:
-                break
-
-            issues_text = "\n".join(f"- {i}" for i in inspection.issues_detected[:6])
-            suggestions_text = "\n".join(f"- {s}" for s in inspection.suggestions[:4])
-            fix_note = (
-                f"\n\nREGENERACIÓN POR PROBLEMAS VISUALES DETECTADOS (iteración {iteration + 1})\n"
-                f"Problemas:\n{issues_text}\n"
-                f"Sugerencias:\n{suggestions_text}"
-            )
-
-            modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
-            self._notify(
-                f"Regenerando {len(ui_modules)} módulo(s) de UI por problemas visuales…",
-                "PHASE_START",
-                {"phase": "visual_fix", "modules": ui_modules, "iteration": iteration + 1},
-            )
-            for nombre in ui_modules:
-                if nombre not in modulos_by_name:
-                    continue
-                original = modulos_by_name[nombre]
-                module = {**original, "responsabilidad": original.get("responsabilidad", "").rstrip() + fix_note}
-                generated_files = await self.code_gen.generate_module(
-                    module, project.blueprint, project.architecture,
-                    user_requirements=RequirementsStore(project.workspace).as_task_field(),
-                )
-                for gf in generated_files:
-                    out = source_dir / gf.filepath
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_text(gf.content, encoding="utf-8", errors="replace")
-                    self._notify(
-                        f"Actualizado (visual fix): {gf.filepath}",
-                        "FILE_GENERATED",
-                        {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
-                    )
-                self._notify(f"Módulo visual regenerado: {nombre}", "MODULE_DONE", {"module": nombre})
-
-            self._save_state(project)
-
-    async def _phase_setup_and_verify(self, project: Project) -> dict:
-        """Install dependencies, launch project, basic smoke, then full endpoint smoke suite."""
-        run_command = self._get_run_command(project)
-        install_command = self._get_install_command(project)
-        if not run_command:
-            return {}
-        workspace = self._workspace(project)
-        self._notify("Configurando y verificando proyecto generado…", "LOG", {"phase": "setup"})
-        result = await self.project_runner.setup_and_verify(
-            project_workspace=workspace,
-            run_command=run_command,
-            install_command=install_command,
-            notify_fn=self._notify,
-        )
-        # Run full endpoint smoke suite if app is reachable
-        smoke_basic = result.get("smoke", {})
-        base_url = smoke_basic.get("target_url", "")
-        if base_url and smoke_basic.get("passed"):
-            source_dir = workspace / "source"
-            arch = project.architecture or {}
-            self._notify(f"Ejecutando smoke suite de endpoints en {base_url}…", "LOG", {"phase": "smoke_suite"})
-            suite = await self.smoke_tester.run_suite_async(base_url, arch, source_dir if source_dir.exists() else None)
-            result["smoke_suite"] = suite.to_dict()
-            if not suite.all_passed:
-                self._notify(
-                    f"Smoke suite: {suite.passed}/{suite.total} endpoints OK",
-                    "HEALTH_WARN",
-                    {"phase": "smoke_suite", **suite.to_dict()},
-                )
-            else:
-                self._notify(f"Smoke suite: {suite.total} endpoints OK", "LOG", {"phase": "smoke_suite"})
-        return result
-
-    async def _phase_docs(self, project: Project) -> None:
-        # Generate docker-compose.yml for multi-service projects before docs
-        if project.blueprint and project.architecture:
-            workspace = self._workspace(project)
-            source_dir = workspace / "source"
-            if source_dir.exists() and self.service_orchestrator.needs_compose(project.blueprint, project.architecture):
-                compose_result = self.service_orchestrator.generate_compose(
-                    project.blueprint, project.architecture, source_dir
-                )
-                if compose_result.generated:
-                    self._notify(
-                        f"docker-compose.yml generado con servicios: {', '.join(compose_result.services)}",
-                        "FILE_GENERATED",
-                        {"file": compose_result.path, "services": compose_result.services},
-                    )
-
-        self._notify("Generando documentación...", "PHASE_START", {"phase": "docs"})
-        try:
-            workspace = self._workspace(project)
-            source_dir = workspace / "source"
-            files = []
-            if source_dir.exists():
-                files = sorted(
-                    str(p.relative_to(source_dir))
-                    for p in source_dir.rglob("*") if p.is_file()
-                )
-
-            bp_text = json.dumps(project.blueprint, ensure_ascii=False, indent=2)
-            arch_text = json.dumps(project.architecture, ensure_ascii=False, indent=2)
-            file_list = "\n".join(files[:60]) or "(sin archivos)"
-
-            task = (
-                f"BLUEPRINT:\n{bp_text}\n\n"
-                f"ARQUITECTURA:\n{arch_text}\n\n"
-                f"ARCHIVOS GENERADOS:\n{file_list}"
-            )
-            content = await self._call_for_role("claude", "docs_generator", task)
-            project.reference_report = self._build_reference_report(content)
-            self._save_state(project)
-
-            readme_path = (source_dir if source_dir.exists() else workspace) / "README.txt"
-            readme_path.write_text(content, encoding="utf-8")
-            self._notify(
-                f"README.txt generado: {readme_path.name}",
-                "FILE_GENERATED",
-                {"file": str(readme_path), "reference_report": project.reference_report},
-            )
-            if project.reference_report.get("broken_candidates", 0) > 0:
-                self._notify(
-                    "La documentación generada contiene referencias potencialmente rotas.",
-                    "HEALTH_WARN",
-                    {"phase": "docs", "reference_report": project.reference_report},
-                )
-
-            # Generate output files (markdown report, PDF, Excel, presentation)
-            outputs_dir = workspace / "_soda_outputs"
-            try:
-                output_results = self.output_generator.generate_all(
-                    project_id=project.id,
-                    blueprint=project.blueprint or {},
-                    architecture=project.architecture or {},
-                    reference_report=project.reference_report or {},
-                    output_dir=outputs_dir,
-                )
-                for out in output_results:
-                    if out.success:
-                        self._notify(
-                            f"Output generado: {out.format} → {out.path}",
-                            "FILE_GENERATED",
-                            {"file": out.path, "format": out.format, "size": out.size_bytes},
-                        )
-            except Exception as out_err:
-                self._notify(f"Output generation omitida: {out_err}", "LOG", {})
-
-        except Exception as e:
-            self._notify(f"Documentación omitida: {e}", "LOG")
-
-    async def _phase_iteration(self, project: Project, user_request: str) -> None:
-        """Re-generate modules affected by user feedback, then re-validate."""
-        self._notify("Analizando cambios solicitados...", "PHASE_START", {"phase": "modification"})
-        modulos_by_name = {m["nombre"]: m for m in project.architecture.get("modulos", [])}
-
-        # Identify affected modules via goal interpreter + impact analyzer
-        affected: set = set()
-        try:
-            plan = await self.goal_interpreter.interpret(user_request, project.architecture, project.blueprint)
-            report = await self.impact_analyzer.analyze(plan, project.architecture)
-            affected = set(report.directly_affected + report.transitively_affected)
-        except Exception as e:
-            print(f"  [!] Impact analysis failed: {e}")
-
-        if not affected:
-            affected = set(modulos_by_name.keys())
-
-        source_dir = self._workspace(project) / "source"
-        self._notify(
-            f"Regenerando {len(affected)} módulo(s) con los cambios solicitados...",
-            "PHASE_START", {"phase": "development"},
-        )
-
-        for nombre in sorted(affected):
-            if nombre not in modulos_by_name:
-                continue
-            module = {
-                **modulos_by_name[nombre],
-                "responsabilidad": (
-                    modulos_by_name[nombre]["responsabilidad"]
-                    + f"\n\nCAMBIO SOLICITADO POR EL USUARIO: {user_request}"
-                ),
-            }
-            self._notify(f"Regenerando: {nombre}", "MODULE_START", {"module": nombre})
-            generated_files = await self.code_gen.generate_module(
-                module, project.blueprint, project.architecture,
-                user_requirements=RequirementsStore(project.workspace).as_task_field(),
-            )
-            for gf in generated_files:
-                out = source_dir / gf.filepath
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(gf.content, encoding="utf-8", errors="replace")
-                self._notify(
-                    f"Actualizado: {gf.filepath}",
-                    "FILE_GENERATED",
-                    {"filename": gf.filepath, "code": gf.content, "validated": gf.validated},
-                )
-            self._notify(f"Módulo actualizado: {nombre}", "MODULE_DONE", {"module": nombre})
-
-        self._save_state(project)
-
-    async def _phase_feedback_loop(self, project: Project) -> None:
-        """Ask user for feedback after DONE, apply changes, re-validate, repeat."""
-        MAX_ITERATIONS = 5
-        DONE_WORDS = {"listo", "ok", "bien", "perfecto", "ninguno", "no", "no cambios",
-                      "nada", "gracias", "todo bien", "funciona", "excelente", "genial"}
-
-        for iteration in range(MAX_ITERATIONS):
-            question = (
-                "Ejecutá la app con el botón ▶. ¿Quedó como esperabas? "
-                "Describí los cambios que querés (o escribí 'listo' para terminar)."
-                if iteration == 0
-                else "¿Cómo quedó? ¿Querés más cambios? (describílos o escribí 'listo')"
-            )
-            answer = await self.user_interaction.ask(question, self._notify)
-            answer_clean = answer.strip().lower()
-
-            if not answer_clean or any(answer_clean == w for w in DONE_WORDS) or answer_clean.startswith("listo"):
-                if answer_clean:
-                    self._notify("¡Proyecto terminado! Podés seguir usando el botón ▶ para ejecutarlo.", "LOG", {})
-                break
-
-            self._notify(f"Aplicando: {answer[:120]}", "LOG", {})
-            await self._phase_iteration(project, answer)
-            await self._phase_validation(project, skip_permission=True)
-
-            run_command = self._get_run_command(project)
-            install_command = self._get_install_command(project)
-            self._notify(
-                f"Cambios aplicados (iteración {iteration + 1}).",
-                "ITERATION_DONE",
-                {
-                    "project_id": project.id,
-                    "run_command": run_command,
-                    "install_command": install_command,
-                    "workspace": str(project.workspace),
-                    "iteration": iteration + 1,
-                },
-            )
-
-    async def _phase_evolution(self, project: Project) -> None:
-        if not project.profile:
-            return
-        print("\n[POST] Profile Evolution — capturing learnings...")
-        self._notify("Capturando aprendizajes...", "PHASE_START", {"phase": "evolution"})
-        try:
-            learnings = await self.profile_evolution.evolve(
-                project.id, project.description,
-                project.blueprint, project.architecture,
-                project.profile, project.skills,
-            )
-            count = (
-                len(learnings.get("patterns", []))
-                + len(learnings.get("anti_patterns", []))
-                + len(learnings.get("preferences", []))
-            )
-            print(f"  [OK] {count} learning(s) written to profile '{project.profile}'")
-            self._notify(
-                f"{count} aprendizajes guardados en perfil '{project.profile}'",
-                "EVOLUTION",
-                {"profile": project.profile, "count": count, "learnings": learnings},
-            )
-            # Copilot review: are the captured learnings complete?
-            evo_sug = await self.copilot_consultant.review_evolution(learnings, project.description)
-            await self._copilot_suggest("evolution", evo_sug)
-        except Exception as e:
-            print(f"  [!] Evolution failed (non-critical): {e}")
-
-        # Synthesize new observations into the knowledge base (fire-and-forget)
-        try:
-            new_patterns = self.knowledge_base.synthesize_from_observations()
-            if new_patterns > 0:
-                print(f"  [KB] {new_patterns} nuevo(s) patrón(es) sintetizados en base de conocimiento")
-                self._notify(
-                    f"Knowledge Base: {new_patterns} patrón(es) nuevos aprendidos",
-                    "EVOLUTION",
-                    {"type": "knowledge_synthesis", "new_patterns": new_patterns},
-                )
-        except Exception as e:
-            print(f"  [!] Knowledge synthesis failed (non-critical): {e}")
+        return validation_result
 
     async def refound(self, project: Project) -> Project:
         """Summarize current project and start a new one from the condensed description."""
@@ -3077,31 +2278,50 @@ class SodaOrchestrator:
 
             if action == "run_and_test":
                 # Just install, run, smoke test
-                await self._phase_validation(project)
-                project.state = ProjectState.DONE
+                _rnt_validation = await self._phase_validation(project)
+                if self._can_reach_done(_rnt_validation):
+                    project.state = ProjectState.DONE
+                else:
+                    project.state = ProjectState.FAILED
                 self._save_state(project)
+                _rnt_event = "DONE" if project.state == ProjectState.DONE else "FAILED"
+                _rnt_msg = "Ejecución y prueba completada." if project.state == ProjectState.DONE else "Ejecución y prueba con errores."
                 self._notify(
-                    "Ejecución y prueba completada.",
-                    "DONE",
+                    _rnt_msg,
+                    _rnt_event,
                     {"project_id": project.id, "run_command": run_cmd, "install_command": inst_cmd},
                 )
                 return project
 
             # Full processing pipeline (skips WISDOM/REQ, uses existing analysis)
-            await self._phase_arch(project)
-            await self._phase_plan(project)
-            await self._phase_dev(project)
-            await self._phase_validation(project)
+            await self._phase_architecture(project)
+            plan = await self._phase_planning(project)
+            await self._phase_development(project, plan)
+            validation_result = await self._phase_validation(project)
             await self._phase_docs(project)
 
-            project.state = ProjectState.DONE
+            if self._can_reach_done(validation_result):
+                project.state = ProjectState.DONE
+                self.lineage.record_complete(project.id, "done")
+            else:
+                project.state = ProjectState.FAILED
+                self._notify(
+                    "Pipeline detenido: errores críticos en el código generado.",
+                    "PIPELINE_ERROR",
+                    {"failed_modules": validation_result.get("failed_modules", [])},
+                )
             self._save_state(project)
-            self.lineage.record_complete(project.id, "done")
             await self._phase_evolution(project)
 
+            _oap_event = "DONE" if project.state == ProjectState.DONE else "FAILED"
+            _oap_msg = (
+                "Procesamiento de proyecto externo completo."
+                if project.state == ProjectState.DONE
+                else "Procesamiento de proyecto externo detenido con errores."
+            )
             self._notify(
-                "Procesamiento de proyecto externo completo.",
-                "DONE",
+                _oap_msg,
+                _oap_event,
                 {"project_id": project.id, "run_command": run_cmd, "install_command": inst_cmd},
             )
 
@@ -3184,6 +2404,171 @@ class SodaOrchestrator:
             self._save_state(project)
             self._notify(f"Error en migración: {e}", "PIPELINE_ERROR", {"project_id": project.id})
             print(f"\n[MIGRATION ERROR] {traceback.format_exc()}")
+
+        return project
+
+
+    def _project_from_disk(self, project_id: str) -> "Project":
+        """Reconstruct a Project object from persisted metadata on disk."""
+        workspace = self.projects_dir / project_id
+        meta_path = workspace / "metadata.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"No se encontró metadata para '{project_id}'")
+        with open(meta_path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        arch_path = workspace / "architecture.json"
+        architecture = {}
+        if arch_path.exists():
+            with open(arch_path, encoding="utf-8") as f:
+                architecture = json.load(f)
+
+        blueprint_path = workspace / "blueprint.json"
+        blueprint = data.get("blueprint") or {}
+        if not blueprint and blueprint_path.exists():
+            with open(blueprint_path, encoding="utf-8") as f:
+                blueprint = json.load(f)
+
+        goal_tree_path = workspace / "goal_tree.json"
+        goal_tree = data.get("goal_tree") or {}
+        if not goal_tree and goal_tree_path.exists():
+            with open(goal_tree_path, encoding="utf-8") as f:
+                goal_tree = json.load(f)
+
+        try:
+            state = ProjectState(data.get("state", "idle"))
+        except ValueError:
+            state = ProjectState.FAILED
+
+        project = Project(
+            id=project_id,
+            description=data.get("description", ""),
+            state=state,
+            workspace=workspace,
+            blueprint=blueprint,
+            architecture=architecture,
+            skills=data.get("skills") or [],
+            profile=data.get("profile") or "",
+            project_type=data.get("project_type") or "",
+            capability_packs=data.get("capability_packs") or [],
+            goal_tree=goal_tree,
+            intensity_level=data.get("intensity_level") or "",
+            reference_report=data.get("reference_report") or {},
+            created_at=data.get("created_at") or datetime.now().isoformat(),
+        )
+        return project
+
+    async def resume(self, project_id: str) -> "Project":
+        """Resume a truncated project from where it left off."""
+        self.perf_tracker.reset()
+        project = self._project_from_disk(project_id)
+        self._active_project = project
+
+        print(f"\n{'='*55}")
+        print(f"SODA — RESUME: {project.id}")
+        print(f"Estado guardado: {project.state.value}")
+        print(f"{'='*55}")
+
+        self._notify(
+            f"Reanudando proyecto '{project.id}' desde estado: {project.state.value}",
+            "RESUME_START",
+            {"project_id": project.id, "state": project.state.value},
+        )
+
+        state = project.state
+
+        try:
+            # Determine which phases are already complete based on what exists on disk
+            has_blueprint = (project.workspace / "blueprint.json").exists() and project.blueprint
+            has_architecture = (project.workspace / "architecture.json").exists() and project.architecture
+            has_topology = (project.workspace / "topology.json").exists()
+            has_plan = (project.workspace / "execution_plan.json").exists()
+            has_master_contract = (project.workspace / "master_contract.json").exists()
+
+            if not has_blueprint:
+                self._current_phase = "capabilities"
+                await self._phase_capabilities(project)
+                self._current_phase = "wisdom"
+                await self._phase_wisdom(project)
+                self._current_phase = "requirements"
+                await self._phase_requirements(project)
+                self._git_commit(project, "Fase 1: Blueprint generado (resume)")
+
+            # Legacy migration: project has architecture.json but not topology.json/master_contract.json
+            if has_architecture and not has_topology and not has_master_contract:
+                self._notify(
+                    "Proyecto legacy detectado — migrando a esquema v2 (topology + master_contract)...",
+                    "LOG", {"phase": "legacy_migration"},
+                )
+                await self._migrate_legacy_architecture(project)
+                has_topology = True
+                has_master_contract = (project.workspace / "master_contract.json").exists()
+                self._git_commit(project, "chore: migrated legacy architecture to v2 schema")
+
+            if not has_architecture or not has_topology or not has_master_contract:
+                self._current_phase = "architecture"
+                await self._phase_architecture(project)
+                self._git_commit(project, "Fase 2: Arquitectura generada (resume)")
+
+            if not has_plan:
+                self._current_phase = "planning"
+                plan = await self._phase_planning(project)
+            else:
+                plan_path = project.workspace / "execution_plan.json"
+                with open(plan_path, encoding="utf-8") as f:
+                    plan_data = json.load(f)
+                plan = ExecutionPlan(
+                    levels=plan_data.get("levels", []),
+                    order=plan_data.get("order", []),
+                    parallelizable=plan_data.get("parallelizable", True),
+                )
+                print(f"[RESUME] Plan cargado desde disco ({len(plan.levels)} niveles)")
+
+            self._current_phase = "design"
+            await self._phase_design(project)
+
+            self._current_phase = "development"
+            await self._phase_development(project, plan, skip_existing=True)
+
+            self._current_phase = "verify"
+            await self._phase_verify(project)
+            self._git_commit(project, "feat: conformance verify — resume")
+
+            integrity_report = self.goal_validator.validate_project_integrity(project.architecture)
+            if not integrity_report.get("is_clean", True):
+                self._notify("Se detectó código huérfano.", "HEALTH_WARN", integrity_report)
+
+            self._git_commit(project, "Fase 4: Desarrollo completado (resume)")
+            await self._phase_import_validation(project)
+            await self._phase_security_review(project)
+            await self._phase_test_generation(project)
+            await self._phase_run_and_triage_tests(project)
+            await self._phase_api_contract(project)
+            await self._phase_audit(project)
+
+            validation_result = await self._validate_and_maybe_regen(project)
+            await self._phase_boot_agent(project)
+            await self._phase_visual_inspection(project)
+            await self._phase_docs(project)
+            self._git_commit(project, "Fase 5: Documentación generada (resume)")
+
+            await self._phase_evolution(project)
+            project.state = ProjectState.DONE
+            self._save_state(project)
+
+            self._notify(
+                f"Proyecto '{project.id}' reanudado y completado.",
+                "DONE",
+                {"project_id": project.id},
+            )
+            print(f"\n[RESUME DONE] {project.id} completado.")
+
+        except Exception as e:
+            import traceback
+            project.state = ProjectState.FAILED
+            self._save_state(project)
+            self._notify(f"Error al reanudar: {e}", "PIPELINE_ERROR", {"project_id": project.id})
+            print(f"\n[RESUME ERROR] {traceback.format_exc()}")
 
         return project
 

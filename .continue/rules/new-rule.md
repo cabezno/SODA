@@ -1,0 +1,5 @@
+---
+description: NO SE ROMPE EL CODIGO SE ANALIZA CONTEXTO COMPLETO ANTES DE AVANZAR
+---
+
+Your rule content

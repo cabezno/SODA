@@ -5,8 +5,9 @@ import yaml
 
 
 class SkillMatcher:
-    def __init__(self, gemini_driver, context_builder):
+    def __init__(self, gemini_driver, context_builder, claude_driver=None):
         self.gemini = gemini_driver
+        self.claude = claude_driver
         self.builder = context_builder
         self.skills_dir = Path(__file__).resolve().parent.parent.parent / "skills"
 
@@ -25,8 +26,27 @@ class SkillMatcher:
         lines = []
         for s in skills:
             keywords = ", ".join(s.get("activation_keywords", []))
-            lines.append(f"- {s['name']}: {s.get('description', '')} [keywords: {keywords}]")
+            signals = s.get("activation_signals", {})
+            file_patterns = ", ".join(signals.get("file_patterns", []))
+            dependencies = ", ".join(signals.get("dependencies", []))
+            extra = ""
+            if file_patterns:
+                extra += f" [files: {file_patterns}]"
+            if dependencies:
+                extra += f" [deps: {dependencies}]"
+            lines.append(f"- {s['name']}: {s.get('description', '')} [keywords: {keywords}]{extra}")
         return "\n".join(lines)
+
+    def _keyword_match(self, description: str, skills: list[dict]) -> list[str]:
+        """Fallback: match skills whose activation_keywords appear in the description."""
+        desc_lower = description.lower()
+        matched = []
+        for s in skills:
+            for kw in s.get("activation_keywords", []):
+                if kw.lower() in desc_lower:
+                    matched.append(s["name"])
+                    break
+        return matched
 
     async def match(self, description: str) -> list[str]:
         available = self._load_available_skills()
@@ -38,15 +58,49 @@ class SkillMatcher:
             f"AVAILABLE SKILLS:\n{self._build_skills_summary(available)}"
         )
         payload = self.builder.build_payload("gemini", "skill_matcher", task)
-        raw = await self._call_gemini(payload)
+        raw = await self._call_gemini(payload, "skill_matcher", task)
+
+        print(f"  [SkillMatcher] Gemini raw ({len(raw)} chars): {raw[:200]!r}")
+
         result = self._parse_json(raw)
         matched = result.get("matched_skills", [])
         valid_names = {s["name"] for s in available}
-        return [m for m in matched if m in valid_names]
+        ai_skills = [m for m in matched if m in valid_names]
 
-    async def _call_gemini(self, payload: dict) -> str:
-        import asyncio
-        return await asyncio.to_thread(self.gemini.prompt, payload["system"], payload["user"])
+        if ai_skills:
+            return self._ensure_design_skills(ai_skills, description, {s["name"] for s in available})
+
+        # Fallback: keyword matching when AI returns nothing or invalid JSON
+        print("  [SkillMatcher] AI returned no skills — using keyword fallback")
+        kw_skills = self._keyword_match(description, available)
+        print(f"  [SkillMatcher] Keyword fallback matched: {kw_skills}")
+        return self._ensure_design_skills(kw_skills, description, {s["name"] for s in available})
+
+    _FRONTEND_DESIGN_SIGNALS = {
+        "html", "react", "vue", "angular", "svelte", "nextjs", "next.js",
+        "frontend", "ui", "interface", "web", "css", "tailwind", "design",
+        "dashboard", "landing", "page", "pantalla", "interfaz", "diseño",
+    }
+
+    def _ensure_design_skills(self, skills: list[str], description: str, valid_names: set) -> list[str]:
+        """Inject skill_ux + skill_ui_design when the project has a frontend component."""
+        desc_lower = description.lower()
+        has_frontend = any(sig in desc_lower for sig in self._FRONTEND_DESIGN_SIGNALS)
+        if not has_frontend:
+            return skills
+        result = list(skills)
+        for skill_name in ("skill_ux", "skill_ui_design"):
+            if skill_name in valid_names and skill_name not in result:
+                result.append(skill_name)
+        return result
+
+    async def _call_gemini(self, payload: dict, role: str = "skill_matcher", task: str = "") -> str:
+        from kernel.utils.ai_fallback import is_capacity_error
+        result = (await self.gemini.call(payload["system"], payload["user"])).content
+        if is_capacity_error(result) and self.claude:
+            fallback = self.builder.build_payload("claude", role, task)
+            result = await self.claude.prompt(fallback["system"], fallback["user"])
+        return result
 
     @staticmethod
     def _parse_json(text: str) -> dict:
@@ -63,8 +117,14 @@ class SkillMatcher:
                 pass
         return {}
 
-    def load_skill_context(self, skill_names: list[str]) -> str:
-        """Returns concatenated system_prompt.md + knowledge/ content for matched skills."""
+    def load_skill_context(self, skill_names: list[str], role: str = "code_generator") -> str:
+        """Returns skill content filtered by load_level for the given role.
+
+        load_level values:
+          full      — system_prompt + all knowledge files
+          summary   — first 30 lines of system_prompt only
+          checklist — only knowledge files named checklist*.md; falls back to last knowledge file
+        """
         available = self._load_available_skills()
         by_name = {s["name"]: s for s in available}
         parts = []
@@ -73,9 +133,39 @@ class SkillMatcher:
             if not skill:
                 continue
             skill_dir: Path = skill["_path"]
+            roles_cfg = skill.get("applies_to_roles", {})
+            # Support both old flat-list format and new dict format
+            if isinstance(roles_cfg, list):
+                load_level = "full" if role in roles_cfg else "summary"
+            elif isinstance(roles_cfg, dict):
+                role_cfg = roles_cfg.get(role, roles_cfg.get("code_generator", {}))
+                load_level = role_cfg.get("load_level", "full") if isinstance(role_cfg, dict) else "summary"
+            else:
+                load_level = "full"
+
             sp = skill_dir / "system_prompt.md"
-            if sp.exists():
-                parts.append(sp.read_text(encoding="utf-8").strip())
-            for kf in sorted((skill_dir / "knowledge").glob("*.md")):
-                parts.append(kf.read_text(encoding="utf-8").strip())
+            knowledge_dir = skill_dir / "knowledge"
+
+            if load_level == "full":
+                if sp.exists():
+                    parts.append(sp.read_text(encoding="utf-8").strip())
+                if knowledge_dir.exists():
+                    for kf in sorted(knowledge_dir.glob("*.md")):
+                        parts.append(kf.read_text(encoding="utf-8").strip())
+
+            elif load_level == "summary":
+                if sp.exists():
+                    lines = sp.read_text(encoding="utf-8").splitlines()
+                    parts.append("\n".join(lines[:30]).strip())
+
+            elif load_level == "checklist":
+                if knowledge_dir.exists():
+                    checklists = sorted(knowledge_dir.glob("checklist*.md"))
+                    if checklists:
+                        parts.append(checklists[0].read_text(encoding="utf-8").strip())
+                    else:
+                        all_kf = sorted(knowledge_dir.glob("*.md"))
+                        if all_kf:
+                            parts.append(all_kf[-1].read_text(encoding="utf-8").strip())
+
         return "\n\n---\n\n".join(parts)

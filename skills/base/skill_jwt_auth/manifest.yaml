@@ -1,19 +1,26 @@
 name: skill_jwt_auth
 category: security
-description: JWT-based authentication with access/refresh tokens, password hashing via bcrypt, and role-based access control
+description: JWT-based authentication with access/refresh tokens, password hashing
+  via bcrypt, and role-based access control
 applies_to_roles:
-  - code_generator
-  - global_architect
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: full
+  reviewer:
+    load_level: full
+  docs_generator:
+    load_level: summary
 activation_keywords:
-  - auth
-  - authentication
-  - login
-  - users
-  - jwt
-  - token
-  - password
-  - register
-  - roles
-  - permissions
-  - secure
-version: "1.0"
+- auth
+- authentication
+- login
+- users
+- jwt
+- token
+- password
+- register
+- roles
+- permissions
+- secure
+version: '1.0'

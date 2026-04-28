@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable
 
+from kernel.execution.project_runner import _kill_process_tree
+
 from kernel.execution.log_collector import LogCollector
 
 
@@ -79,6 +81,86 @@ class BootReport:
         }
 
 
+# ─────────────────────────────── env bootstrap ──
+
+_NPM_VALID_RE = re.compile(
+    r'^(?!@/)(?!~)(?!\.)(@[a-z0-9\-~][a-z0-9\-._~]*/[a-z0-9\-._~]+|[a-z0-9\-~][a-z0-9\-._~]*)$'
+)
+_NODE_BUILTINS = frozenset({
+    "fs", "fs/promises", "path", "os", "crypto", "stream", "util",
+    "http", "https", "net", "events", "buffer", "child_process", "url",
+    "querystring", "readline", "assert", "module", "process",
+})
+
+
+def _sanitize_package_json(pkg_path: Path) -> None:
+    """Remove invalid/hallucinated entries from package.json before npm install (PASO 3).
+
+    Rejects: TypeScript path aliases (@/...), sub-path imports (next/link),
+    Node built-ins, and anything that doesn't match a valid npm package name.
+    """
+    import json
+    try:
+        text = pkg_path.read_text(encoding="utf-8")
+        pkg = json.loads(text)
+        changed = False
+        removed_total: list[str] = []
+        for section in ("dependencies", "devDependencies", "peerDependencies"):
+            deps = pkg.get(section, {})
+            if not isinstance(deps, dict):
+                continue
+            bad = [
+                k for k in deps
+                if k in _NODE_BUILTINS
+                or not _NPM_VALID_RE.match(k)
+            ]
+            for k in bad:
+                del deps[k]
+                removed_total.append(k)
+                changed = True
+        if changed:
+            pkg_path.write_text(json.dumps(pkg, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"  [BootAgent] Sanitized package.json — removed {len(removed_total)}: {removed_total[:10]}")
+    except Exception as e:
+        print(f"  [BootAgent] Could not sanitize package.json: {e}")
+
+
+def _bootstrap_env(source_dir: Path, notify=None) -> None:
+    """Copy .env.example → .env.local (and .env) if they don't exist yet.
+
+    Next.js reads .env.local; Python/FastAPI reads .env.
+    SODA generates .env.example but never creates the real file — without it,
+    process.env vars are undefined and rewrites/connections break at startup.
+    """
+    _notify = notify or (lambda *a, **kw: None)
+    candidates = [
+        (".env.local.example", ".env.local"),
+        (".env.example",       ".env.local"),
+        (".env.example",       ".env"),
+    ]
+    copied: list[str] = []
+    for src_name, dst_name in candidates:
+        src = source_dir / src_name
+        dst = source_dir / dst_name
+        if src.exists() and not dst.exists():
+            try:
+                import shutil
+                shutil.copy2(src, dst)
+                copied.append(dst_name)
+            except OSError as e:
+                _notify(
+                    f"BootAgent: no se pudo copiar {src_name} → {dst_name}: {e}",
+                    "HEALTH_WARN",
+                    {"phase": "boot_env", "src": src_name, "dst": dst_name, "error": str(e)},
+                )
+    if copied:
+        _notify(
+            f"BootAgent: creó {', '.join(copied)} desde .env.example (completá las API keys reales).",
+            "LOG",
+            {"env_files": copied},
+        )
+
+
 # ─────────────────────────────── stack commands ──
 
 def _detect_commands(source_dir: Path, architecture: dict) -> tuple[list[str], list[str], str]:
@@ -87,19 +169,15 @@ def _detect_commands(source_dir: Path, architecture: dict) -> tuple[list[str], l
     backend = (stack.get("backend") or "").lower()
     frontend = (stack.get("frontend") or "").lower()
 
-    if (source_dir / "requirements.txt").exists() or (source_dir / "pyproject.toml").exists():
-        install = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"]
-        # Find main entry point
-        for candidate in ("main.py", "app.py", "run.py", "server.py", "manage.py"):
-            if (source_dir / candidate).exists():
-                run = [sys.executable, candidate]
-                return install, run, "python"
-        run = [sys.executable, "-m", "uvicorn", "main:app", "--port", "8080"]
-        return install, run, "python"
-
+    # Check Node.js FIRST — if package.json exists it's the primary entrypoint.
+    # A project with both package.json and requirements.txt (fullstack) should
+    # start the frontend; Python backend is managed separately.
     if (source_dir / "package.json").exists():
         npm = "npm"
-        install = [npm, "install", "--silent"]
+        # Sanitize package.json before installing — remove TS path aliases and sub-paths
+        _sanitize_package_json(source_dir / "package.json")
+        # --legacy-peer-deps avoids peer-dep conflicts that block install on many generated projects
+        install = [npm, "install", "--legacy-peer-deps"]
         # Check scripts
         try:
             import json
@@ -114,6 +192,15 @@ def _detect_commands(source_dir: Path, architecture: dict) -> tuple[list[str], l
         except Exception:
             run = [npm, "start"]
         return install, run, "node"
+
+    if (source_dir / "requirements.txt").exists() or (source_dir / "pyproject.toml").exists():
+        install = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"]
+        for candidate in ("main.py", "app.py", "run.py", "server.py", "manage.py"):
+            if (source_dir / candidate).exists():
+                run = [sys.executable, candidate]
+                return install, run, "python"
+        run = [sys.executable, "-m", "uvicorn", "main:app", "--port", "8080"]
+        return install, run, "python"
 
     if (source_dir / "go.mod").exists():
         install = ["go", "mod", "tidy"]
@@ -209,16 +296,25 @@ async def _run_cmd(cmd: list[str], cwd: Path, timeout: int) -> tuple[bool, str]:
     if not cmd:
         return True, ""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        import subprocess as _sp
+        if sys.platform == "win32":
+            proc = await asyncio.create_subprocess_shell(
+                _sp.list2cmdline(cmd),
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
-            proc.kill()
+            _kill_process_tree(proc)
             return False, f"Timeout después de {timeout}s"
         output = (stdout or b"").decode("utf-8", errors="replace")
         return proc.returncode == 0, output[-4000:]  # last 4000 chars
@@ -233,12 +329,21 @@ async def _boot_and_capture(cmd: list[str], cwd: Path, timeout: int) -> tuple[bo
     if not cmd:
         return True, ""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        import subprocess as _sp
+        if sys.platform == "win32":
+            proc = await asyncio.create_subprocess_shell(
+                _sp.list2cmdline(cmd),
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
         lines_collected = []
         deadline = asyncio.get_event_loop().time() + timeout
 
@@ -262,10 +367,10 @@ async def _boot_and_capture(cmd: list[str], cwd: Path, timeout: int) -> tuple[bo
         await asyncio.sleep(0.5)
         alive = proc.returncode is None
         if not alive and proc.returncode != 0:
-            proc.kill()
+            _kill_process_tree(proc)
             return False, output
-        proc.kill()  # clean up after capture
-        return alive or True, output
+        _kill_process_tree(proc)  # clean up after capture
+        return alive, output
 
     except FileNotFoundError as e:
         return False, f"Comando no encontrado: {e}"
@@ -295,8 +400,29 @@ class BootAgent:
         if not install_cmd and not run_cmd:
             report.skipped = True
             report.reason = "Stack no reconocido para boot automático."
-            self.notify(report.reason, "LOG", {})
+            self.notify(report.reason, "LOG", {"phase": "boot_agent", "reason": report.reason, "stack": stack})
             return report
+
+        # Bootstrap env files before any install/run so env vars are available
+        _bootstrap_env(source_dir, self.notify)
+
+        # Environment detection + venv setup for Python projects
+        if stack == "python":
+            from kernel.execution.environment_detector import EnvironmentDetector
+            from kernel.execution.venv_manager import VenvManager
+            env_report = EnvironmentDetector().detect(source_dir)
+            for warning in env_report.warnings:
+                self.notify(warning, "HEALTH_WARN", {"phase": "env_check"})
+            venv_info = VenvManager().ensure(source_dir, self.notify)
+            # Route install/run through venv python instead of host sys.executable
+            install_cmd = [
+                venv_info.python if c == sys.executable else c
+                for c in install_cmd
+            ]
+            run_cmd = [
+                venv_info.python if c == sys.executable else c
+                for c in run_cmd
+            ]
 
         self.notify(
             f"BootAgent [{stack}]: instalando dependencias…",
@@ -316,7 +442,7 @@ class BootAgent:
                 self.notify(
                     f"BootAgent ronda {round_idx+1}: instalación falló.",
                     "HEALTH_WARN",
-                    {"round": round_idx + 1, "output": install_out[-500:]},
+                    {"phase": "boot_install", "round": round_idx + 1, "stack": stack, "origin": "install", "output": install_out[-500:]},
                 )
                 errors = parse_errors(install_out, source_dir)
                 attempt.errors = errors
@@ -327,7 +453,24 @@ class BootAgent:
                     break
                 continue
 
-            self.notify(f"BootAgent ronda {round_idx+1}: dependencias instaladas. Iniciando…", "LOG", {})
+            self.notify(f"BootAgent ronda {round_idx+1}: dependencias instaladas. Iniciando…", "LOG", {"phase": "boot_install", "round": round_idx + 1, "stack": stack})
+
+            # Sanity check: node_modules must exist for Node projects
+            if stack == "node" and not (source_dir / "node_modules").exists():
+                self.notify(
+                    "BootAgent: node_modules no encontrado tras install — reintentando sin --legacy-peer-deps.",
+                    "HEALTH_WARN",
+                    {"phase": "boot_install", "round": round_idx + 1, "stack": stack, "origin": "npm_fallback"},
+                )
+                fallback_install = ["npm", "install"]
+                install_ok2, install_out2 = await _run_cmd(fallback_install, source_dir, INSTALL_TIMEOUT)
+                if not install_ok2 or not (source_dir / "node_modules").exists():
+                    attempt.install_ok = False
+                    attempt.install_output += f"\n[FALLBACK]\n{install_out2[-1000:]}"
+                    errors = parse_errors(install_out2, source_dir)
+                    attempt.errors = errors
+                    report.attempts.append(attempt)
+                    break
 
             # Step 2: Boot
             boot_ok, boot_out = await _boot_and_capture(run_cmd, source_dir, BOOT_TIMEOUT)
@@ -338,7 +481,7 @@ class BootAgent:
                 self.notify(
                     f"BootAgent: proyecto arranca correctamente en ronda {round_idx+1}.",
                     "LOG",
-                    {"round": round_idx + 1, "stack": stack},
+                    {"phase": "boot", "round": round_idx + 1, "stack": stack},
                 )
                 report.final_ok = True
                 report.attempts.append(attempt)
@@ -352,7 +495,7 @@ class BootAgent:
             self.notify(
                 f"BootAgent ronda {round_idx+1}: el proyecto no arranca — {len(errors)} error(es) detectados.",
                 "HEALTH_WARN",
-                {"round": round_idx + 1, "errors": [e.to_dict() for e in errors[:3]]},
+                {"phase": "boot", "round": round_idx + 1, "stack": stack, "origin": "boot_crash", "errors": [e.to_dict() for e in errors[:3]]},
             )
 
             fixed = await self._fix_errors(errors, boot_out, source_dir, blueprint, architecture)
@@ -361,10 +504,14 @@ class BootAgent:
                 break
 
         if not report.final_ok:
+            last = report.attempts[-1] if report.attempts else None
+            last_phase = "install" if (last and not last.install_ok) else "boot"
+            last_errors = [e.message for e in (last.errors[:3] if last else [])]
             self.notify(
-                f"BootAgent: proyecto no pudo arrancar tras {len(report.attempts)} intento(s).",
+                f"BootAgent: proyecto no pudo arrancar tras {len(report.attempts)} intento(s). "
+                f"Última fase fallida: {last_phase}. Errores: {'; '.join(last_errors) or 'desconocido'}",
                 "HEALTH_WARN",
-                report.to_dict(),
+                {**report.to_dict(), "last_phase_failed": last_phase, "last_errors": last_errors},
             )
 
         return report
@@ -466,7 +613,18 @@ class BootAgent:
                     return patched
 
             except Exception as e:
-                self.notify(f"BootAgent fix error: {e}", "LOG", {})
+                import traceback as _tb
+                self.notify(
+                    f"BootAgent fix error ({provider}): {type(e).__name__}: {e}",
+                    "HEALTH_WARN",
+                    {
+                        "phase": "boot_fix",
+                        "provider": provider,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "traceback": _tb.format_exc()[-1500:],
+                    },
+                )
                 continue
 
         return []

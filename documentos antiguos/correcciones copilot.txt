@@ -1,0 +1,933 @@
+HOJA DE RUTA - CORRECCIONES COPILOT
+
+Objetivo
+--------
+Aplicar correcciones al sistema de revision con Copilot sin romper el pipeline.
+Esta version de la hoja ya incorpora el estado actual del repo: varios bugs del
+diagnostico inicial ya parecen corregidos o cubiertos por tests, asi que la prioridad
+real pasa a ser alinear el comportamiento entre fases y hacer mas accionable la salida
+de Copilot.
+
+CONTEXTO TECNICO MINIMO PARA CLAUDE CODE
+----------------------------------------
+Antes de implementar nada, Claude Code debe asumir este contexto del repo actual:
+
+- El entry point principal sigue siendo SodaOrchestrator en kernel/orchestrator.py,
+  pero buena parte de la logica de fases ya no vive ahi: requirements, architecture,
+  planning y validation estan en kernel/orchestration/phase_mixin.py.
+- El consultor de Copilot esta en kernel/intelligence/copilot_consultant.py y hoy
+  sigue trabajando principalmente con un contrato simple compatible con
+  has_suggestion, message y changes.
+- El orquestador sigue usando _copilot_suggest(...) como punto comun de evaluacion,
+  pero Development tiene un loop mas fuerte que el resto de las fases.
+- El comportamiento que hoy parece realmente pendiente no es rehacer fixes viejos,
+  sino alinear Validation entre run() y resume(), enriquecer el contrato de Copilot,
+  centralizar la decision y luego integrar esa decision en fases concretas.
+- Ya existe red de seguridad relevante en tests/test_unit.py para fallbacks async,
+  rama non-software, seleccion por fase y /api/config. Esa base debe reutilizarse.
+- El workspace esta sucio y tiene ruido fuera del objetivo inmediato. No usar el estado
+  global del repo como señal principal si el slice puede validarse con tests locales.
+
+ANALISIS DE PRECAUCIONES PARA NO IMPACTAR NEGATIVAMENTE EL CODIGO
+----------------------------------------------------------------
+Estas son las precauciones que Claude Code debe considerar como analisis previo obligatorio:
+
+1. Riesgo de tocar el archivo equivocado
+----------------------------------------
+El mayor riesgo inmediato es modificar solo kernel/orchestrator.py y olvidar que varias
+fases reales viven en kernel/orchestration/phase_mixin.py. Si el cambio afecta requirements,
+architecture, planning o validation, hay que revisar ambos puntos antes de editar.
+
+2. Riesgo de reabrir bugs ya cerrados
+-------------------------------------
+No reimplementar fixes del diagnostico inicial sin prueba actual de regresion.
+En especial, no tocar de nuevo fallback async, rama non-software o /api/config salvo que
+un test o una lectura puntual demuestre que volvieron a romperse.
+
+3. Riesgo de romper compatibilidad del contrato Copilot
+-------------------------------------------------------
+Si cambia la salida de CopilotConsultant, los consumidores actuales pueden romperse en cadena.
+Por eso el contrato nuevo debe introducirse primero como normalizacion compatible hacia atras
+y solo despues consumirse en orchestrator y phase_mixin.
+
+4. Riesgo de divergencia entre run() y resume()
+-----------------------------------------------
+No corregir solo uno de los dos caminos si el bug pertenece a validation.
+La asimetria actual entre run() y resume() es justamente uno de los problemas a resolver,
+asi que cualquier fix de validation debe verificarse en ambos caminos o extraerse a una ruta comun.
+
+5. Riesgo estructural en Architecture y Planning
+------------------------------------------------
+Architecture no es una fase aislada: alimenta GoalTree, ExecutionPlan y Development.
+Si se reemplaza un comportamiento advisory por regeneracion o reparacion real, hay que verificar
+que la salida siga siendo consumible por planning y por las fases siguientes antes de avanzar.
+
+6. Riesgo de degradar el mejor loop actual
+------------------------------------------
+Development ya tiene el loop mas fuerte del sistema: generar -> revisar -> regenerar -> verificar.
+No usar Development como primer lugar de experimentacion del contrato enriquecido. Ese ajuste va
+al final, cuando el manejo comun y las fases previas ya esten estables.
+
+7. Riesgo de mezclar fix funcional con refactor
+-----------------------------------------------
+No combinar en un mismo slice:
+  - alineacion run()/resume(),
+  - rediseño del contrato Copilot,
+  - integracion de fases,
+  - limpieza de providers/config,
+  - refactor estetico.
+Si el cambio necesita mas de una de esas cosas, dividirlo.
+
+8. Riesgo de validar demasiado tarde
+------------------------------------
+La validacion tiene que ser inmediata y acotada. El orden correcto es:
+  - test mas cercano al cambio,
+  - regresion del subsistema,
+  - solo despues una regresion mas amplia.
+No usar una validacion global como sustituto del test discriminante del slice.
+
+9. Riesgo de tocar archivos que no forman parte del objetivo
+------------------------------------------------------------
+No tocar contenido de projects/.
+No usar .soda_backups/ ni .webview_cache/ como superficie de edicion.
+Esos directorios pueden servir como referencia historica o ruido del workspace, pero no deben
+entrar en el cambio salvo instruccion explicita.
+
+10. Riesgo de interpretar el repo sucio como fallo del slice
+------------------------------------------------------------
+El repo puede tener cambios no relacionados. No intentar limpiarlos ni revertirlos.
+La validacion del slice debe basarse en el archivo tocado, el test cercano y el comportamiento
+objetivo, no en dejar el repositorio completo sin cambios.
+
+11. Criterio de avance seguro
+-----------------------------
+Claude Code solo puede pasar a la siguiente fase si el slice actual queda verde.
+Si una validacion falla, la obligacion es reparar ese mismo slice o revertirlo, no abrir otro frente.
+
+INSTRUCCION OPERATIVA CONSOLIDADA PARA CLAUDE CODE
+--------------------------------------------------
+Esta hoja no es descriptiva. Es una secuencia de ejecucion.
+Claude Code debe seguir siempre este protocolo y no desviarse de el salvo que una validacion
+lo obligue a corregir el mismo slice.
+
+Definicion de "verde"
+----------------------
+Un slice queda verde solo si se cumplen las tres condiciones:
+  1. El cambio no introduce errores nuevos.
+  2. El test mas cercano al cambio pasa.
+  3. La regresion relevante del subsistema sigue pasando.
+
+Alcance
+-------
+- Trabajar solo sobre el codigo fuente del repo.
+- No tocar contenido de projects/.
+- No reabrir bugs que hoy ya estan resueltos salvo que una validacion los vuelva a romper.
+- No mezclar estas correcciones con refactors no relacionados.
+- Mantener cambios pequenos, reversibles y verificables.
+
+Protocolo obligatorio por slice
+-------------------------------
+1. Antes de tocar codigo, leer el archivo objetivo y el test mas cercano.
+2. Confirmar que el problema sigue vigente en el repo actual y no es un hallazgo viejo.
+3. Formular el bug concreto a corregir y elegir la validacion minima que puede falsarlo.
+4. Hacer el cambio mas pequeno posible.
+5. Ejecutar primero la validacion minima del slice.
+6. Si pasa, ejecutar la regresion relacionada del subsistema.
+7. Si ambas pasan, cerrar el slice y avanzar.
+8. Si alguna falla, reparar ese mismo slice o volver atras antes de abrir otro frente.
+
+Regla unica de seguridad
+------------------------
+No encadenar varios cambios grandes sin una validacion acotada entre medio.
+
+Regla unica sobre tests
+-----------------------
+Antes de crear tests nuevos, revisar la cobertura ya existente en tests/test_unit.py y
+tests/test_pipeline.py. Reutilizar o extender regresiones ya presentes antes de duplicar
+casos con otro nombre o en otro archivo.
+
+
+BASELINE - NO REABRIR LO YA CERRADO
+===================================
+
+Objetivo
+  Confirmar que el roadmap arranca desde el estado real del repo y no desde hallazgos viejos.
+
+Estado actual que debe considerarse base verde
+---------------------------------------------
+- El fallback async de capabilities parece resuelto y cubierto por regresiones existentes.
+- La rama non-software ya no usa el punto de llamada estatica que motivaba el fix inicial.
+- /api/config ya no aparece duplicado en la implementacion actual.
+- El dispatch generico y parte del soporte de providers custom ya existe.
+
+Tests a conservar como red de seguridad
+--------------------------------------
+- TestSkillMatcherAsyncFallback
+- TestProfileMatcherAsyncFallback
+- TestNonSoftwarePipelineSkillContext
+- TestNoDuplicateApiConfigRoutes
+
+Chequeos sugeridos al inicio
+---------------------------
+- .\venv\Scripts\python.exe -m pytest tests/test_unit.py -k "TestSkillMatcherAsyncFallback or TestProfileMatcherAsyncFallback or TestNonSoftwarePipelineSkillContext or TestNoDuplicateApiConfigRoutes" -v
+
+Regla de esta baseline
+----------------------
+No implementar de nuevo estos fixes salvo que la validacion demuestre una regresion real.
+
+
+FASE 1 - ALINEAR VALIDATION ENTRE run() Y resume()
+=================================================
+
+Objetivo
+  Corregir la inconsistencia funcional mas clara del estado actual: resume() ya usa
+  review_validation + analisis Copilot antes de decidir una regeneracion, mientras que
+  run() todavia sigue un camino distinto.
+
+Archivos objetivo
+-----------------
+- kernel/orchestrator.py
+- kernel/orchestration/phase_mixin.py
+- tests/test_unit.py o tests/test_pipeline.py
+
+Cambios esperados
+-----------------
+- Hacer que run() y resume() compartan el mismo flujo para validation.
+- Reutilizar, extraer o centralizar la logica de review_validation y la decision de
+  targeted regeneration.
+- Tener presente que la decision de post-validation hoy se toma en orchestrator.py,
+  pero la regeneracion dirigida vive en phase_mixin.py.
+- No cambiar todavia el contrato completo de Copilot en este mismo slice.
+
+Razon
+-----
+Este es el fix con mejor relacion impacto/riesgo: corrige una divergencia real del pipeline
+sin abrir aun el rediseño mayor del contrato estructurado.
+
+Validacion minima inmediata
+--------------------------
+- Test o regresion que confirme que run() y resume() pasan por la misma decision cuando
+  validation encuentra errores.
+- Si no existe test puntual, agregar uno pequeño antes de tocar slices mas grandes.
+
+Checklist del slice
+-------------------
+- No mezclar este cambio con Requirements ni Architecture.
+- Confirmar que la rama de validation sigue soportando el caso sin sugerencias.
+- Cerrar el slice solo si run() y resume() quedan alineados.
+
+Condicion de cierre
+-------------------
+- La decision post-validation deja de depender de que el flujo venga de run() o de resume().
+
+
+FASE 2 - AMPLIAR EL CONTRATO ESTRUCTURADO DE COPILOT
+====================================================
+
+Objetivo
+  Hacer que Copilot devuelva hallazgos mas accionables sin romper a los consumidores actuales.
+
+Archivo objetivo
+----------------
+- kernel/intelligence/copilot_consultant.py
+
+Cambios esperados
+-----------------
+- Mantener compatibilidad con has_suggestion, message y changes.
+- Introducir un formato normalizado que permita leer por issue:
+    severity
+    scope
+    target_files
+    target_modules
+    diagnosis
+    proposed_fix
+    repair_mode
+    verification
+    confidence
+- Aceptar formato nuevo y viejo sin forzar una migracion total en el mismo commit.
+
+Razon
+-----
+Hoy Copilot detecta y resume, pero el orquestador todavia tiene poca informacion para decidir
+si debe anotar, regenerar, rerunear una fase o ignorar una sugerencia debil.
+
+Validacion minima inmediata
+--------------------------
+- Tests unitarios de normalizacion de salida.
+- Casos con payload heredado y payload enriquecido.
+
+Checklist del slice
+-------------------
+- No romper los call sites existentes.
+- Introducir primero normalizacion y helpers de lectura.
+- Dejar el consumo avanzado para la fase siguiente.
+
+Condicion de cierre
+-------------------
+- CopilotConsultant puede producir o normalizar hallazgos enriquecidos sin romper el flujo actual.
+
+
+FASE 3 - CREAR UN MANEJADOR COMUN DE REVIEWS COPILOT
+====================================================
+
+Objetivo
+  Evitar que cada fase interprete por su cuenta la salida de Copilot.
+
+Archivos objetivo
+-----------------
+- kernel/orchestrator.py
+- kernel/orchestration/phase_mixin.py
+- tests/test_unit.py
+
+Cambios esperados
+-----------------
+- Agregar una funcion comun, por ejemplo _handle_copilot_review(...), o una abstraccion equivalente.
+- Esa funcion debe:
+    a) recibir el review normalizado,
+    b) clasificar alcance y severidad,
+    c) decidir la estrategia minima,
+    d) devolver un resultado util para la fase llamadora.
+- Mantener a Development fuera de este cambio salvo compatibilidad minima.
+
+Razon
+-----
+La logica de fases ya no vive solo en orchestrator.py; requirements, architecture y planning
+se resuelven en phase_mixin.py. Si no se centraliza ahi tambien, el comportamiento seguira dispar.
+
+Validacion minima inmediata
+--------------------------
+- Testear al menos dos estrategias de salida.
+- Confirmar compatibilidad con reviews heredados y reviews enriquecidos.
+
+Checklist del slice
+-------------------
+- No cambiar aun el comportamiento final de todas las fases en un solo commit.
+- Diseñar la funcion comun para que el llamador decida si aplicar, regenerar o solo anotar.
+
+Condicion de cierre
+-------------------
+- Existe un punto comun verificable para interpretar las decisiones de Copilot.
+
+
+FASE 4 - INTEGRAR PRIMERO EN REQUIREMENTS Y VALIDATION
+======================================================
+
+Objetivo
+  Aplicar el nuevo manejo comun donde el valor es mas alto y el riesgo sigue siendo controlable.
+
+Archivos objetivo
+-----------------
+- kernel/orchestration/phase_mixin.py
+- kernel/orchestrator.py
+- tests/test_unit.py o tests/test_pipeline.py
+
+Cambios esperados
+-----------------
+- Requirements debe dejar de depender solo de una sugerencia textual libre.
+- Validation debe usar el mismo manejador comun tanto en run() como en resume().
+- No tocar Architecture ni Planning dentro del mismo slice.
+
+Razon
+-----
+Requirements y Validation son los dos puntos donde una mejora del contrato y de la decision
+produce mas valor sin abrir todavia el riesgo estructural de Architecture.
+
+Validacion minima inmediata
+--------------------------
+- Tests de flujo con review positivo y review negativo.
+- Confirmar que una sugerencia debil no fuerza regeneracion y una sugerencia fuerte si puede hacerlo.
+
+Checklist del slice
+-------------------
+- Integrar Requirements primero.
+- Validar.
+- Integrar Validation despues.
+- Validar otra vez.
+
+Condicion de cierre
+-------------------
+- Requirements y Validation reaccionan de forma consistente y usan el mismo lenguaje de decision.
+
+
+FASE 5 - INTEGRAR DESPUES EN ARCHITECTURE Y PLANNING
+====================================================
+
+Objetivo
+  Corregir los puntos donde Copilot hoy detecta hallazgos pero el sistema todavia actua poco o nada.
+
+Archivos objetivo
+-----------------
+- kernel/orchestration/phase_mixin.py
+- tests/test_unit.py o tests/test_pipeline.py
+
+Cambios esperados
+-----------------
+- Architecture debe dejar de limitarse a guardar _copilot_note cuando el hallazgo es estructural.
+- Planning debe poder rerunear o recalcular si Copilot detecta problemas reales de orden o dependencias.
+- Separar Architecture y Planning si el cambio crece demasiado.
+
+Razon
+-----
+Este es el punto de mayor impacto funcional despues de validation, pero tambien el de mayor riesgo
+porque toca la salida que alimenta GoalTree, ExecutionPlan y desarrollo.
+
+Validacion minima inmediata
+--------------------------
+- Tests que comprueben que un review de architecture o planning puede cambiar el resultado final.
+- Confirmar que la salida corregida sigue siendo consumible por las fases siguientes.
+
+Checklist del slice
+-------------------
+- No degradar DependencyGraph.
+- Confirmar que la arquitectura corregida sigue produciendo execution_plan valido.
+- Si hace falta, dividir en dos slices separados.
+
+Condicion de cierre
+-------------------
+- Un hallazgo estructural de Copilot deja de ser solo advisory.
+
+
+FASE 6 - ADAPTAR DEVELOPMENT SIN ROMPER EL LOOP ACTUAL
+======================================================
+
+Objetivo
+  Hacer que el loop mas fuerte del sistema aproveche el contrato enriquecido sin perder estabilidad.
+
+Archivos objetivo
+-----------------
+- kernel/orchestrator.py
+- kernel/code_generator.py
+- tests/test_pipeline.py
+
+Cambios esperados
+-----------------
+- Mantener el flujo actual de generar -> revisar -> regenerar -> verificar.
+- Permitir que el feedback estructurado reemplace gradualmente al bloque textual libre.
+- Mantener el numero de rondas segun copilot_temperature.
+
+Razon
+-----
+Development ya es el mejor loop del sistema. Conviene tocarlo al final, cuando el contrato comun
+y el manejo de fases ya esten estables.
+
+Validacion minima inmediata
+--------------------------
+- Tests que comprueben que el feedback estructurado sigue disparando rondas de generacion.
+
+Checklist del slice
+-------------------
+- No romper generar -> revisar -> regenerar -> verificar.
+- Si code_generator necesita adaptacion, hacerlo en un cambio separado.
+
+Condicion de cierre
+-------------------
+- Development sigue verde y entiende el contrato enriquecido.
+
+
+FASE 7 - LIMPIEZA SOLO DONDE SIGA HABIENDO COMPORTAMIENTO ENGANOSO
+=================================================================
+
+Objetivo
+  Tratar como trabajo opcional o de cierre solo lo que siga incompleto despues de las fases funcionales.
+
+Puntos a revisar antes de tocar
+-------------------------------
+- Ver si el soporte actual de custom providers sigue teniendo huecos reales.
+- Ver si alguna fase critica sigue ignorando ai_phase_provider.
+- Ver si /api/config necesita mas cleanup o si el estado actual ya es suficiente.
+
+Regla de esta fase
+------------------
+No asumir que estos puntos siguen rotos. Revalidarlos primero en el repo actual.
+
+Posibles slices
+---------------
+- Completar soporte de custom providers si algun caso real sigue decorativo.
+- Migrar fases concretas a _call_for_role(...) solo si la configuracion por fase no se aplica.
+- Ajustar el contrato de /api/config solo si la UI actual realmente necesita mas que el merge existente.
+
+Condicion de cierre
+-------------------
+- No quedan comportamientos decorativos demostrables en providers ni en configuracion.
+
+
+REGLAS PARA NO ROMPER EL CODIGO
+===============================
+
+1. Trabajar por slices chicos
+-----------------------------
+No mezclar en el mismo cambio:
+  - alineacion validation,
+  - redisenos de contrato,
+  - integraciones de fases,
+  - limpieza de providers o config,
+  - refactors esteticos.
+
+2. Validar despues de cada cambio sustantivo
+--------------------------------------------
+Orden recomendado:
+  a) test mas cercano al cambio,
+  b) test del subsistema,
+  c) pytest completo,
+  d) chequeo manual puntual solo si hace falta.
+
+3. No cambiar APIs o contratos sin actualizar call sites en el mismo cambio
+---------------------------------------------------------------------------
+Si cambia una firma o un contrato estructurado, actualizar todos los puntos de uso
+en la misma tanda y cubrirlos con test.
+
+4. Si una validacion falla, reparar el mismo slice antes de abrir otro frente
+-----------------------------------------------------------------------------
+No seguir tocando mas capas si el test mas cercano todavia esta rojo.
+
+5. Mantener compatibilidad hacia atras cuando sea barato
+--------------------------------------------------------
+Especialmente en la salida de Copilot y en la configuracion del servidor.
+
+6. No tocar Development temprano
+--------------------------------
+Primero alinear validation y fases previas. Development va al final.
+
+7. Estrategia de retroceso si un slice rompe codigo existente
+------------------------------------------------------------
+Si el test mas cercano al cambio falla y la causa no se corrige en el mismo slice:
+  - revertir el ultimo cambio local de ese slice,
+  - volver al ultimo estado verde,
+  - reducir el alcance,
+  - reintentar con una correccion mas pequena.
+
+No abrir una fase nueva mientras el slice actual siga rojo.
+
+8. Preferir ampliar regresiones existentes antes que crear suites paralelas
+--------------------------------------------------------------------------
+Para esta hoja de ruta ya existe base de regresion util para:
+  - fallback async en capabilities,
+  - rama non-software,
+  - /api/config,
+  - overrides de provider por fase.
+
+Primero extender esos tests. Solo crear archivos nuevos si el comportamiento a cubrir no
+encaja razonablemente en la suite actual.
+
+9. Formato de entrega esperado por slice
+----------------------------------------
+Al cerrar cada slice, Claude Code debe dejar claro:
+  - que archivos toco,
+  - que bug resolvio,
+  - que test corrio,
+  - si el slice quedo verde o no.
+
+10. No considerar un cambio "terminado" solo porque compila
+-----------------------------------------------------------
+Para esta hoja de ruta, terminado significa:
+  - bug corregido,
+  - regresion relevante verde,
+  - sin degradacion visible en tests cercanos.
+
+
+ORDEN EXACTO DE IMPLEMENTACION
+=============================
+
+Paso 1
+  Correr baseline corta para no reabrir bugs ya cerrados.
+
+Paso 2
+  Alinear validation entre run() y resume().
+
+Paso 3
+  Ampliar contrato de salida de Copilot con compatibilidad hacia atras.
+
+Paso 4
+  Crear manejador comun de hallazgos en orchestrator + phase_mixin.
+
+Paso 5
+  Integrar primero en Requirements.
+
+Paso 6
+  Integrar despues en Validation y confirmar que run() y resume() siguen alineados.
+
+Paso 7
+  Integrar luego en Architecture.
+
+Paso 8
+  Integrar despues en Planning.
+
+Paso 9
+  Ajustar Development para consumir issues estructurados sin perder el loop actual.
+
+Paso 10
+  Revisar providers/config solo si siguen teniendo comportamiento decorativo real.
+
+Paso 11
+  Correr regresion completa:
+    - .\venv\Scripts\python.exe -m pytest tests/ -v
+
+Paso 12
+  Revisar resultados fallidos y no corregir tests ajenos si no estan relacionados con el slice.
+
+Paso 13
+  Solo despues de verde completo, considerar limpieza menor o refactor acotado.
+
+
+CRITERIO FINAL DE ACEPTACION
+============================
+
+La hoja de ruta se considera cumplida cuando:
+  - la baseline inicial sigue verde y no se reabren bugs ya cerrados,
+  - run() y resume() corrigen validation de manera alineada,
+  - Copilot devuelve hallazgos accionables de forma consistente,
+  - Requirements, Validation, Architecture y Planning reaccionan con una logica comun,
+  - Development sigue verde despues de adoptar el contrato enriquecido,
+  - providers o config no conservan comportamiento decorativo demostrable,
+  - la suite de tests sigue pasando.
+
+RESUMEN EJECUTIVO PARA CLAUDE CODE
+=================================
+
+Si solo lees esta seccion, ejecuta asi:
+  1. Lee primero el contexto tecnico minimo y el analisis de precauciones del inicio.
+  2. Aplica despues la instruccion operativa consolidada; esa manda sobre el resto.
+  3. No vuelvas a implementar fixes que hoy ya parecen cerrados; primero valida baseline.
+  4. Corrige primero la asimetria run() versus resume() en validation.
+  5. Despues amplia el contrato de Copilot y crea el manejador comun.
+  6. Integra luego por capas: Requirements, Validation, Architecture, Planning y al final Development.
+  7. Trata providers y config como limpieza final, no como prioridad inicial.
+
+
+ANEXO - HOJA DE RUTA PARA VALIDACION, INSTALACION Y ARRANQUE
+============================================================
+
+Objetivo
+--------
+Corregir el tramo final del pipeline donde hoy se mezclan validacion estatica,
+instalacion de dependencias, arranque del proyecto y smoke checks, sin convertir
+errores de entorno en falsos bloqueos ni romper el cierre actual del pipeline.
+
+Estado actual del repo que esta hoja asume como punto de partida
+----------------------------------------------------------------
+- _phase_validation en kernel/orchestration/phase_mixin.py delega en
+  kernel/project_validator.py.
+- ProjectValidator instala dependencias y corre un check de build o compilacion
+  segun stack.
+- _validate_and_maybe_regen en kernel/orchestrator.py ya existe y puede disparar
+  regeneracion dirigida si los errores quedan concentrados por modulo.
+- El orquestador ya no cierra siempre en DONE: run() y resume() usan
+  _can_reach_done(...), pero ese guard aun es conservador y solo mira ciertos
+  patrones estructurales de error.
+- BootAgent intenta instalar, arrancar, capturar logs y corregir con IA.
+- ProjectRunner vuelve a instalar, lanzar y hacer smoke HTTP.
+- DockerSandbox existe, pero hoy no debe asumirse como prueba fuerte de ejecucion
+  real del proyecto.
+
+Problema real a corregir
+------------------------
+No es que SODA no mire nada. Mira muchas cosas, pero las mira desde varias capas
+distintas y no todas tienen autoridad para bloquear DONE.
+
+Hoy el riesgo principal es este:
+- un mismo fallo de dependencias puede aparecer en ProjectValidator, BootAgent y
+  ProjectRunner;
+- el smoke HTTP puede avisar fallo pero no necesariamente bloquear el pipeline;
+- DockerSandbox puede dar una falsa sensacion de cobertura;
+- el criterio de cierre mezcla errores del codigo generado con problemas del entorno.
+
+Principio rector de esta hoja
+-----------------------------
+Primero separar evidencia de ejecucion real de evidencia estatica.
+Despues definir que tipos de error bloquean DONE.
+Recien al final endurecer el cierre del pipeline.
+
+Regla de seguridad critica
+--------------------------
+No endurecer DONE antes de clasificar los errores.
+Si se hace al reves, se van a bloquear proyectos validos por:
+  - Docker no disponible,
+  - dependencias externas no presentes en el host,
+  - servicios o API keys ausentes,
+  - stacks donde el smoke HTTP no es la senal correcta.
+
+
+FASE R0 - BASELINE DE OBSERVABILIDAD
+====================================
+
+Objetivo
+  Confirmar exactamente que capa detecta cada fallo sin cambiar aun el comportamiento.
+
+Archivos a revisar primero
+--------------------------
+- kernel/orchestration/phase_mixin.py
+- kernel/project_validator.py
+- kernel/execution/boot_agent.py
+- kernel/execution/project_runner.py
+- kernel/orchestrator.py
+
+Cambios permitidos en esta fase
+-------------------------------
+- Solo mejoras de trazabilidad y reportes.
+- No cambiar el criterio de DONE.
+- No cambiar el timeout critico de _notify().
+
+Resultado esperado
+------------------
+- Cada intento debe dejar claro:
+  1. si fallo install,
+  2. si fallo build/check,
+  3. si fallo boot,
+  4. si fallo smoke,
+  5. en que capa se detecto.
+
+Validacion minima inmediata
+--------------------------
+- Extender tests cercanos para asegurar que los reportes incluyen phase, reason y origen.
+
+Condicion de cierre
+-------------------
+- Ya no hay que inferir a ojo si un fallo vino de ProjectValidator, BootAgent o ProjectRunner.
+
+
+FASE R1 - DEFINIR TAXONOMIA DE ERRORES
+======================================
+
+Objetivo
+  Separar errores bloqueantes del codigo generado de errores tolerables del entorno.
+
+Salida esperada
+---------------
+Crear una clasificacion pequena y explicita, por ejemplo:
+
+- BLOQUEANTES DEL CODIGO
+  - SyntaxError
+  - IndentationError
+  - NameError
+  - ImportError sobre simbolos internos del proyecto
+  - errores de compilacion que prueban codigo roto del repo generado
+
+- TOLERABLES DEL ENTORNO
+  - Docker no disponible
+  - comando no encontrado en host
+  - dependencias opcionales o externas ausentes
+  - API keys no configuradas
+  - servicios remotos no accesibles
+  - smoke HTTP no aplicable al stack
+
+- ADVISORY RUNTIME
+  - la app arranca pero responde 404/500 en un probe inicial
+  - warnings de startup sin crash
+
+Regla de esta fase
+------------------
+No cambiar aun _can_reach_done().
+Primero escribir tests de decision con fixtures pequenos de errores.
+
+Condicion de cierre
+-------------------
+- Existe una tabla de decision verificable para "bloquea DONE" versus "solo advierte".
+
+
+FASE R2 - HACER DE _can_reach_done() UNA DECISION EXPLICITA Y TESTEADA
+=======================================================================
+
+Objetivo
+  Reemplazar el guard actual por una decision basada en la taxonomia definida.
+
+Archivo objetivo
+----------------
+- kernel/orchestrator.py
+- tests/test_unit.py
+
+Cambios esperados
+-----------------
+- Mantener la firma pequena y local.
+- Basar la decision en clasificacion, no solo en substring sueltos.
+- Seguir permitiendo skipped cuando el problema es del entorno.
+
+Orden correcto
+--------------
+1. tests de decision,
+2. helper de clasificacion,
+3. adaptacion de _can_reach_done(),
+4. rerun de tests cercanos.
+
+Condicion de cierre
+-------------------
+- DONE solo se alcanza cuando:
+  - validation_result.fixed es True, o
+  - el fallo restante es tolerable segun la clasificacion.
+
+
+FASE R3 - ELIMINAR DOBLE O TRIPLE RESPONSABILIDAD SIN CAMBIAR AUN EL RESULTADO FINAL
+======================================================================================
+
+Objetivo
+  Reducir chequeos redundantes para que cada capa tenga una responsabilidad clara.
+
+Distribucion recomendada
+------------------------
+- ProjectValidator
+  fuente de verdad para install + build/check estatico.
+
+- BootAgent
+  fuente de verdad para install + boot + captura de errores de arranque + fix loop.
+
+- ProjectRunner
+  fuente de verdad para launch final + smoke HTTP + smoke suite.
+
+Regla de esta fase
+------------------
+No borrar una capa completa en el primer cambio.
+Primero marcar una como autoritativa y convertir las otras en advisory donde corresponda.
+
+Slice sugerido
+--------------
+- Evitar que ProjectRunner vuelva a "instalar" si BootAgent ya dejo evidencia valida
+  de install para ese intento.
+- Evitar que el orquestador interprete tres veces el mismo fallo como tres problemas distintos.
+
+Condicion de cierre
+-------------------
+- Install, boot y smoke ya no aparecen duplicados como si fueran fallos independientes.
+
+
+FASE R4 - ENDURECER EL SMOKE PARA QUE LA SENAL SEA UTIL
+=======================================================
+
+Objetivo
+  Hacer que el smoke represente mejor "la app esta viva" sin romper stacks no HTTP.
+
+Problema actual
+---------------
+- El smoke de ProjectRunner acepta cualquier HTTP entre 200 y 499.
+- Eso sirve para detectar que hay algo escuchando, pero no prueba salud funcional.
+
+Estrategia segura
+-----------------
+- No volver el smoke mas estricto para todos los stacks de una vez.
+- Introducir primero un modo por stack o por tipo de proyecto.
+- Mantener "probe basico" como fallback.
+
+Orden recomendado
+-----------------
+1. agregar metadata de probe esperada,
+2. soportar excepciones por stack,
+3. endurecer solo donde haya evidencia clara de endpoint raiz esperable.
+
+Condicion de cierre
+-------------------
+- El smoke deja de ser enganoso sin pasar a ser una fuente masiva de falsos negativos.
+
+
+FASE R5 - TRATAR DOCKER SANDBOX COMO ADVISORY HASTA QUE SEA CONFIABLE
+=====================================================================
+
+Objetivo
+  Evitar que una capa incompleta se perciba como validacion fuerte.
+
+Regla de esta fase
+------------------
+- Si DockerSandbox no ejecuta realmente el test suite esperado, no usarlo como criterio
+  de bloqueo ni como evidencia principal de calidad.
+- Mientras tanto, degradarlo a chequeo advisory y dejarlo claro en logs/reportes.
+
+Dos opciones validas
+--------------------
+- Opcion A: dejarlo explicitamente como advisory hasta completarlo.
+- Opcion B: completarlo de verdad y recien entonces promoverlo en el pipeline.
+
+Condicion de cierre
+-------------------
+- Docker deja de vender una garantia que hoy no puede sostener.
+
+
+FASE R6 - CIERRE FINAL DEL PIPELINE BASADO EN EVIDENCIA MINIMA SUFICIENTE
+=========================================================================
+
+Objetivo
+  Definir la condicion final de exito del tramo runtime.
+
+Propuesta de cierre seguro
+--------------------------
+Marcar DONE solo si se cumple esta evidencia minima:
+
+1. Validation no deja errores bloqueantes del codigo generado.
+2. BootAgent no reporta crash estructural del arranque.
+3. El smoke aplicable al stack pasa, o el stack esta explicitamente marcado como no-HTTP.
+
+Marcar FAILED o estado equivalente si:
+--------------------------------------
+- hay error bloqueante del codigo,
+- el arranque rompe de forma estructural,
+- o el smoke obligatorio del stack falla de forma persistente.
+
+Mantener HEALTH_WARN si:
+------------------------
+- el problema es de entorno,
+- el proyecto requiere configuracion externa,
+- o la verificacion disponible no alcanza para una conclusion mas fuerte.
+
+Condicion de cierre
+-------------------
+- El DONE final deja de ser "compilo algo" y pasa a significar "hay evidencia minima suficiente de que el proyecto generado es ejecutable".
+
+
+TESTS MINIMOS RECOMENDADOS PARA ESTA HOJA
+=========================================
+
+1. Tests de clasificacion
+-------------------------
+- errores estructurales del codigo bloquean DONE.
+- errores de entorno no bloquean DONE.
+
+2. Tests de decision final
+--------------------------
+- run() no marca DONE cuando _can_reach_done() devuelve False.
+- resume() mantiene el mismo criterio.
+- import_from_code() no queda desalineado.
+
+3. Tests de smoke
+-----------------
+- un stack HTTP con connection_error queda en warning o fail segun clasificacion.
+- un stack no-HTTP no se penaliza por no tener probe HTTP valido.
+
+4. Tests de no regresion
+------------------------
+- la validacion comun sigue pasando.
+- no se rompe el loop de targeted regeneration.
+- no se toca el timeout critico de _notify().
+
+
+ORDEN EXACTO DE IMPLEMENTACION PARA ESTE ANEXO
+==============================================
+
+Paso R1
+  Baseline de observabilidad del tramo validation -> boot -> smoke.
+
+Paso R2
+  Definir taxonomia de errores con tests pequenos.
+
+Paso R3
+  Adaptar _can_reach_done() para usar esa taxonomia.
+
+Paso R4
+  Reducir duplicacion de responsabilidades entre ProjectValidator, BootAgent y ProjectRunner.
+
+Paso R5
+  Mejorar el smoke solo donde el stack lo soporte.
+
+Paso R6
+  Degradar DockerSandbox a advisory o completarlo de verdad.
+
+Paso R7
+  Recien entonces endurecer el cierre final a DONE/FAILED segun evidencia minima suficiente.
+
+
+CRITERIO FINAL DE ACEPTACION DE ESTE ANEXO
+==========================================
+
+Esta correccion se considera bien hecha solo si:
+- ya no hay ambiguedad sobre donde fallo install, build, boot o smoke,
+- los errores del entorno no bloquean proyectos validos,
+- los errores estructurales del codigo si bloquean DONE,
+- el runtime smoke deja de ser ornamental,
+- DockerSandbox deja de ser una senal enganosa,
+- run(), resume() e import_from_code() cierran con el mismo criterio,
+- y los tests cercanos siguen verdes despues de cada slice.

@@ -1,0 +1,21 @@
+name: skill_nodejs
+category: backend_framework
+description: Node.js/Express REST backend with async/await, middleware, and JSON APIs
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+- node
+- nodejs
+- express
+- javascript backend
+- js backend
+- npm
+- javascript server
+version: '1.0'

@@ -6,6 +6,7 @@ from typing import Optional
 EXTERNAL_EVENTS = {
     "START", "DONE", "FAILED", "CHECKPOINT",
     "HEALTH_WARN", "WISDOM", "BRANCH_CREATED", "EVOLUTION",
+    "USER_QUESTION",
 }
 
 
@@ -33,6 +34,7 @@ class MessagingGateway(ABC):
             "WISDOM":        "[WS]",
             "BRANCH_CREATED":"[BR]",
             "EVOLUTION":     "[EV]",
+            "USER_QUESTION": "[?]",
         }
         icon = icons.get(event_type, "[--]")
         return f"SODA {icon} {message}"

@@ -1,0 +1,28 @@
+name: skill_finance
+category: domain_discipline
+description: Financial modeling, unit economics, forecasting, P&L, cash flow, valuation, and pricing strategy
+applies_to_roles:
+  code_generator:
+    load_level: summary
+  global_architect:
+    load_level: full
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: full
+activation_keywords:
+  - finance
+  - financial model
+  - forecast
+  - revenue
+  - unit economics
+  - cac
+  - ltv
+  - mrr
+  - arr
+  - cash flow
+  - pricing
+  - valuation
+  - p&l
+  - budget
+version: "1.0"

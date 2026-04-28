@@ -58,6 +58,11 @@ class Module(BaseModel):
     id: str = Field(..., description="Unique ID in snake_case")
     name: str = Field(..., description="Descriptive name")
     purpose: str = Field(..., min_length=20)
+    # Physical files inherited from topology.json (set by Gemini, carried through unchanged)
+    archivos_principales: list[str] = Field(
+        default_factory=list,
+        description="Physical file paths owned by this module (inherited from topology)",
+    )
     interfaces: list[Interface] = Field(..., min_length=1)
     depends_on: list[str] = Field(
         default_factory=list,

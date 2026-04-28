@@ -15,7 +15,7 @@ from kernel.integrity.validators.traceability import TraceabilityValidator
 # ---------------------------------------------------------------------------
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _method(**overrides) -> dict:

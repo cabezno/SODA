@@ -1,0 +1,22 @@
+activation_signals:
+- frontend
+- ui
+- interface
+- react
+- vue
+- angular
+- spa
+- dashboard
+- landing page
+- web app
+description: Builds modern frontend applications with React or Vue, TypeScript, and
+  component-driven architecture
+display_name: Frontend Developer
+experience_projects: 10
+name: profile_frontend_dev
+skills_included:
+- skill_react
+- skill_vue
+- skill_typescript
+- skill_nextjs
+version: '1.0'

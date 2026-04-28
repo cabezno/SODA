@@ -1,0 +1,33 @@
+name: skill_ui_design
+category: visual_design
+description: Visual UI design specialization — color theory, typography, spacing, layout composition, design tokens, and translating design specs into production-ready code
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+  docs_generator:
+    load_level: summary
+activation_keywords:
+  - ui design
+  - visual design
+  - color palette
+  - typography
+  - design tokens
+  - tailwind
+  - shadcn
+  - material ui
+  - chakra
+  - component design
+  - layout
+  - spacing
+  - frontend design
+  - design spec
+  - figma
+  - brand
+  - theme
+  - dark mode
+  - color scheme
+version: "1.0"

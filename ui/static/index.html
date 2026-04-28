@@ -2,194 +2,1296 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SODA Mission Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs/loader.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        *, *::before, *::after { box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    /* ═══════════════════════════════════════
+       SODA — Premium Dark Theme
+    ═══════════════════════════════════════ */
+    :root {
+        --void:    #000000;  --deep:    #000000;
+        --base:    #000000;  --surface: #0a0a0a;  --raised:  #111111;
+        --b-dim:   rgba(255,255,255,0.05);  --b-sub: rgba(255,255,255,0.08);
+        --b-mid:   rgba(0,229,255,0.18);    --b-hi:  rgba(0,229,255,0.35);
+        --blue:   #00e5ff;  --cyan:   #00e5ff;  --violet: #e040fb;
+        --green:  #34d399;  --amber:  #f5d060;  --red:    #f87171;  --orange: #fb923c;
+        --t1: #ffffff;  --t2: #b0bec5;  --t3: #546e7a;  --t4: #263238;
+        --font: 'Inter','Segoe UI',system-ui,sans-serif;
+        --mono: 'JetBrains Mono','Consolas',monospace;
+        --r1:4px; --r2:8px; --r3:12px;
+        --ease:0.16s ease; --slow:0.3s ease;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:var(--font);background:var(--void);color:var(--t1);display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.07);border-radius:3px;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.14);}
 
-        /* Top bar */
-        #topbar {
-            display: flex; align-items: center; gap: 16px;
-            padding: 0 16px; height: 42px; min-height: 42px;
-            background: #2d2d2d; border-bottom: 1px solid #3c3c3c; font-size: 12px;
-        }
-        #topbar .brand { font-weight: 700; font-size: 13px; color: #fff; letter-spacing: 1px; }
-        #topbar .model-badge {
-            padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600;
-            background: #0e4a72; color: #4ec9b0; border: 1px solid #007acc;
-        }
-        #phase-track { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-        .phase-step {
-            padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 600;
-            background: #3c3c3c; color: #666; border: 1px solid #444; transition: all 0.3s ease;
-        }
-        .phase-step.active { background: #0e4a72; color: #fff; border-color: #007acc; }
-        .phase-step.done   { background: #1e4620; color: #89d185; border-color: #4ec9b0; }
-        .phase-sep { color: #444; font-size: 10px; }
-        #status-dot {
-            width: 8px; height: 8px; border-radius: 50%; background: #444;
-            margin-left: 8px; transition: background 0.3s;
-        }
-        #status-dot.running { background: #cca700; animation: pulse 1.2s infinite; }
-        #status-dot.done    { background: #4ec9b0; }
-        #status-dot.failed  { background: #f44747; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    /* ── Tab Bar ── */
+    #tab-bar{display:flex;background:var(--deep);border-bottom:1px solid var(--b-dim);height:42px;flex-shrink:0;padding:0 6px;}
+    .tab{padding:0 20px;display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:500;color:var(--t3);border:none;background:none;outline:none;height:100%;position:relative;transition:color var(--ease);letter-spacing:.2px;font-family:var(--font);}
+    .tab::after{content:'';position:absolute;bottom:0;left:16px;right:16px;height:2px;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:2px 2px 0 0;opacity:0;transform:scaleX(.4);transition:opacity var(--ease),transform var(--ease);}
+    .tab.active{color:var(--amber);}
+    .tab.active::after{opacity:1;transform:scaleX(1);}
+    .tab:hover:not(.active){color:var(--t2);}
+    .tab i{font-size:11px;opacity:.65;}
 
-        /* Input bar */
-        #input-bar {
-            display: flex; align-items: center; gap: 10px;
-            padding: 6px 16px; background: #252526; border-bottom: 1px solid #3c3c3c;
-            flex-shrink: 0;
-        }
-        #description-input {
-            flex: 1; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px;
-            color: #d4d4d4; font-size: 12px; font-family: 'Segoe UI', sans-serif;
-            padding: 5px 10px; resize: none; outline: none; line-height: 1.4;
-            height: 30px; overflow: hidden; transition: height 0.2s ease, border-color 0.2s;
-        }
-        #description-input:focus { border-color: #007acc; height: 72px; overflow-y: auto; }
-        #description-input:disabled { opacity: 0.4; cursor: not-allowed; }
-        #run-btn {
-            padding: 5px 18px; background: #007acc; color: #fff; border: none;
-            border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;
-            white-space: nowrap; transition: background 0.2s, opacity 0.2s;
-        }
-        #run-btn:hover:not(:disabled) { background: #005fa3; }
-        #run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* ── Tab Contents ── */
+    .tab-content{display:none;height:calc(100vh - 42px);overflow:hidden;}
+    .tab-content.active{display:flex;flex-direction:column;}
+    #main-tab.active{display:flex;flex-direction:column;}
 
-        /* Layout */
-        #body { display: flex; flex: 1; overflow: hidden; }
+    /* ── Config Panel ── */
+    #config-tab,#sistema-cfg{background:var(--base);}
+    .cfg-wrap{max-width:980px;margin:0 auto;padding:36px 44px 80px;}
+    .cfg-title{font-size:22px;font-weight:800;background:linear-gradient(135deg,var(--cyan),var(--blue),var(--violet));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px;letter-spacing:-.5px;}
+    .cfg-subtitle{font-size:13px;color:var(--amber);margin-bottom:36px;}
+    .cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+    .cfg-card{background:rgba(255,255,255,.03);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--b-sub);border-radius:var(--r3);padding:22px 24px;display:flex;flex-direction:column;gap:14px;transition:border-color var(--ease),box-shadow var(--slow),transform var(--slow);}
+    .cfg-card:hover{border-color:var(--b-mid);box-shadow:0 12px 40px rgba(0,0,0,.45);transform:translateY(-2px);}
+    .cfg-card.cfg-full{grid-column:1/-1;}
+    .cfg-card-header{display:flex;align-items:center;gap:10px;}
+    .cfg-card-icon{font-size:20px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;background:var(--raised);border-radius:var(--r2);border:1px solid var(--b-dim);flex-shrink:0;}
+    .cfg-card-name{font-size:14px;font-weight:700;color:var(--t1);}
+    .cfg-card-role{font-size:10px;color:var(--t3);margin-left:auto;background:var(--raised);padding:2px 9px;border-radius:20px;border:1px solid var(--b-dim);letter-spacing:.3px;}
+    .cfg-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--raised);border:1px solid var(--b-sub);transition:all var(--ease);}
+    .cfg-status-dot.ok{background:var(--green);border-color:transparent;box-shadow:0 0 8px rgba(52,211,153,.55);}
+    .cfg-status-dot.err{background:var(--red);border-color:transparent;box-shadow:0 0 8px rgba(248,113,113,.55);}
+    .cfg-status-dot.warn{background:var(--amber);border-color:transparent;box-shadow:0 0 8px rgba(251,191,36,.55);}
+    .cfg-field{display:flex;flex-direction:column;gap:5px;}
+    .cfg-label{font-size:10px;color:var(--violet);font-weight:600;letter-spacing:.8px;text-transform:uppercase;}
+    .cfg-input{background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--mono);padding:8px 12px;outline:none;width:100%;transition:border-color var(--ease),box-shadow var(--ease);}
+    .cfg-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,229,255,.14);}
+    .cfg-input::placeholder{color:var(--t4);}
+    .cfg-select{background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;padding:8px 12px;outline:none;width:100%;cursor:pointer;font-family:var(--font);transition:border-color var(--ease);}
+    .cfg-select:focus{border-color:var(--blue);}
+    .cfg-row{display:flex;gap:8px;align-items:flex-end;}
+    .cfg-row .cfg-field{flex:1;}
+    .cfg-btn{padding:7px 16px;border:none;border-radius:var(--r1);cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;font-family:var(--font);transition:all var(--ease);}
+    .cfg-btn-test{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.22);}
+    .cfg-btn-test:hover{background:rgba(52,211,153,.16);box-shadow:0 0 14px rgba(52,211,153,.18);}
+    .cfg-btn-test.testing{opacity:.55;cursor:not-allowed;}
+    .cfg-btn-start{background:rgba(0,229,255,.08);color:var(--blue);border:1px solid rgba(0,229,255,.22);}
+    .cfg-btn-start:hover{background:rgba(0,229,255,.16);box-shadow:0 0 14px rgba(0,229,255,.18);}
+    .cfg-test-msg{font-size:11px;margin-top:2px;min-height:16px;}
+    .cfg-test-msg.ok{color:var(--green);}
+    .cfg-test-msg.err{color:var(--red);}
+    .cfg-hint{font-size:10px;color:var(--t4);}
+    .cfg-section-label{font-size:10px;font-weight:700;color:var(--amber);letter-spacing:1.2px;text-transform:uppercase;margin:28px 0 14px;border-bottom:1px solid var(--b-dim);padding-bottom:9px;display:flex;align-items:center;gap:10px;}
+    .cfg-section-label::before{content:'';display:inline-block;width:3px;height:13px;background:linear-gradient(180deg,var(--blue),var(--violet));border-radius:2px;}
+    .cfg-save-bar{position:sticky;bottom:0;background:rgba(8,8,16,.92);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-top:1px solid var(--b-dim);padding:14px 44px;display:flex;align-items:center;gap:14px;}
+    .cfg-save-btn{padding:9px 32px;background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;border:none;border-radius:var(--r1);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);transition:opacity var(--ease),box-shadow var(--ease);}
+    .cfg-save-btn:hover{opacity:.88;box-shadow:0 4px 20px rgba(0,229,255,.35);}
+    .cfg-save-msg{font-size:12px;color:var(--green);}
+    /* TTS toggle switch */
+    .tts-switch{position:relative;display:inline-block;width:34px;height:18px;flex-shrink:0;}
+    .tts-switch input{opacity:0;width:0;height:0;}
+    .tts-slider{position:absolute;inset:0;background:#2a2a2a;border-radius:18px;cursor:pointer;transition:background .2s;}
+    .tts-slider::before{content:'';position:absolute;width:12px;height:12px;left:3px;top:3px;background:#888;border-radius:50%;transition:transform .2s,background .2s;}
+    .tts-switch input:checked + .tts-slider{background:var(--violet);}
+    .tts-switch input:checked + .tts-slider::before{transform:translateX(16px);background:#fff;}
 
-        /* Sidebar */
-        #sidebar { width: 260px; min-width: 260px; background: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; overflow: hidden; }
-        .panel-header { padding: 6px 12px; background: #2d2d2d; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; border-bottom: 1px solid #222; flex-shrink: 0; }
+    /* ── Status Panel ── */
+    #sistema-estado{background:var(--base);}
+    #status-panel{padding:36px 44px;color:var(--t1);}
+    #status-panel h2{font-size:20px;font-weight:800;background:linear-gradient(135deg,var(--cyan),var(--amber));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:24px;letter-spacing:-.4px;}
+    .driver-status-list{display:flex;gap:16px;margin-bottom:32px;flex-wrap:wrap;}
+    .driver-status{background:rgba(255,255,255,.03);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--b-sub);border-radius:var(--r3);padding:20px 24px;min-width:200px;flex:1;display:flex;flex-direction:column;transition:border-color var(--ease),box-shadow var(--slow);}
+    .driver-status:hover{border-color:var(--b-mid);box-shadow:0 6px 28px rgba(0,0,0,.35);}
+    .driver-status .ds-title{font-size:13px;font-weight:700;margin-bottom:6px;text-transform:capitalize;}
+    .driver-status .ds-model{font-size:11px;color:var(--t2);margin-bottom:10px;font-family:var(--mono);}
+    .driver-status .ds-health{font-size:12px;font-weight:500;margin-bottom:4px;}
+    .driver-status .ds-health.ok{color:var(--green);}
+    .driver-status .ds-health.err{color:var(--red);}
+    .driver-status .ds-latency{font-size:11px;color:var(--t3);}
+    .driver-status .ds-cost{font-size:11px;color:var(--amber);margin-top:8px;}
+    #usage-summary{margin-top:24px;}
+    #usage-summary h3{font-size:14px;font-weight:700;color:var(--amber);margin-bottom:14px;}
+    #usage-table{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono);}
+    #usage-table th,#usage-table td{padding:8px 12px;border-bottom:1px solid var(--b-dim);}
+    #usage-table th{color:var(--violet);text-align:left;font-weight:700;font-family:var(--font);font-size:10px;letter-spacing:.8px;text-transform:uppercase;background:rgba(0,0,0,.25);}
+    #usage-table td{color:var(--t2);}
+    #usage-table tr:hover td{color:var(--t1);background:rgba(255,255,255,.02);}
 
-        /* Objective tree */
-        #tree-wrap { overflow-y: auto; border-bottom: 1px solid #333; }
-        #tree-wrap.hidden { display: none; }
-        .tree-level { padding: 6px 12px 4px; }
-        .tree-level-label { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-        .tree-modules { display: flex; flex-wrap: wrap; gap: 4px; }
-        .mod-chip {
-            padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 500;
-            background: #2d2d2d; color: #666; border: 1px solid #3c3c3c;
-            transition: all 0.25s ease; white-space: nowrap;
-        }
-        .mod-chip.running {
-            background: #1a3a4a; color: #9cdcfe; border-color: #007acc;
-            animation: pulse 1.2s infinite;
-        }
-        .mod-chip.done { background: #1a3020; color: #89d185; border-color: #3a7a3a; animation: none; }
+    /* ── Settings Overlay ── */
+    #settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:200;align-items:center;justify-content:center;}
+    #settings-overlay.open{display:flex;}
+    #settings-box{background:var(--surface);border:1px solid var(--b-mid);border-radius:var(--r3);padding:26px 30px;width:440px;max-width:95vw;box-shadow:0 28px 64px rgba(0,0,0,.65);}
+    #settings-box h2{margin-bottom:22px;font-size:12px;color:var(--amber);font-weight:700;letter-spacing:1.2px;text-transform:uppercase;}
+    .settings-row{margin-bottom:14px;}
+    .settings-label{font-size:10px;color:var(--violet);margin-bottom:5px;display:flex;align-items:center;gap:6px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;}
+    .settings-set{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 6px rgba(52,211,153,.6);}
+    .settings-unset{width:7px;height:7px;border-radius:50%;background:var(--t4);flex-shrink:0;}
+    .settings-hint{font-size:10px;color:var(--t4);margin-top:3px;}
+    .settings-input{width:100%;background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--mono);padding:7px 12px;outline:none;transition:border-color var(--ease),box-shadow var(--ease);}
+    .settings-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,229,255,.12);}
+    .settings-actions{display:flex;gap:8px;margin-top:22px;justify-content:flex-end;}
+    .btn-save{padding:7px 22px;background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;border:none;border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);transition:opacity var(--ease),box-shadow var(--ease);}
+    .btn-save:hover{opacity:.88;box-shadow:0 4px 16px rgba(0,229,255,.35);}
+    .btn-cancel{padding:7px 16px;background:transparent;color:var(--t2);border:1px solid var(--b-sub);border-radius:var(--r1);font-size:12px;cursor:pointer;font-family:var(--font);transition:color var(--ease),border-color var(--ease);}
+    .btn-cancel:hover{color:var(--t1);border-color:var(--b-mid);}
 
-        /* File list */
-        #file-list { flex: 1; overflow-y: auto; min-height: 0; }
-        .file-item {
-            padding: 6px 12px; cursor: pointer; font-size: 12px;
-            display: flex; align-items: center; gap: 6px;
-            border-bottom: 1px solid #2d2d2d; color: #ccc;
-        }
-        .file-item:hover { background: #2a2d2e; }
-        .file-item.active { background: #094771; color: #fff; }
-        .file-icon { font-size: 11px; opacity: 0.7; }
-        .file-validated { margin-left: auto; font-size: 10px; }
-        .file-validated.ok   { color: #4ec9b0; }
-        .file-validated.fail { color: #f44747; }
+    /* ── Question Box ── */
+    #question-box{display:none;flex-shrink:0;border-top:1px solid rgba(251,191,36,.3);background:linear-gradient(135deg,rgba(251,191,36,.06),rgba(251,191,36,.02));padding:12px 16px;gap:10px;flex-direction:column;position:relative;overflow:hidden;}
+    #question-box::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(251,191,36,.07) 0%,transparent 55%);pointer-events:none;}
+    #question-box.visible{display:flex;}
+    #question-header{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;color:var(--amber);letter-spacing:1px;text-transform:uppercase;}
+    #question-pulse{width:8px;height:8px;border-radius:50%;background:var(--amber);animation:pulse 1s infinite;flex-shrink:0;box-shadow:0 0 10px rgba(251,191,36,.65);}
+    #question-text{font-size:13px;color:#fde68a;line-height:1.6;white-space:pre-wrap;}
+    #question-row{display:flex;gap:8px;align-items:flex-end;}
+    #answer-input{flex:1;background:rgba(0,0,0,.4);border:1px solid rgba(251,191,36,.28);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--font);padding:6px 12px;resize:none;outline:none;height:32px;transition:height var(--ease),border-color var(--ease),box-shadow var(--ease);}
+    #answer-input:focus{height:68px;border-color:var(--amber);box-shadow:0 0 0 3px rgba(251,191,36,.1);}
+    #answer-btn{padding:6px 20px;background:var(--amber);color:#000;border:none;border-radius:var(--r1);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:box-shadow var(--ease),opacity var(--ease);}
+    #answer-btn:hover{box-shadow:0 4px 18px rgba(251,191,36,.45);}
+    #answer-btn:disabled{opacity:.4;cursor:not-allowed;}
+    #skip-btn{padding:6px 12px;background:transparent;color:var(--t3);border:1px solid var(--b-sub);border-radius:var(--r1);font-size:11px;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:color var(--ease),border-color var(--ease);}
+    #skip-btn:hover{color:var(--t2);border-color:var(--b-mid);}
+    #mic-btn{width:32px;height:32px;border-radius:50%;border:1px solid rgba(251,191,36,.3);background:rgba(251,191,36,.08);color:var(--amber);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background var(--ease),box-shadow var(--ease);}
+    #mic-btn:hover{background:rgba(251,191,36,.18);}
+    #mic-btn.recording{background:rgba(220,50,50,.25);border-color:rgba(220,50,50,.6);color:#f66;animation:mic-pulse 1s infinite;}
+    @keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(220,50,50,.4);}50%{box-shadow:0 0 0 6px rgba(220,50,50,0);}}
 
-        /* Hardware — pinned footer */
-        #hw-panel { padding: 8px 12px; border-top: 1px solid #333; background: #1e1e1e; flex-shrink: 0; }
-        .hw-metric { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-        .hw-metric:last-child { margin-bottom: 0; }
-        .hw-label { font-size: 10px; color: #555; width: 36px; flex-shrink: 0; }
-        .hw-val   { font-size: 10px; color: #666; width: 30px; text-align: right; flex-shrink: 0; }
-        .bar-bg   { flex: 1; height: 3px; background: #3c3c3c; border-radius: 2px; overflow: hidden; }
-        .bar-fill { height: 100%; width: 0%; transition: width 0.5s ease; border-radius: 2px; }
-        .vram-fill { background: #007acc; }
-        .cpu-fill  { background: #4ec9b0; }
-        .ram-fill  { background: #ce9178; }
+    /* ── Progress Bar ── */
+    #progress-wrap{display:flex;align-items:center;gap:10px;padding:0 16px;height:26px;min-height:26px;background:var(--deep);border-bottom:1px solid var(--b-dim);font-size:10px;flex-shrink:0;}
+    #progress-track{flex:1;height:3px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden;position:relative;}
+    #progress-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:2px;transition:width .5s ease;position:relative;}
+    #progress-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent);animation:shimmer 2.4s infinite;}
+    @keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(500%)}}
+    #progress-fill.done{background:linear-gradient(90deg,var(--green),var(--cyan));}
+    #progress-fill.done::after,#progress-fill.failed::after{display:none;}
+    #progress-fill.failed{background:var(--red);}
+    #progress-pct{color:var(--amber);width:32px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;font-weight:600;font-family:var(--mono);}
+    #progress-label{color:var(--amber);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+    #progress-time{color:var(--t4);flex-shrink:0;font-variant-numeric:tabular-nums;min-width:120px;text-align:right;font-family:var(--mono);}
 
-        /* Main */
-        #main-view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-        #editor-container { flex: 1; min-height: 0; }
+    /* ── Token Counter ── */
+    #token-display{font-size:10px;color:var(--t3);padding:2px 10px;border:1px solid var(--b-dim);border-radius:20px;white-space:nowrap;font-family:var(--mono);font-weight:500;background:rgba(0,0,0,.25);}
+    #token-display.warn{color:var(--amber);border-color:rgba(251,191,36,.25);}
+    #token-display.crit{color:var(--red);border-color:rgba(248,113,113,.25);}
 
-        /* Console */
-        #console-wrap { height: 190px; min-height: 190px; border-top: 2px solid #333; display: flex; flex-direction: column; }
-        #console-header { display: flex; align-items: center; padding: 0 10px; height: 26px; background: #2d2d2d; border-bottom: 1px solid #222; font-size: 10px; font-weight: 700; color: #888; letter-spacing: 1px; }
-        #console-clear { margin-left: auto; cursor: pointer; color: #555; font-size: 11px; padding: 2px 6px; }
-        #console-clear:hover { color: #ccc; }
-        #console { flex: 1; background: #0d0d0d; padding: 8px 10px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 12px; }
-        .log-entry { margin-bottom: 3px; display: flex; gap: 8px; line-height: 1.5; }
-        .log-time { color: #555; flex-shrink: 0; }
-        .log-msg  { word-break: break-all; }
-        .log-entry.START .log-msg         { color: #dcdcaa; }
-        .log-entry.DONE .log-msg          { color: #4ec9b0; font-weight: 600; }
-        .log-entry.FAILED .log-msg        { color: #f44747; font-weight: 600; }
-        .log-entry.PHASE_START .log-msg   { color: #9cdcfe; }
-        .log-entry.CHECKPOINT .log-msg    { color: #cca700; }
-        .log-entry.FILE_GENERATED .log-msg { color: #b5cea8; }
-        .log-entry.MODULE_START .log-msg  { color: #c586c0; }
-        .log-entry.MODULE_DONE .log-msg   { color: #89d185; }
-        .log-entry.CAPABILITIES .log-msg      { color: #dcdcaa; }
-        .log-entry.WISDOM .log-msg            { color: #f0a050; }
-        .log-entry.HEALTH_WARN .log-msg       { color: #f44747; font-weight: 600; }
-        .log-entry.MODIFICATION_PLAN .log-msg { color: #9cdcfe; }
-        .log-entry.IMPACT_REPORT .log-msg     { color: #c586c0; }
-        .log-entry.EVOLUTION .log-msg         { color: #4ec9b0; }
-        .log-entry.BRANCH_CREATED .log-msg    { color: #cca700; }
-        .log-entry.REFOUNDATION .log-msg      { color: #dcdcaa; font-style: italic; }
-        .log-entry.LOG .log-msg               { color: #666; }
+    /* ── Topbar ── */
+    #topbar{display:flex;align-items:center;gap:12px;padding:0 16px;height:46px;min-height:46px;background:linear-gradient(180deg,rgba(255,255,255,.025) 0%,transparent 100%),var(--surface);border-bottom:1px solid var(--b-dim);font-size:12px;flex-shrink:0;}
+    #topbar .brand{font-weight:800;font-size:15px;letter-spacing:2.5px;background:linear-gradient(135deg,var(--blue) 0%,var(--cyan) 50%,var(--violet) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;flex-shrink:0;}
+    #topbar .model-badge{padding:2px 10px;border-radius:20px;font-size:10px;font-weight:600;background:rgba(0,229,255,.1);color:var(--blue);border:1px solid rgba(0,229,255,.22);font-family:var(--mono);}
+    #project-name{font-size:11px;color:var(--amber);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-        /* Wisdom panel — shows before pipeline runs */
-        #wisdom-panel {
-            border-top: 1px solid #333; background: #1a1a1a; flex-shrink: 0;
-            max-height: 130px; overflow-y: auto;
-        }
-        #wisdom-panel.hidden { display: none; }
-        .wisdom-item {
-            display: flex; gap: 8px; padding: 5px 10px;
-            border-bottom: 1px solid #222; font-size: 11px; line-height: 1.4;
-        }
-        .wisdom-tag {
-            font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 2px;
-            flex-shrink: 0; margin-top: 2px; text-transform: uppercase;
-        }
-        .wisdom-tag.ambiguity       { background: #4a3000; color: #f0a050; }
-        .wisdom-tag.complexity      { background: #3a1a4a; color: #c586c0; }
-        .wisdom-tag.missing_requirement { background: #003a3a; color: #4ec9b0; }
-        .wisdom-tag.tradeoff        { background: #1a3a00; color: #89d185; }
-        .wisdom-tag.warning         { background: #4a0000; color: #f44747; }
-        .wisdom-tag.ok              { background: #1a3020; color: #89d185; }
-        .wisdom-body { flex: 1; }
-        .wisdom-msg  { color: #ccc; }
-        .wisdom-sug  { color: #666; margin-top: 2px; font-style: italic; }
+    /* AI Pills */
+    #ai-pills{display:flex;align-items:center;gap:4px;}
+    .ai-pill{display:flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:600;letter-spacing:.3px;cursor:default;border:1px solid transparent;transition:all var(--ease);font-family:var(--font);}
+    .ai-pill::before{content:'●';font-size:6px;opacity:.7;}
+    .ai-pill.unconfigured{background:rgba(255,255,255,.02);color:var(--t4);border-color:var(--b-dim);}
+    .ai-pill.unconfigured::before{color:var(--t4);}
+    .ai-pill.offline{background:rgba(248,113,113,.05);color:rgba(248,113,113,.5);border-color:rgba(248,113,113,.1);}
+    .ai-pill.offline::before{color:rgba(248,113,113,.35);}
+    .ai-pill.ok.Qwen{background:rgba(0,229,255,.1);color:#00e5ff;border-color:rgba(0,229,255,.22);}
+    .ai-pill.ok.Claude{background:rgba(224,64,251,.1);color:#e040fb;border-color:rgba(224,64,251,.22);}
+    .ai-pill.ok.Gemini{background:rgba(52,211,153,.1);color:#6ee7b7;border-color:rgba(52,211,153,.22);}
+    .ai-pill.ok::before{color:var(--green);opacity:1;}
+    .ai-pill.error{background:rgba(248,113,113,.1);color:var(--red);border-color:rgba(248,113,113,.22);}
+    .ai-pill.error::before{color:var(--red);opacity:1;}
+    .ai-pill.working{animation:aiPulse .9s infinite;}
+    .ai-pill.working::before{opacity:1;}
+    @keyframes aiPulse{0%,100%{opacity:1}50%{opacity:.35}}
+    #ollama-start-btn{display:none;font-size:9px;font-weight:700;padding:2px 8px;background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.2);border-radius:20px;cursor:pointer;margin-left:2px;font-family:var(--font);transition:all var(--ease);}
+    #ollama-start-btn:hover{background:rgba(248,113,113,.14);}
+    #ollama-start-btn.starting{color:var(--amber);border-color:rgba(251,191,36,.2);background:rgba(251,191,36,.07);animation:aiPulse .8s infinite;}
+    #auto-confirm-btn{font-size:10px;font-weight:600;padding:3px 10px;background:rgba(255,255,255,.02);color:var(--t3);border:1px solid var(--b-dim);border-radius:20px;cursor:pointer;letter-spacing:.3px;font-family:var(--font);transition:all var(--ease);}
+    #auto-confirm-btn:hover{border-color:rgba(52,211,153,.3);color:var(--green);}
+    #auto-confirm-btn.active{background:rgba(52,211,153,.1);color:var(--green);border-color:rgba(52,211,153,.3);box-shadow:0 0 10px rgba(52,211,153,.1);}
+    #auto-confirm-btn.active::before{content:'⚡ ';}
 
-        /* Project chat — unlocks after DONE */
-        #chat-wrap {
-            border-top: 2px solid #333; flex-shrink: 0;
-            display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-        }
-        #chat-wrap.hidden { display: none; }
-        #chat-input {
-            flex: 1; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px;
-            color: #d4d4d4; font-size: 12px; font-family: 'Segoe UI', sans-serif;
-            padding: 5px 10px; resize: none; outline: none; height: 28px;
-            transition: border-color 0.2s, height 0.2s;
-        }
-        #chat-input:focus { border-color: #c586c0; height: 60px; }
-        #chat-input:disabled { opacity: 0.4; }
-        #chat-btn {
-            padding: 5px 14px; background: #3a1a4a; color: #c586c0; border: 1px solid #c586c0;
-            border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;
-            white-space: nowrap; transition: background 0.2s;
-        }
-        #chat-btn:hover:not(:disabled) { background: #5a2a6a; }
-        #chat-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Phase track */
+    #phase-track{display:flex;align-items:center;gap:3px;margin-left:auto;}
+    .phase-step{padding:3px 10px;border-radius:20px;font-size:10px;font-weight:600;background:rgba(255,255,255,.02);color:var(--t4);border:1px solid var(--b-dim);transition:all var(--ease);letter-spacing:.3px;}
+    .phase-step.active{background:rgba(245,208,96,.12);color:var(--amber);border-color:rgba(245,208,96,.40);box-shadow:0 0 12px rgba(245,208,96,.18);}
+    .phase-step.done{background:rgba(52,211,153,.08);color:var(--green);border-color:rgba(52,211,153,.22);}
+    .phase-sep{color:var(--t4);font-size:9px;opacity:.4;}
+    #status-dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.08);border:1px solid var(--b-dim);margin-left:4px;transition:all var(--ease);}
+    #status-dot.running{background:var(--amber);border-color:transparent;box-shadow:0 0 10px rgba(251,191,36,.65);animation:pulse 1.2s infinite;}
+    #status-dot.done{background:var(--green);border-color:transparent;box-shadow:0 0 10px rgba(52,211,153,.65);}
+    #status-dot.failed{background:var(--red);border-color:transparent;box-shadow:0 0 10px rgba(248,113,113,.65);}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.28}}
+
+    /* Topbar utility buttons */
+    .tb-btn{padding:3px 10px;font-size:11px;font-weight:600;border-radius:var(--r1);cursor:pointer;font-family:var(--font);transition:all var(--ease);white-space:nowrap;border:1px solid var(--b-sub);background:rgba(255,255,255,.03);color:var(--t2);}
+    .tb-btn:hover{background:rgba(255,255,255,.07);color:var(--t1);border-color:var(--b-mid);}
+    #tg-btn{color:#00e5ff;border-color:rgba(0,229,255,.2);background:rgba(0,229,255,.07);}
+    #tg-btn:hover{background:rgba(0,229,255,.14);}
+    #cost-btn{color:var(--green);border-color:rgba(52,211,153,.2);background:rgba(52,211,153,.07);}
+    #cost-btn:hover{background:rgba(52,211,153,.14);}
+
+    /* ── Cost Overlay ── */
+    #cost-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:100;align-items:flex-start;justify-content:flex-end;padding-top:52px;padding-right:12px;}
+    #cost-overlay.open{display:flex;}
+    #cost-box{background:var(--surface);border:1px solid var(--b-mid);border-radius:var(--r3);padding:18px 20px;width:400px;max-width:95vw;max-height:80vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.65);}
+    #cost-box h2{margin-bottom:14px;font-size:10px;color:var(--violet);font-weight:700;letter-spacing:1.2px;text-transform:uppercase;}
+    .cost-summary{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap;}
+    .cost-stat{text-align:center;min-width:70px;}
+    .cost-stat-val{font-size:20px;font-weight:700;color:var(--cyan);font-variant-numeric:tabular-nums;font-family:var(--mono);}
+    .cost-stat-lbl{font-size:9px;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-top:2px;}
+    .cost-table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;font-family:var(--mono);}
+    .cost-table th{color:var(--t4);font-weight:600;text-align:left;padding:3px 6px;border-bottom:1px solid var(--b-dim);font-family:var(--font);font-size:9px;text-transform:uppercase;letter-spacing:.5px;}
+    .cost-table td{padding:4px 6px;color:var(--t2);font-variant-numeric:tabular-nums;}
+    .cost-table tr:hover td{color:var(--t1);}
+    .cost-alerts{margin-top:10px;}
+    .cost-alert{padding:5px 10px;border-radius:var(--r1);font-size:10px;margin-bottom:5px;}
+    .cost-alert.warning{background:rgba(251,191,36,.08);color:var(--amber);border:1px solid rgba(251,191,36,.2);}
+    .cost-alert.critical{background:rgba(248,113,113,.08);color:var(--red);border:1px solid rgba(248,113,113,.2);}
+    #cost-close{float:right;background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;}
+    #cost-close:hover{color:var(--t1);}
+    #cost-refresh-time{font-size:9px;color:var(--t4);margin-top:10px;text-align:right;}
+    .cost-copilot-link{display:block;margin-top:12px;text-align:center;font-size:10px;color:var(--blue);text-decoration:none;padding:6px;border:1px solid rgba(0,229,255,.22);border-radius:var(--r1);background:rgba(0,229,255,.06);transition:background var(--ease);}
+    .cost-copilot-link:hover{background:rgba(0,229,255,.12);}
+
+    /* ── AI Activity Bar ── */
+    #ai-activity-bar{display:none;height:26px;min-height:26px;background:linear-gradient(90deg,rgba(0,229,255,.07),transparent);border-bottom:1px solid rgba(0,229,255,.08);align-items:center;padding:0 16px;gap:10px;flex-shrink:0;overflow:hidden;}
+    #ai-activity-bar.visible{display:flex;}
+    #ai-activity-label{font-size:9px;font-weight:700;color:rgba(0,229,255,.45);letter-spacing:1.2px;white-space:nowrap;text-transform:uppercase;}
+    #ai-activity-text{font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);}
+    #ai-activity-text .ai-badge{font-size:9px;}
+    #ai-activity-text .af{color:var(--t1);font-weight:600;}
+
+    /* ── Input Bar ── */
+    #input-bar{display:flex;flex-direction:column;gap:6px;padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--b-dim);flex-shrink:0;}
+    #input-row{display:flex;align-items:center;gap:10px;}
+    #name-row{display:flex;align-items:center;gap:8px;}
+    #name-label{font-size:10px;color:var(--amber);white-space:nowrap;flex-shrink:0;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+    #name-hint{font-size:10px;color:var(--t4);}
+    #temp-row{display:flex;align-items:center;gap:8px;}
+    #temp-label{font-size:10px;color:var(--violet);white-space:nowrap;flex-shrink:0;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+    #copilot-temp-select{background:rgba(0,0,0,.35);border:1px solid rgba(224,64,251,.35);border-radius:var(--r1);color:var(--t1);font-size:11px;font-family:var(--font);padding:3px 8px;outline:none;height:24px;cursor:pointer;transition:border-color var(--ease);}
+    #copilot-temp-select:focus{border-color:var(--violet);}
+    #project-name-input{width:220px;background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:11px;font-family:var(--mono);padding:4px 10px;outline:none;height:24px;transition:border-color var(--ease),box-shadow var(--ease);}
+    #project-name-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,229,255,.12);}
+    #project-name-input:disabled{opacity:.35;cursor:not-allowed;}
+    #project-name-input.name-error{border-color:var(--red);}
+    #description-input{flex:1;background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--font);padding:6px 12px;resize:none;outline:none;line-height:1.4;height:32px;overflow:hidden;transition:height var(--ease),border-color var(--ease),box-shadow var(--ease);}
+    #description-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,229,255,.12);height:76px;overflow-y:auto;}
+    #description-input:disabled{opacity:.35;cursor:not-allowed;}
+    #run-btn{padding:6px 22px;background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;border:none;border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:opacity var(--ease),box-shadow var(--ease);}
+    #run-btn:hover:not(:disabled){opacity:.88;box-shadow:0 4px 18px rgba(224,64,251,.38);}
+    #run-btn:disabled{opacity:.35;cursor:not-allowed;}
+
+    /* ── Layout ── */
+    #body{display:flex;flex:1;overflow:hidden;}
+
+    /* ── Sidebar ── */
+    #sidebar{width:256px;min-width:256px;background:var(--deep);border-right:1px solid var(--b-dim);display:flex;flex-direction:column;overflow:hidden;}
+    .panel-header{padding:7px 14px;background:rgba(255,255,255,.015);font-size:9px;font-weight:700;color:var(--violet);letter-spacing:1.2px;text-transform:uppercase;border-bottom:1px solid var(--b-dim);flex-shrink:0;}
+    #tree-wrap{overflow-y:auto;border-bottom:1px solid var(--b-dim);}
+    #tree-wrap.hidden{display:none;}
+    .tree-level{padding:6px 12px 4px;}
+    .tree-level-label{font-size:9px;color:var(--amber);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;}
+    .tree-modules{display:flex;flex-wrap:wrap;gap:4px;}
+    .mod-chip{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:500;background:rgba(255,255,255,.02);color:var(--t3);border:1px solid var(--b-dim);transition:all var(--ease);white-space:nowrap;}
+    .mod-chip.running{background:rgba(0,229,255,.1);color:var(--blue);border-color:rgba(224,64,251,.28);animation:pulse 1.2s infinite;}
+    .mod-chip.done{background:rgba(52,211,153,.08);color:var(--green);border-color:rgba(52,211,153,.22);animation:none;}
+    /* Goal Tree Panel */
+    #goal-tree-section{flex-shrink:0;border-bottom:1px solid var(--b-dim);}
+    #goal-tree-section.hidden{display:none;}
+    #goal-tree-toggle{cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:7px 14px;font-size:9px;font-weight:700;color:var(--violet);letter-spacing:1.2px;text-transform:uppercase;background:rgba(255,255,255,.015);border-bottom:1px solid var(--b-dim);}
+    #goal-tree-toggle:hover{color:var(--t2);background:rgba(255,255,255,.03);}
+    #goal-tree-toggle .gt-arrow{transition:transform .2s;}
+    #goal-tree-toggle.collapsed .gt-arrow{transform:rotate(-90deg);}
+    #goal-tree-body{max-height:220px;overflow-y:auto;}
+    #goal-tree-body.hidden{display:none;}
+    .gt-node{display:flex;align-items:flex-start;gap:6px;padding:4px 10px 4px 14px;font-size:10px;color:var(--t2);border-bottom:1px solid rgba(255,255,255,.02);cursor:default;}
+    .gt-node:hover{background:rgba(255,255,255,.025);color:var(--t1);}
+    .gt-node-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:3px;}
+    .gt-node-dot.planned{background:var(--t4);}
+    .gt-node-dot.in_progress{background:var(--blue);animation:pulse 1.2s infinite;}
+    .gt-node-dot.implemented{background:var(--green);}
+    .gt-node-dot.deprecated{background:var(--t4);opacity:.35;}
+    .gt-node-desc{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .gt-node-type{font-size:8px;color:var(--t4);letter-spacing:.5px;text-transform:uppercase;flex-shrink:0;}
+    #file-list{flex:1;overflow-y:auto;min-height:0;}
+    .file-item{padding:6px 14px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:7px;border-bottom:1px solid rgba(255,255,255,.02);color:var(--t2);position:relative;transition:background var(--ease),color var(--ease);font-family:var(--mono);}
+    .file-item::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background var(--ease);}
+    .file-item:hover{background:rgba(255,255,255,.04);color:var(--t1);}
+    .file-item:hover::before{background:rgba(0,229,255,.35);}
+    .file-item.active{background:rgba(0,229,255,.1);color:var(--t1);}
+    .file-item.active::before{background:var(--blue);}
+    .file-icon{font-size:10px;opacity:.45;}
+    .file-validated{margin-left:auto;font-size:10px;font-weight:700;}
+    .file-validated.ok{color:var(--green);}
+    .file-validated.fail{color:var(--red);}
+    #hw-panel{padding:10px 14px;border-top:1px solid var(--b-dim);background:rgba(0,0,0,.25);flex-shrink:0;}
+    .hw-metric{display:flex;align-items:center;gap:7px;margin-bottom:6px;}
+    .hw-metric:last-child{margin-bottom:0;}
+    .hw-label{font-size:9px;color:var(--violet);width:34px;flex-shrink:0;text-transform:uppercase;letter-spacing:.5px;font-weight:700;}
+    .hw-val{font-size:9px;color:var(--t3);width:28px;text-align:right;flex-shrink:0;font-family:var(--mono);}
+    .bar-bg{flex:1;height:2px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden;}
+    .bar-fill{height:100%;width:0%;transition:width .5s ease;border-radius:2px;}
+    .vram-fill{background:linear-gradient(90deg,var(--blue),var(--cyan));}
+    .cpu-fill{background:linear-gradient(90deg,var(--cyan),var(--green));}
+    .ram-fill{background:linear-gradient(90deg,var(--violet),var(--blue));}
+
+    /* ── Main View ── */
+    #main-view{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+    #editor-container{flex:1;min-height:0;}
+
+    /* ── Editor Inner Tabs ── */
+    #editor-tabs{display:flex;background:var(--surface);font-size:11px;border-bottom:1px solid var(--b-dim);flex-shrink:0;}
+    .editor-tab{padding:7px 18px;cursor:pointer;color:var(--t3);border-right:1px solid var(--b-dim);font-weight:600;display:flex;align-items:center;gap:5px;transition:color var(--ease),background var(--ease);font-family:var(--font);position:relative;}
+    .editor-tab::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--blue);opacity:0;transition:opacity var(--ease);}
+    .editor-tab.active{color:var(--amber);background:rgba(255,255,255,.02);}
+    .editor-tab.active::after{opacity:1;}
+    .editor-tab:hover:not(.active){color:var(--t2);background:rgba(255,255,255,.02);}
+
+    /* ── Console ── */
+    #console-wrap{height:195px;min-height:195px;border-top:1px solid var(--b-dim);display:flex;flex-direction:column;}
+    #console-header{display:flex;align-items:center;padding:0 12px;height:26px;background:rgba(255,255,255,.018);border-bottom:1px solid var(--b-dim);font-size:9px;font-weight:700;color:var(--violet);letter-spacing:1.2px;text-transform:uppercase;flex-shrink:0;}
+    #console-clear{margin-left:auto;cursor:pointer;color:var(--t4);font-size:10px;font-weight:400;padding:2px 8px;border-radius:var(--r1);text-transform:none;letter-spacing:0;font-family:var(--font);transition:color var(--ease),background var(--ease);}
+    #console-clear:hover{color:var(--t2);background:rgba(255,255,255,.06);}
+    #console{flex:1;background:var(--void);padding:8px 12px;overflow-y:auto;font-family:var(--mono);font-size:11.5px;}
+    .log-entry{margin-bottom:1px;display:flex;gap:10px;line-height:1.65;padding:1px 4px;border-radius:3px;transition:background var(--ease);}
+    .log-entry:hover{background:rgba(255,255,255,.025);}
+    .log-time{color:var(--t4);flex-shrink:0;font-size:10px;opacity:.55;}
+    .log-msg{word-break:break-all;}
+    .log-entry.START .log-msg{color:#fde68a;}
+    .log-entry.DONE .log-msg{color:var(--green);font-weight:600;}
+    .log-entry.FAILED .log-msg{color:var(--red);font-weight:600;}
+    .log-entry.PHASE_START .log-msg{color:var(--violet);font-weight:600;}
+    .log-entry.CHECKPOINT .log-msg{color:var(--amber);}
+    .log-entry.FILE_GENERATED .log-msg{color:#86efac;}
+    .log-entry.MODULE_START .log-msg{color:var(--violet);}
+    .log-entry.MODULE_DONE .log-msg{color:var(--green);}
+    .log-entry.CAPABILITIES .log-msg{color:#fde68a;}
+    .log-entry.WISDOM .log-msg{color:var(--orange);}
+    .log-entry.HEALTH_WARN .log-msg{color:var(--red);font-weight:600;}
+    .log-entry.MODIFICATION_PLAN .log-msg{color:var(--blue);}
+    .log-entry.IMPACT_REPORT .log-msg{color:var(--violet);}
+    .log-entry.EVOLUTION .log-msg{color:var(--cyan);}
+    .log-entry.COPILOT_SUGGESTION .log-msg{color:#e040fb;font-weight:600;border-left:2px solid rgba(224,64,251,.45);padding-left:8px;}
+    .log-entry.BRANCH_CREATED .log-msg{color:var(--amber);}
+    .log-entry.REFOUNDATION .log-msg{color:#fde68a;font-style:italic;}
+    .log-entry.LOG .log-msg{color:var(--t3);}
+    .log-entry.AI_WORKING .log-msg{color:var(--t2);font-style:italic;}
+    .log-entry.AI_WORKING .ai-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;margin-right:5px;vertical-align:middle;letter-spacing:.3px;}
+    .ai-badge.Qwen{background:rgba(224,64,251,.15);color:#00e5ff;border:1px solid rgba(224,64,251,.28);}
+    .ai-badge.Claude{background:rgba(224,64,251,.15);color:#e040fb;border:1px solid rgba(224,64,251,.28);}
+    .ai-badge.Gemini{background:rgba(52,211,153,.15);color:#6ee7b7;border:1px solid rgba(52,211,153,.28);}
+    .log-entry.AI_ERROR .log-msg{color:var(--red);font-weight:600;}
+    .log-entry.AI_ERROR .ai-badge{background:rgba(248,113,113,.15);color:var(--red);border:1px solid rgba(248,113,113,.28);}
+    .log-entry.CHAT_Q .log-msg{color:var(--cyan);font-style:italic;}
+    .log-entry.CHAT_A .log-msg{color:#86efac;white-space:pre-wrap;}
+
+    /* ── Copilot Box ── */
+    #copilot-box{display:none;flex-shrink:0;border-top:1px solid rgba(224,64,251,.28);background:linear-gradient(135deg,rgba(224,64,251,.06),rgba(0,229,255,.03));padding:12px 16px;gap:10px;flex-direction:column;position:relative;overflow:hidden;}
+    #copilot-box::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(224,64,251,.07) 0%,transparent 55%);pointer-events:none;}
+    #copilot-box.visible{display:flex;}
+    #copilot-header{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;color:var(--violet);letter-spacing:.8px;text-transform:uppercase;}
+    #copilot-phase{font-size:10px;color:rgba(224,64,251,.55);font-style:italic;font-weight:400;text-transform:none;letter-spacing:0;}
+    #copilot-message{font-size:12px;color:#e040fb;line-height:1.55;}
+    #copilot-change{font-size:11px;color:var(--t2);background:rgba(0,0,0,.3);border:1px solid rgba(224,64,251,.14);border-radius:var(--r1);padding:8px 10px;font-family:var(--mono);white-space:pre-wrap;}
+    #copilot-row{display:flex;gap:8px;}
+    .log-entry.COPILOT_APPLIED .log-msg{color:var(--green);font-weight:600;}
+    .log-entry.COPILOT_REJECTED .log-msg{color:var(--t3);font-style:italic;}
+
+    /* ── Wisdom Panel ── */
+    #wisdom-panel{border-top:1px solid var(--b-dim);background:var(--deep);flex-shrink:0;max-height:140px;overflow-y:auto;}
+    #wisdom-panel.hidden{display:none;}
+    .wisdom-item{display:flex;gap:10px;padding:7px 12px;border-bottom:1px solid var(--b-dim);font-size:11px;line-height:1.5;transition:background var(--ease);}
+    .wisdom-item:hover{background:rgba(255,255,255,.02);}
+    .wisdom-tag{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;flex-shrink:0;margin-top:2px;text-transform:uppercase;letter-spacing:.5px;}
+    .wisdom-tag.ambiguity{background:rgba(251,191,36,.1);color:var(--amber);border:1px solid rgba(251,191,36,.22);}
+    .wisdom-tag.complexity{background:rgba(224,64,251,.1);color:var(--violet);border:1px solid rgba(224,64,251,.22);}
+    .wisdom-tag.missing_requirement{background:rgba(34,211,238,.08);color:var(--cyan);border:1px solid rgba(34,211,238,.18);}
+    .wisdom-tag.tradeoff{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.18);}
+    .wisdom-tag.warning{background:rgba(248,113,113,.1);color:var(--red);border:1px solid rgba(248,113,113,.22);}
+    .wisdom-tag.ok{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.18);}
+    .wisdom-body{flex:1;}
+    .wisdom-msg{color:var(--t1);}
+    .wisdom-sug{color:var(--amber);margin-top:2px;font-style:italic;}
+
+    /* ── Launch Panel ── */
+    #launch-panel{display:none;flex-shrink:0;border-top:1px solid rgba(52,211,153,.28);background:linear-gradient(135deg,rgba(52,211,153,.06),rgba(34,211,238,.03));padding:10px 16px;gap:10px;align-items:center;flex-wrap:wrap;position:relative;overflow:hidden;}
+    #launch-panel::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(52,211,153,.07) 0%,transparent 50%);pointer-events:none;}
+    #launch-panel.visible{display:flex;}
+    #launch-header{font-size:10px;font-weight:700;color:var(--green);letter-spacing:1px;text-transform:uppercase;white-space:nowrap;}
+    #launch-cmd{flex:1;background:rgba(0,0,0,.38);border:1px solid rgba(52,211,153,.22);border-radius:var(--r1);color:#86efac;font-size:12px;font-family:var(--mono);padding:5px 12px;min-width:160px;outline:none;transition:border-color var(--ease);}
+    #launch-cmd:focus{border-color:var(--green);}
+    #launch-btn{padding:5px 20px;background:linear-gradient(135deg,var(--green),var(--cyan));color:#000;border:none;border-radius:var(--r1);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:opacity var(--ease),box-shadow var(--ease);}
+    #launch-btn:hover{opacity:.88;box-shadow:0 4px 18px rgba(52,211,153,.35);}
+    #launch-path{font-size:10px;color:var(--t4);width:100%;}
+
+    /* ── Project Chat ── */
+    #chat-wrap{border-top:1px solid var(--b-dim);flex-shrink:0;display:flex;align-items:flex-end;gap:8px;padding:7px 12px;background:var(--surface);}
+    #chat-wrap.hidden{display:none;}
+    #chat-input{flex:1;background:rgba(0,0,0,.3);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--font);padding:6px 12px;resize:none;outline:none;height:30px;transition:border-color var(--ease),height var(--ease),box-shadow var(--ease);}
+    #chat-input:focus{border-color:var(--cyan);height:64px;box-shadow:0 0 0 3px rgba(34,211,238,.09);}
+    #chat-input:disabled{opacity:.35;}
+    .chat-actions{display:flex;flex-direction:column;gap:4px;}
+    #ask-btn{padding:5px 14px;background:rgba(34,211,238,.08);color:var(--cyan);border:1px solid rgba(34,211,238,.22);border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:all var(--ease);}
+    #ask-btn:hover:not(:disabled){background:rgba(34,211,238,.16);box-shadow:0 0 12px rgba(34,211,238,.18);}
+    #ask-btn:disabled{opacity:.35;cursor:not-allowed;}
+    #chat-btn{padding:5px 14px;background:rgba(224,64,251,.08);color:var(--violet);border:1px solid rgba(224,64,251,.22);border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:all var(--ease);}
+    #chat-btn:hover:not(:disabled){background:rgba(224,64,251,.16);box-shadow:0 0 12px rgba(224,64,251,.18);}
+    #chat-btn:disabled{opacity:.22;cursor:not-allowed;}
+    #chat-btn:disabled::after{content:' 🔒';font-size:9px;}
+    #refound-btn{padding:5px 14px;background:rgba(251,191,36,.08);color:var(--amber);border:1px solid rgba(251,191,36,.22);border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:var(--font);transition:all var(--ease);}
+    #refound-btn:hover:not(:disabled){background:rgba(251,191,36,.16);box-shadow:0 0 12px rgba(251,191,36,.18);}
+    #refound-btn:disabled{opacity:.35;cursor:not-allowed;}
+
+    /* ── New Project Form ── */
+    .new-form-wrap{padding:44px;max-width:660px;}
+    .new-form-wrap h2{font-size:20px;font-weight:800;margin-bottom:6px;letter-spacing:-.4px;background:linear-gradient(135deg,var(--cyan),var(--amber));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+    .new-form-wrap p{color:var(--t2);font-size:13px;margin-bottom:32px;}
+    .new-form-field{margin-bottom:18px;}
+    .new-form-label{font-size:10px;color:var(--amber);display:block;margin-bottom:6px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;}
+    .new-form-input{width:100%;background:rgba(0,0,0,.3);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:13px;padding:10px 14px;font-family:var(--mono);outline:none;transition:border-color var(--ease),box-shadow var(--ease);}
+    .new-form-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,229,255,.12);}
+    .new-form-textarea{width:100%;background:rgba(0,0,0,.3);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:13px;padding:10px 14px;resize:vertical;font-family:var(--font);outline:none;transition:border-color var(--ease),box-shadow var(--ease);}
+    .new-form-textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,229,255,.12);}
+    .new-form-hint{font-size:10px;color:var(--t4);margin-top:4px;}
+    #new-project-error{color:var(--red);font-size:12px;margin-left:14px;}
+
+    /* ── Process cards ── */
+    .proc-card{display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,.025);border:1px solid var(--b-sub);border-radius:var(--r2);font-size:12px;}
+    .proc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+    .proc-dot.alive{background:var(--green);box-shadow:0 0 6px rgba(52,211,153,.6);}
+    .proc-dot.dead{background:var(--t4);}
+    .proc-name{font-weight:700;color:var(--amber);min-width:120px;}
+    .proc-cmd{color:var(--t2);font-family:var(--mono);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .proc-pid{color:var(--t3);font-size:10px;font-family:var(--mono);white-space:nowrap;}
+    .proc-kill{padding:3px 10px;background:rgba(248,113,113,.08);color:var(--red);border:1px solid rgba(248,113,113,.22);border-radius:var(--r1);font-size:10px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all var(--ease);}
+    .proc-kill:hover{background:rgba(248,113,113,.18);}
+
+    /* ── Execution error cards ── */
+    .exec-err{display:flex;flex-direction:column;gap:3px;padding:8px 12px;background:rgba(248,113,113,.04);border:1px solid rgba(248,113,113,.15);border-radius:var(--r1);font-size:11px;}
+    .exec-err-header{display:flex;gap:8px;align-items:center;}
+    .exec-err-phase{font-size:9px;font-weight:700;padding:1px 6px;border-radius:20px;background:rgba(248,113,113,.12);color:var(--red);text-transform:uppercase;letter-spacing:.5px;}
+    .exec-err-proj{font-weight:700;color:var(--amber);}
+    .exec-err-ts{color:var(--t4);font-size:9px;margin-left:auto;font-family:var(--mono);}
+    .exec-err-msg{color:var(--t2);font-family:var(--mono);white-space:pre-wrap;max-height:80px;overflow:hidden;}
+
+    /* ── Import from Code Tab ── */
+    #crear-codigo{overflow-y:auto;}
+    .import-wrap{padding:32px 44px;max-width:900px;display:flex;flex-direction:column;gap:20px;}
+    .import-wrap h2{font-size:20px;font-weight:800;letter-spacing:-.4px;background:linear-gradient(135deg,var(--violet),var(--amber));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:2px;}
+    .import-wrap>p{color:var(--t2);font-size:13px;}
+    .import-row{display:flex;gap:12px;align-items:flex-end;}
+    .import-filename{flex:1;background:rgba(0,0,0,.3);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;padding:7px 12px;font-family:var(--mono);outline:none;transition:border-color var(--ease);}
+    .import-filename:focus{border-color:var(--violet);box-shadow:0 0 0 3px rgba(224,64,251,.12);}
+    #import-editor-wrap{border:1px solid var(--b-sub);border-radius:var(--r2);overflow:hidden;height:280px;flex-shrink:0;}
+    #import-editor-container{height:100%;width:100%;}
+    #import-analyze-btn{padding:8px 22px;background:linear-gradient(135deg,var(--violet),var(--cyan));color:#000;border:none;border-radius:var(--r1);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);white-space:nowrap;transition:opacity var(--ease);}
+    #import-analyze-btn:disabled{opacity:.4;cursor:not-allowed;}
+    #import-analysis-panel{display:none;background:rgba(224,64,251,.04);border:1px solid rgba(224,64,251,.2);border-radius:var(--r2);padding:18px 22px;gap:14px;flex-direction:column;}
+    #import-analysis-panel.visible{display:flex;}
+    .import-analysis-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .import-lang-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(245,208,96,.12);color:var(--amber);border:1px solid rgba(245,208,96,.3);}
+    .import-fw-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:rgba(0,229,255,.08);color:var(--cyan);border:1px solid rgba(0,229,255,.2);}
+    #import-summary{font-size:13px;color:var(--t1);line-height:1.6;}
+    .import-suggestions{display:flex;flex-direction:column;gap:6px;}
+    .import-sug-label{font-size:10px;font-weight:700;color:var(--violet);letter-spacing:.8px;text-transform:uppercase;}
+    .import-sug-item{font-size:12px;color:var(--t2);padding:5px 10px;background:rgba(255,255,255,.02);border-left:2px solid rgba(224,64,251,.4);cursor:pointer;border-radius:0 var(--r1) var(--r1) 0;transition:background var(--ease),color var(--ease);}
+    .import-sug-item:hover{background:rgba(224,64,251,.08);color:var(--t1);}
+    .import-intent-area{width:100%;background:rgba(0,0,0,.3);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:13px;padding:10px 14px;resize:vertical;font-family:var(--font);outline:none;min-height:72px;transition:border-color var(--ease),box-shadow var(--ease);}
+    .import-intent-area:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,208,96,.1);}
+    #import-go-btn{padding:10px 32px;background:linear-gradient(135deg,var(--amber),var(--violet));color:#000;border:none;border-radius:var(--r1);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);align-self:flex-start;transition:opacity var(--ease),box-shadow var(--ease);}
+    #import-go-btn:hover{opacity:.88;box-shadow:0 4px 18px rgba(245,208,96,.3);}
+    #import-go-btn:disabled{opacity:.4;cursor:not-allowed;}
+    #import-error{color:var(--red);font-size:12px;}
+    .import-loading{display:flex;align-items:center;gap:8px;color:var(--violet);font-size:12px;}
+    .import-loading-dot{width:6px;height:6px;border-radius:50%;background:var(--violet);animation:pulse 0.9s infinite;}
+    .import-loading-dot:nth-child(2){animation-delay:.2s;}
+    .import-loading-dot:nth-child(3){animation-delay:.4s;}
+
+    /* ── Open Project Tab ── */
+    #crear-abrir{background:var(--base);}
+    .open-wrap{max-width:900px;margin:0 auto;padding:32px 40px 80px;}
+    .resume-item{display:flex;align-items:center;gap:14px;padding:12px 16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:var(--r1);transition:border-color var(--ease);}
+    .resume-item:hover{border-color:rgba(251,191,36,.3);}
+    .resume-item-info{flex:1;min-width:0;}
+    .resume-item-id{font-size:13px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .resume-item-desc{font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+    .resume-item-state{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(251,191,36,.1);color:var(--amber);border:1px solid rgba(251,191,36,.2);white-space:nowrap;}
+    .resume-item-btn{padding:6px 18px;background:linear-gradient(135deg,var(--amber),var(--violet));color:#000;border:none;border-radius:var(--r1);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);white-space:nowrap;transition:opacity var(--ease);}
+    .resume-item-btn:hover{opacity:.85;}
+    .resume-item-btn:disabled{opacity:.4;cursor:not-allowed;}
+    .open-title{font-size:20px;font-weight:800;background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px;letter-spacing:-.4px;}
+    .open-subtitle{font-size:12px;color:var(--amber);margin-bottom:28px;}
+
+    /* Path picker */
+    .open-path-row{display:flex;gap:8px;align-items:center;margin-bottom:20px;}
+    #open-path-input{flex:1;background:rgba(0,0,0,.45);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--mono);padding:8px 14px;outline:none;transition:border-color var(--ease);}
+    #open-path-input:focus{border-color:var(--green);}
+    #open-path-input::placeholder{color:var(--t4);}
+    .open-btn{padding:7px 18px;border:none;border-radius:var(--r1);cursor:pointer;font-size:12px;font-weight:600;font-family:var(--font);transition:all var(--ease);white-space:nowrap;}
+    .open-btn-browse{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.22);}
+    .open-btn-browse:hover{background:rgba(52,211,153,.18);box-shadow:0 0 12px rgba(52,211,153,.18);}
+    .open-btn-analyze{background:rgba(0,229,255,.1);color:var(--cyan);border:1px solid rgba(0,229,255,.22);}
+    .open-btn-analyze:hover{background:rgba(0,229,255,.2);}
+    .open-btn-analyze:disabled{opacity:.4;cursor:not-allowed;}
+
+    /* Analysis loading */
+    .open-loading{display:none;align-items:center;gap:10px;padding:16px;color:var(--cyan);font-size:12px;background:rgba(0,229,255,.04);border:1px solid rgba(0,229,255,.1);border-radius:var(--r2);margin-bottom:16px;}
+    .open-loading.active{display:flex;}
+    .open-loading-dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);animation:pulse .9s infinite;}
+    .open-loading-dot:nth-child(2){animation-delay:.2s;} .open-loading-dot:nth-child(3){animation-delay:.4s;}
+
+    /* Analysis result */
+    #open-analysis-panel{display:none;margin-bottom:24px;}
+    #open-analysis-panel.visible{display:block;}
+    .open-analysis-card{background:rgba(255,255,255,.025);border:1px solid var(--b-sub);border-radius:var(--r3);padding:20px 24px;margin-bottom:14px;}
+    .open-analysis-card:hover{border-color:var(--b-mid);}
+    .open-purpose{font-size:14px;font-weight:600;color:var(--t1);margin-bottom:8px;line-height:1.5;}
+    .open-stack-badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+    .open-badge{font-size:10px;font-weight:700;padding:2px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px;}
+    .open-badge-lang{background:rgba(0,229,255,.1);color:var(--cyan);border:1px solid rgba(0,229,255,.2);}
+    .open-badge-fw{background:rgba(224,64,251,.1);color:var(--violet);border:1px solid rgba(224,64,251,.2);}
+    .open-badge-db{background:rgba(245,208,96,.1);color:var(--amber);border:1px solid rgba(245,208,96,.2);}
+    .open-badge-domain{background:rgba(52,211,153,.1);color:var(--green);border:1px solid rgba(52,211,153,.2);}
+    .open-quality-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+    .open-quality-label{font-size:10px;color:var(--t3);font-weight:600;letter-spacing:.5px;text-transform:uppercase;min-width:60px;}
+    .open-quality-track{flex:1;height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;}
+    .open-quality-fill{height:100%;border-radius:2px;transition:width .6s ease;}
+    .open-quality-score{font-size:11px;font-family:var(--mono);font-weight:700;min-width:28px;text-align:right;}
+    .open-issues-list{margin-top:10px;}
+    .open-issue{font-size:11px;color:var(--t2);padding:4px 0;border-bottom:1px solid var(--b-dim);display:flex;gap:6px;align-items:flex-start;}
+    .open-issue-dot{width:5px;height:5px;border-radius:50%;background:var(--red);flex-shrink:0;margin-top:4px;}
+    .open-files-count{font-size:11px;color:var(--t3);margin-top:6px;}
+
+    /* Action cards grid */
+    .open-actions-label{font-size:10px;font-weight:700;color:var(--amber);letter-spacing:1.2px;text-transform:uppercase;margin:20px 0 12px;display:flex;align-items:center;gap:8px;}
+    .open-actions-label::before{content:'';width:3px;height:12px;background:linear-gradient(180deg,var(--green),var(--cyan));border-radius:2px;display:inline-block;}
+    .open-actions-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:20px;}
+    .open-action-card{padding:14px 16px;background:rgba(255,255,255,.025);border:2px solid transparent;border-radius:var(--r2);cursor:pointer;transition:all var(--ease);position:relative;overflow:hidden;}
+    .open-action-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--action-color,var(--cyan)) 0%,transparent 60%);opacity:0;transition:opacity var(--ease);}
+    .open-action-card:hover{border-color:rgba(255,255,255,.12);transform:translateY(-1px);}
+    .open-action-card.selected{border-color:var(--action-color,var(--cyan));box-shadow:0 0 16px -4px var(--action-color,var(--cyan));}
+    .open-action-card.selected::before{opacity:.06;}
+    .open-action-icon{font-size:20px;margin-bottom:8px;}
+    .open-action-name{font-size:12px;font-weight:700;color:var(--t1);margin-bottom:4px;}
+    .open-action-desc{font-size:10px;color:var(--t3);line-height:1.4;}
+    .open-action-priority{font-size:9px;padding:1px 7px;border-radius:20px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-top:6px;display:inline-block;}
+    .open-action-priority.high{background:rgba(248,113,113,.12);color:var(--red);}
+    .open-action-priority.medium{background:rgba(245,208,96,.1);color:var(--amber);}
+    .open-action-priority.low{background:rgba(52,211,153,.08);color:var(--green);}
+
+    /* Migration language selector */
+    #open-migrate-row{display:none;align-items:center;gap:10px;padding:12px 16px;background:rgba(224,64,251,.06);border:1px solid rgba(224,64,251,.15);border-radius:var(--r2);margin-bottom:16px;}
+    #open-migrate-row.visible{display:flex;}
+    .open-migrate-label{font-size:11px;font-weight:700;color:var(--violet);}
+    #open-migrate-sel{background:rgba(0,0,0,.45);border:1px solid rgba(224,64,251,.25);border-radius:var(--r1);color:var(--t1);font-size:12px;padding:5px 12px;outline:none;cursor:pointer;font-family:var(--mono);}
+    #open-migrate-sel:focus{border-color:var(--violet);}
+
+    /* Intent + launch */
+    .open-intent-section{display:flex;flex-direction:column;gap:12px;}
+    .open-intent-area{background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r2);color:var(--t1);font-size:12px;font-family:var(--font);padding:10px 14px;resize:vertical;min-height:72px;outline:none;line-height:1.5;transition:border-color var(--ease),box-shadow var(--ease);}
+    .open-intent-area:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(52,211,153,.1);}
+    .open-intent-area::placeholder{color:var(--t4);}
+    #open-project-name-input{background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--mono);padding:7px 12px;outline:none;width:100%;transition:border-color var(--ease);}
+    #open-project-name-input:focus{border-color:var(--green);}
+    #open-launch-btn{padding:11px 32px;background:linear-gradient(135deg,var(--green),var(--cyan));color:#000;border:none;border-radius:var(--r2);font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);transition:opacity var(--ease),box-shadow var(--ease);align-self:flex-start;}
+    #open-launch-btn:hover{opacity:.88;box-shadow:0 4px 20px rgba(52,211,153,.4);}
+    #open-launch-btn:disabled{opacity:.4;cursor:not-allowed;}
+    #open-error{color:var(--red);font-size:12px;}
+
+    /* ── Console process output ── */
+    .console-app-line{color:var(--t2);font-family:var(--mono);}
+    .console-app-line.app-info{color:var(--cyan);}
+    .console-app-line.app-url{color:var(--green);font-weight:600;}
+    .console-app-line.app-err{color:var(--red);}
+    .console-app-line.app-exit{color:var(--t3);font-style:italic;}
+
+    /* ── Graph Visualization (Cytoscape) ── */
+    #graph-wrap{flex:1;display:flex;flex-direction:column;min-height:0;background:#080808;}
+    #graph-toolbar{display:flex;align-items:center;gap:6px;padding:5px 10px;background:#0f0f0f;border-bottom:1px solid #1a1a1a;flex-shrink:0;}
+    #graph-toolbar button{background:rgba(255,255,255,.04);border:1px solid #222;border-radius:4px;color:#666;cursor:pointer;padding:3px 9px;font-size:11px;font-family:var(--mono);transition:background .15s,color .15s;}
+    #graph-toolbar button:hover,#graph-toolbar button.active{background:rgba(0,229,255,.08);color:var(--cyan);border-color:rgba(0,229,255,.2);}
+    #graph-toolbar .graph-sep{width:1px;height:14px;background:#222;margin:0 4px;}
+    #graph-legend{display:flex;gap:12px;margin-left:auto;align-items:center;}
+    .g-legend{display:flex;align-items:center;gap:4px;font-size:10px;color:#444;}
+    .g-dot{width:8px;height:8px;border-radius:50%;border:1px solid;}
+    .g-dot.pending{background:#111;border-color:#333;}
+    .g-dot.generating{background:#011820;border-color:#00e5ff;}
+    .g-dot.done{background:#011208;border-color:#00c853;}
+    .g-dot.error{background:#180101;border-color:#ff4444;}
+    #dag-container{flex:1;min-height:0;position:relative;}
+    #dag-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#222;font-size:13px;text-align:center;user-select:none;pointer-events:none;}
+    #graph-tooltip{position:absolute;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;padding:8px 12px;font-size:11px;font-family:var(--mono);color:#aaa;pointer-events:none;z-index:100;display:none;max-width:220px;line-height:1.5;}
+
+    /* ── Recursos sidebar panel ── */
+    #recursos-sidebar{border-top:1px solid var(--b-dim);flex-shrink:0;}
+    .recursos-sb-header{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;cursor:pointer;font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.8px;text-transform:uppercase;user-select:none;transition:color .15s;}
+    .recursos-sb-header:hover{color:var(--t2);}
+    #recursos-sb-body{padding:8px 10px;display:flex;flex-direction:column;gap:6px;}
+    #recursos-sb-body.collapsed{display:none;}
+    #recursos-sb-dropzone{border:1px dashed rgba(255,255,255,.1);border-radius:var(--r1);padding:8px 10px;font-size:11px;color:var(--t3);text-align:center;transition:border-color .15s,background .15s;cursor:default;}
+    #recursos-sb-dropzone.drag{border-color:var(--blue);background:rgba(0,229,255,.04);color:var(--t2);}
+    #recursos-sb-link-row{display:flex;gap:4px;}
+    .recursos-sb-input{flex:1;background:rgba(0,0,0,.3);border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t1);font-size:11px;padding:4px 8px;outline:none;font-family:var(--font);min-width:0;}
+    .recursos-sb-input:focus{border-color:var(--blue);}
+    .recursos-sb-input::placeholder{color:var(--t4);}
+    #recursos-sb-link-row button{padding:4px 8px;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.2);border-radius:var(--r1);color:var(--blue);font-size:11px;cursor:pointer;flex-shrink:0;}
+    #recursos-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;}
+    .ritem{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:var(--r1);background:rgba(255,255,255,.03);border:1px solid var(--b-dim);cursor:pointer;transition:border-color .12s;}
+    .ritem:hover{border-color:var(--b-mid);}
+    .ritem-icon{font-size:13px;color:var(--t4);flex-shrink:0;width:16px;text-align:center;}
+    .ritem-icon.has-intent{color:var(--cyan);}
+    .ritem-name{flex:1;font-size:11px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .ritem-del{width:16px;height:16px;border-radius:3px;border:none;background:transparent;color:var(--t4);cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s;}
+    .ritem:hover .ritem-del{opacity:1;}
+    #recursos-count-badge{font-size:10px;background:rgba(0,229,255,.15);color:var(--blue);padding:1px 6px;border-radius:10px;}
+    #recursos-apply-btn{width:100%;padding:5px;background:rgba(224,64,251,.08);border:1px solid rgba(224,64,251,.2);border-radius:var(--r1);color:var(--violet);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);transition:background .15s;}
+    #recursos-apply-btn:hover{background:rgba(224,64,251,.16);}
+    #recursos-intent-box{position:fixed;bottom:0;left:0;right:0;background:rgba(8,8,16,.97);border-top:1px solid rgba(251,191,36,.4);padding:16px 20px;display:flex;flex-direction:column;gap:10px;backdrop-filter:blur(12px);z-index:100;}
+    #recursos-intent-label{font-size:13px;color:#fde68a;font-weight:500;}
+    #recursos-intent-input{background:rgba(0,0,0,.4);border:1px solid rgba(251,191,36,.28);border-radius:var(--r1);color:var(--t1);font-size:12px;font-family:var(--font);padding:8px 12px;resize:none;outline:none;transition:border-color .15s;}
+    #recursos-intent-input:focus{border-color:var(--amber);}
+    .recursos-intent-actions{display:flex;gap:8px;}
+    .recursos-intent-ok{padding:6px 18px;background:var(--amber);color:#000;border:none;border-radius:var(--r1);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);}
+    .recursos-intent-skip{padding:6px 14px;background:transparent;border:1px solid var(--b-sub);border-radius:var(--r1);color:var(--t3);font-size:12px;cursor:pointer;font-family:var(--font);}
+
+    /* ── Código Tab ── */
+    #codigo-tab{background:#0e0e0e;}
+    #codigo-tab.active{display:flex;flex-direction:column;height:calc(100vh - 42px);}
+    #codigo-toolbar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#161616;border-bottom:1px solid var(--b-sub);flex-shrink:0;}
+    #codigo-toolbar button{background:rgba(255,255,255,.05);border:1px solid var(--b-sub);border-radius:5px;color:var(--t1);cursor:pointer;padding:4px 10px;font-size:12px;transition:background .15s;}
+    #codigo-toolbar button:hover{background:rgba(255,255,255,.1);}
+    #codigo-save-btn{color:var(--cyan);border-color:rgba(0,229,255,.2);}
+    .codigo-sep{width:1px;height:18px;background:var(--b-sub);margin:0 4px;}
+    #codigo-selector{display:flex;gap:3px;}
+    .csel{background:transparent!important;border:1px solid transparent!important;color:var(--t3)!important;padding:3px 10px!important;border-radius:4px;}
+    .csel.active{color:var(--cyan)!important;border-color:rgba(0,229,255,.25)!important;background:rgba(0,229,255,.06)!important;}
+    #codigo-status{font-size:11px;color:#555;margin-left:8px;}
+    #codigo-file-tabs{display:flex;gap:0;background:#111;border-bottom:1px solid var(--b-sub);overflow-x:auto;flex-shrink:0;min-height:0;}
+    #codigo-file-tabs:empty{display:none;}
+    .codigo-ftab{display:flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;font-family:var(--mono);color:#666;cursor:pointer;border-right:1px solid #1a1a1a;white-space:nowrap;transition:background .15s;}
+    .codigo-ftab:hover{background:#1a1a1a;}
+    .codigo-ftab.active{background:#1e1e1e;color:var(--t1);border-bottom:2px solid var(--cyan);}
+    .codigo-ftab span:first-child{flex:1;}
+    .codigo-close{opacity:.4;font-size:10px;padding:1px 3px;border-radius:3px;}
+    .codigo-close:hover{opacity:1;background:rgba(255,255,255,.1);}
+    #codigo-panels{flex:1;display:flex;flex-direction:column;min-height:0;}
+    #codigo-editor-panel{flex:1;display:flex;flex-direction:column;min-height:0;}
+    #codigo-editor-container{flex:1;min-height:0;}
+    #codigo-import-panel{flex:1;overflow-y:auto;padding:24px 32px;}
+
+    /* ── Test UI Tab ── */
+    #testui-tab{background:#0e0e0e;}
+    #testui-tab.active{display:flex;flex-direction:column;height:calc(100vh - 42px);}
+    #testui-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#161616;border-bottom:1px solid var(--b-sub);flex-shrink:0;}
+    #testui-toolbar button{background:rgba(255,255,255,.06);border:1px solid var(--b-sub);border-radius:5px;color:var(--t1);cursor:pointer;padding:4px 9px;font-size:13px;line-height:1;transition:background .15s;}
+    #testui-toolbar button:hover{background:rgba(255,255,255,.12);}
+    #testui-url{flex:1;background:rgba(255,255,255,.04);border:1px solid var(--b-sub);border-radius:5px;color:var(--t1);font-size:12px;padding:5px 9px;outline:none;}
+    #testui-url:focus{border-color:var(--cyan);}
+    #testui-frame{flex:1;border:none;width:100%;background:#fff;min-height:0;}
+    #testui-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--t2);font-size:14px;}
+    #testui-empty i{font-size:38px;color:#333;}
+    #testui-blocked{flex:1;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--t2);font-size:14px;text-align:center;padding:32px;}
+    #testui-console-wrap{flex-shrink:0;height:180px;display:flex;flex-direction:column;border-top:1px solid var(--b-sub);background:#0a0a0a;}
+    #testui-console-header{display:flex;align-items:center;justify-content:space-between;padding:4px 10px;font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--t3);text-transform:uppercase;border-bottom:1px solid #1a1a1a;flex-shrink:0;}
+    #testui-console-header span{cursor:pointer;color:var(--t3);}#testui-console-header span:hover{color:var(--t1);}
+    #testui-console{flex:1;overflow-y:auto;padding:6px 10px;font-size:11px;}
+
+    /* ── Conectividad Tab ── */
+    #conectividad-tab{background:var(--base);}
+    #conectividad-tab.active{display:flex;align-items:center;justify-content:center;overflow-y:auto;}
+    .conn-wrap{padding:44px 32px;max-width:520px;width:100%;text-align:center;}
+    .conn-title{font-size:22px;font-weight:800;background:linear-gradient(135deg,var(--cyan),var(--violet));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px;letter-spacing:-.5px;}
+    .conn-subtitle{font-size:13px;color:var(--t2);margin-bottom:36px;line-height:1.6;}
+    .conn-card{background:rgba(255,255,255,.03);border:1px solid var(--b-sub);border-radius:var(--r3);padding:32px;display:flex;flex-direction:column;align-items:center;gap:24px;position:relative;overflow:hidden;transition:border-color var(--slow);}
+    .conn-card.paired{border-color:rgba(52,211,153,.45);box-shadow:0 0 40px rgba(52,211,153,.12);}
+    #conn-qr-wrap{width:200px;height:200px;background:#fff;border-radius:var(--r2);padding:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+    #conn-qr-wrap canvas,#conn-qr-wrap img{max-width:100%;max-height:100%;}
+    .conn-pin-label{font-size:10px;font-weight:700;color:var(--violet);letter-spacing:1.2px;text-transform:uppercase;}
+    #conn-pin{font-size:36px;font-weight:800;letter-spacing:10px;color:var(--amber);font-family:var(--mono);text-shadow:0 0 20px rgba(245,208,96,.35);}
+    .conn-url{font-size:11px;color:var(--t3);font-family:var(--mono);word-break:break-all;padding:6px 12px;background:rgba(0,0,0,.3);border-radius:var(--r1);border:1px solid var(--b-dim);}
+    .conn-hint{font-size:12px;color:var(--t2);line-height:1.6;}
+    .conn-timer{font-size:11px;font-family:var(--mono);color:var(--t4);display:flex;align-items:center;gap:6px;}
+    .conn-timer-bar{flex:1;height:2px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden;}
+    .conn-timer-fill{height:100%;background:linear-gradient(90deg,var(--green),var(--cyan));transition:width 1s linear;border-radius:2px;}
+    .conn-status{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;padding:8px 16px;border-radius:20px;transition:all var(--slow);}
+    .conn-status.waiting{color:var(--t3);background:rgba(255,255,255,.02);border:1px solid var(--b-dim);}
+    .conn-status.connected{color:var(--green);background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.3);animation:pulse 1.5s 3;}
+    .conn-status-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;}
+    #conn-refresh-btn{padding:8px 24px;background:rgba(0,229,255,.08);color:var(--cyan);border:1px solid rgba(0,229,255,.22);border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);transition:all var(--ease);}
+    #conn-refresh-btn:hover{background:rgba(0,229,255,.16);box-shadow:0 0 14px rgba(0,229,255,.2);}
+    .conn-steps{display:flex;flex-direction:column;gap:8px;text-align:left;width:100%;}
+    .conn-step{display:flex;align-items:flex-start;gap:10px;font-size:12px;color:var(--t2);padding:8px 12px;background:rgba(255,255,255,.02);border-radius:var(--r1);}
+    .conn-step-num{font-size:10px;font-weight:700;width:20px;height:20px;border-radius:50%;background:rgba(0,229,255,.12);color:var(--cyan);border:1px solid rgba(0,229,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
+    @media(max-width:640px){.conn-wrap{padding:24px 16px;}.conn-card{padding:20px;}.conn-pin{font-size:28px;letter-spacing:7px;}}
+
+    /* ── Sub-tab navigation ── */
+    .subtab-bar{display:flex;background:rgba(255,255,255,.02);border-bottom:1px solid var(--b-dim);flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+    .subtab-bar::-webkit-scrollbar{display:none;}
+    .subtab{padding:0 16px;height:36px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--t3);border:none;background:none;outline:none;white-space:nowrap;position:relative;transition:color var(--ease);font-family:var(--font);flex-shrink:0;}
+    .subtab::after{content:'';position:absolute;bottom:0;left:12px;right:12px;height:2px;background:var(--violet);border-radius:2px 2px 0 0;opacity:0;transform:scaleX(.4);transition:opacity var(--ease),transform var(--ease);}
+    .subtab.active{color:var(--violet);}
+    .subtab.active::after{opacity:1;transform:scaleX(1);}
+    .subtab:hover:not(.active){color:var(--t2);}
+    .subtab i{font-size:10px;opacity:.65;}
+    .subtab-panel{display:none;flex:1;overflow-y:auto;flex-direction:column;min-height:0;}
+    .subtab-panel.active{display:flex;}
+    #crear-tab.active,#sistema-tab.active{display:flex;flex-direction:column;height:calc(100vh - 42px);overflow:hidden;}
+    #sistema-cfg .cfg-save-bar{position:sticky;bottom:0;}
+
+    /* ── Mobile sidebar toggle ── */
+    #sidebar-toggle{display:none;width:34px;height:34px;align-items:center;justify-content:center;border:1px solid var(--b-sub);border-radius:var(--r1);background:rgba(255,255,255,.02);color:var(--t2);cursor:pointer;font-size:14px;flex-shrink:0;transition:all var(--ease);}
+    #sidebar-toggle:hover{color:var(--t1);background:rgba(255,255,255,.06);}
+    #sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40;backdrop-filter:blur(4px);}
+    #sidebar-overlay.open{display:block;}
+
+    /* ── Responsive: tablet ── */
+    @media(max-width:900px){
+        #tab-bar{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+        #tab-bar::-webkit-scrollbar{display:none;}
+        .tab{padding:0 14px;flex-shrink:0;}
+        #phase-track .phase-step{padding:2px 6px;font-size:9px;}
+        #phase-track .phase-sep{display:none;}
+    }
+
+    /* ── Responsive: mobile ── */
+    @media(max-width:640px){
+        #sidebar-toggle{display:flex;}
+        #sidebar{position:fixed;left:-260px;top:0;bottom:0;z-index:50;transition:left .25s ease;box-shadow:4px 0 24px rgba(0,0,0,.6);}
+        #sidebar.mobile-open{left:0;}
+        #main-view{width:100%;}
+        #topbar{flex-wrap:wrap;height:auto;min-height:auto;padding:8px;gap:6px;}
+        #topbar .brand{font-size:13px;letter-spacing:2px;}
+        #phase-track{display:none;}
+        #token-display{display:none;}
+        #ai-pills{order:10;width:100%;}
+        #topbar #model-badge{font-size:9px;}
+        #tg-btn,#cost-btn{padding:2px 7px;font-size:10px;}
+        .cfg-grid{grid-template-columns:1fr!important;}
+        .cfg-card.cfg-full{grid-column:1;}
+        .cfg-wrap{padding:20px 14px 80px;}
+        .new-form-wrap{padding:20px 14px;}
+        .import-wrap{padding:20px 14px;}
+        .open-wrap{padding:20px 14px;}
+        #status-panel{padding:20px 14px;}
+        #input-bar{padding:6px 10px;}
+        #name-row{flex-wrap:wrap;}
+        #name-hint{display:none;}
+        #project-name-input{width:100%!important;}
+        #input-row{flex-wrap:wrap;}
+        #description-input{width:100%;}
+        .driver-status-list{flex-direction:column;}
+        .driver-status{min-width:auto;}
+        #progress-time{display:none;}
+        #console-wrap{height:160px;min-height:160px;}
+        .term-toolbar{gap:6px;}
+        #term-project-sel{min-width:100px;}
+        #open-actions-grid{grid-template-columns:1fr;}
+        .cfg-save-bar{padding:12px 14px;}
+    }
     </style>
 </head>
-<body>
+    <body>
+    <div id="tab-bar">
+        <button id="sidebar-toggle" onclick="toggleMobileSidebar()" title="Mostrar/ocultar panel lateral"><i class="fa fa-bars"></i></button>
+        <button class="tab active" data-tab="main"><i class="fa fa-rocket"></i>Principal</button>
+        <button class="tab" data-tab="crear"><i class="fa fa-plus-circle"></i>Crear</button>
+        <button class="tab" data-tab="codigo"><i class="fa fa-code"></i>Código</button>
+        <button class="tab" data-tab="sistema"><i class="fa fa-cogs"></i>Sistema</button>
+        <button class="tab" data-tab="conectividad"><i class="fa fa-qrcode"></i>Conectividad</button>
+        <button class="tab" data-tab="testui"><i class="fa fa-desktop"></i>Test UI</button>
+        <div id="tts-tab-toggle" style="display:flex;align-items:center;gap:7px;margin-left:auto;padding:0 14px;border-left:1px solid rgba(255,255,255,.07);">
+            <i class="fa fa-microphone" style="font-size:13px;color:#888;"></i>
+            <label class="tts-switch" title="Activar/desactivar voz TTS">
+                <input type="checkbox" id="tts-toggle-switch" onchange="window._sodaTTS && window._sodaTTS.toggle(this.checked)">
+                <span class="tts-slider"></span>
+            </label>
+            <span id="tts-toggle-label" style="font-size:11px;color:#666;min-width:48px;">Voz OFF</span>
+        </div>
+    </div>
+    <div id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
+    <!-- ════════ CREAR TAB (Nuevo + Desde Código + Abrir) ════════ -->
+    <div id="crear-tab" class="tab-content">
+        <div class="subtab-bar">
+            <button class="subtab active" data-panel="nuevo" onclick="switchCrear('nuevo')"><i class="fa fa-plus-circle"></i>Nuevo Proyecto</button>
+            <button class="subtab" data-panel="abrir" onclick="switchCrear('abrir')"><i class="fa fa-folder-open"></i>Abrir Proyecto</button>
+            <button class="subtab" data-panel="reanudar" onclick="switchCrear('reanudar')"><i class="fa fa-play-circle"></i>Reanudar</button>
+        </div>
+
+        <!-- Nuevo Proyecto -->
+        <div id="crear-nuevo" class="subtab-panel active">
+            <div class="new-form-wrap">
+                <h2>Nuevo Proyecto</h2>
+                <p>Describí qué querés construir. SODA generará el código completo.</p>
+                <div class="new-form-field">
+                    <label class="new-form-label">Nombre del proyecto</label>
+                    <input id="new-project-name" type="text" placeholder="mi_proyecto" maxlength="60" autocomplete="off" class="new-form-input">
+                    <div class="new-form-hint">Solo letras, números, guiones y guiones bajos</div>
+                </div>
+                <div class="new-form-field">
+                    <label class="new-form-label">Descripción del proyecto</label>
+                    <textarea id="new-project-desc" rows="5" placeholder="Ej: Una API REST con FastAPI que gestiona inventario de productos, con autenticación JWT y base de datos SQLite..." class="new-form-textarea"></textarea>
+                </div>
+                <button onclick="startNewProject()" class="btn-save" style="padding:9px 28px;font-size:13px;">Generar proyecto</button>
+                <span id="new-project-error" style="display:none;"></span>
+            </div>
+        </div>
+        <!-- Abrir Proyecto -->
+        <div id="crear-abrir" class="subtab-panel">
+        <div class="open-wrap">
+        <div class="open-title"><i class="fa fa-folder-open"></i> Abrir Proyecto Existente</div>
+        <div class="open-subtitle">Elegí una carpeta o archivo de código — SODA lo analiza y te da opciones para mejorarlo, corregirlo o migrarlo.</div>
+
+        <!-- Path picker -->
+        <div class="open-path-row">
+            <input id="open-path-input" type="text" placeholder="C:\Users\...\mi_proyecto  o  /home/user/proyecto" spellcheck="false">
+            <button class="open-btn open-btn-browse" onclick="openBrowse()"><i class="fa fa-folder"></i> Explorar…</button>
+            <button class="open-btn open-btn-analyze" id="open-analyze-btn" onclick="openAnalyze()">⚡ Analizar</button>
+        </div>
+
+        <!-- Loading -->
+        <div class="open-loading" id="open-loading">
+            <span class="open-loading-dot"></span>
+            <span class="open-loading-dot"></span>
+            <span class="open-loading-dot"></span>
+            <span>Analizando proyecto con IA…</span>
+        </div>
+
+        <!-- Analysis result -->
+        <div id="open-analysis-panel">
+            <!-- purpose + stack + quality -->
+            <div class="open-analysis-card" id="open-card-overview"></div>
+
+            <!-- Action cards -->
+            <div class="open-actions-label">¿Qué querés hacer con este proyecto?</div>
+            <div class="open-actions-grid" id="open-actions-grid"></div>
+
+            <!-- Language migration selector -->
+            <div id="open-migrate-row">
+                <span class="open-migrate-label"><i class="fa fa-language"></i> Migrar a:</span>
+                <select id="open-migrate-sel">
+                    <option value="">Elegí el lenguaje destino…</option>
+                </select>
+            </div>
+
+            <!-- Intent + project name + launch -->
+            <div class="open-intent-section" id="open-intent-section" style="display:none;">
+                <div>
+                    <label class="new-form-label">¿Qué querés lograr? (opcional — describe con detalle)</label>
+                    <textarea id="open-intent" class="open-intent-area" placeholder="Ej: Corregir los bugs de autenticación y añadir endpoints REST · Migrar a FastAPI moderno · Añadir tests unitarios y documentación completa…"></textarea>
+                </div>
+                <div>
+                    <label class="new-form-label">Nombre del nuevo proyecto SODA</label>
+                    <input id="open-project-name-input" type="text" placeholder="mi_proyecto_v2" maxlength="60" autocomplete="off">
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <button id="open-launch-btn" onclick="openLaunch()">🚀 Procesar proyecto</button>
+                    <span id="open-error"></span>
+                </div>
+            </div>
+        </div>
+        </div><!-- /#open-wrap -->
+        </div><!-- /#crear-abrir -->
+
+        <!-- Reanudar Proyecto -->
+        <div id="crear-reanudar" class="subtab-panel">
+            <div class="new-form-wrap">
+                <h2>Reanudar Proyecto Truncado</h2>
+                <p>Proyectos que quedaron incompletos. SODA retoma desde donde paró, saltando los archivos ya generados.</p>
+                <div id="resume-loading" style="display:none;font-size:12px;color:var(--t3);margin:12px 0;">Cargando proyectos...</div>
+                <div id="resume-list" style="display:flex;flex-direction:column;gap:8px;margin-top:12px;"></div>
+                <div id="resume-empty" style="display:none;font-size:13px;color:var(--t3);margin-top:20px;text-align:center;">No hay proyectos truncados.</div>
+            </div>
+        </div><!-- /#crear-reanudar -->
+    </div><!-- /#crear-tab -->
+
+    <!-- ════════ SISTEMA TAB (Estado + API Keys & IAs) ════════ -->
+    <div id="sistema-tab" class="tab-content">
+        <div class="subtab-bar">
+            <button class="subtab active" data-panel="estado" onclick="switchSistema('estado')"><i class="fa fa-microchip"></i>Estado</button>
+            <button class="subtab" data-panel="cfg" onclick="switchSistema('cfg')"><i class="fa fa-key"></i>API Keys &amp; IAs</button>
+        </div>
+
+        <!-- Estado -->
+        <div id="sistema-estado" class="subtab-panel active">
+        <div id="status-panel">
+            <h2>Estado de Drivers y Consumo</h2>
+            <div class="driver-status-list" id="driver-status-list"></div>
+
+            <!-- ── Procesos en ejecución ── -->
+            <div class="cfg-section-label" style="margin-top:32px;">Procesos en ejecución</div>
+            <div id="processes-panel" style="margin-bottom:24px;">
+                <div id="processes-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+                <div id="processes-empty" style="font-size:12px;color:var(--t3);margin-top:6px;">No hay procesos activos.</div>
+            </div>
+
+            <!-- ── Errores de ejecución ── -->
+            <div class="cfg-section-label">Errores de ejecución recientes</div>
+            <div id="exec-errors-panel" style="margin-bottom:24px;">
+                <div id="exec-errors-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;"></div>
+                <div id="exec-errors-empty" style="font-size:12px;color:var(--t3);margin-top:6px;">Sin errores registrados.</div>
+            </div>
+
+            <div id="usage-summary">
+                <h3>Métricas de Uso Reciente</h3>
+                <table id="usage-table">
+                    <thead>
+                        <tr><th>Fecha</th><th>Driver</th><th>Modelo</th><th>Tokens In</th><th>Tokens Out</th><th>Latencia</th><th>Costo</th></tr>
+                    </thead>
+                    <tbody id="usage-table-body">
+                        <tr><td colspan="7">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        </div><!-- /#sistema-estado -->
+
+        <!-- API Keys & IAs -->
+        <div id="sistema-cfg" class="subtab-panel">
+        <div id="config-tab">
+        <div class="cfg-wrap">
+            <div class="cfg-title">Inteligencias Artificiales & API Keys</div>
+            <div class="cfg-subtitle">Configurá los proveedores de IA, credenciales y modelos activos.</div>
+
+            <div class="cfg-section-label">Proveedores Cloud</div>
+            <div class="cfg-grid">
+
+                <!-- Claude -->
+                <div class="cfg-card">
+                    <div class="cfg-card-header">
+                        <span class="cfg-card-icon">🤖</span>
+                        <span class="cfg-card-name">Claude</span>
+                        <span class="cfg-card-role">REQ · EVAL · CODE fallback</span>
+                        <span class="cfg-status-dot" id="cfg-dot-claude"></span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">ANTHROPIC_API_KEY</span>
+                        <input id="cfg-ANTHROPIC_API_KEY" class="cfg-input" type="password" placeholder="sk-ant-api03-…" autocomplete="off">
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">Modelo</span>
+                        <select id="cfg-CLAUDE_MODEL" class="cfg-select">
+                            <option value="claude-sonnet-4-6">claude-sonnet-4-6 (default)</option>
+                            <option value="claude-opus-4-7">claude-opus-4-7</option>
+                            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (rápido)</option>
+                        </select>
+                    </div>
+                    <div class="cfg-row">
+                        <button class="cfg-btn cfg-btn-test" onclick="testProvider('claude')">Probar conexión</button>
+                        <span class="cfg-test-msg" id="cfg-msg-claude"></span>
+                    </div>
+                </div>
+
+                <!-- Gemini -->
+                <div class="cfg-card">
+                    <div class="cfg-card-header">
+                        <span class="cfg-card-icon">✨</span>
+                        <span class="cfg-card-name">Gemini</span>
+                        <span class="cfg-card-role">CAP · ARCH · EVOLUTION</span>
+                        <span class="cfg-status-dot" id="cfg-dot-gemini"></span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">GEMINI_API_KEY</span>
+                        <input id="cfg-GEMINI_API_KEY" class="cfg-input" type="password" placeholder="AIzaSy…" autocomplete="off">
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">Modelo</span>
+                        <select id="cfg-GEMINI_MODEL" class="cfg-select">
+                            <option value="gemini-2.5-pro">gemini-2.5-pro (máxima calidad)</option>
+                            <option value="gemini-2.5-flash">gemini-2.5-flash ✦ gratis / rápido</option>
+                            <option value="gemini-2.0-flash">gemini-2.0-flash (gratis)</option>
+                            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                            <option value="gemini-1.5-flash">gemini-1.5-flash (gratis)</option>
+                        </select>
+                        <span class="cfg-hint">✦ gemini-2.5-flash es gratuito y muy rápido — ideal para desarrollo</span>
+                    </div>
+                    <div class="cfg-row">
+                        <button class="cfg-btn cfg-btn-test" onclick="testProvider('gemini')">Probar conexión</button>
+                        <span class="cfg-test-msg" id="cfg-msg-gemini"></span>
+                    </div>
+                </div>
+
+                <!-- Ollama/Qwen -->
+                <div class="cfg-card">
+                    <div class="cfg-card-header">
+                        <span class="cfg-card-icon">🔧</span>
+                        <span class="cfg-card-name">Ollama / Qwen</span>
+                        <span class="cfg-card-role">DEV · local</span>
+                        <span class="cfg-status-dot" id="cfg-dot-ollama"></span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">OLLAMA_BASE_URL</span>
+                        <input id="cfg-OLLAMA_BASE_URL" class="cfg-input" type="text" placeholder="http://localhost:11434" autocomplete="off">
+                        <span class="cfg-hint">Por defecto: http://localhost:11434</span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">OLLAMA_MODEL</span>
+                        <input id="cfg-OLLAMA_MODEL" class="cfg-input" type="text" placeholder="qwen2.5-coder:7b" autocomplete="off">
+                        <span class="cfg-hint">Modelo que usa SODA para generar código</span>
+                    </div>
+                    <div class="cfg-row">
+                        <button class="cfg-btn cfg-btn-start" onclick="startOllama()">▶ Iniciar Ollama</button>
+                        <button class="cfg-btn cfg-btn-test" onclick="testProvider('ollama')">Probar</button>
+                        <span class="cfg-test-msg" id="cfg-msg-ollama"></span>
+                    </div>
+                </div>
+
+            </div><!-- /.cfg-grid -->
+
+            <!-- Custom providers section -->
+            <div class="cfg-section-label" style="margin-top:24px;">
+                Proveedores Personalizados
+                <button class="cfg-btn cfg-btn-test" style="float:right;padding:4px 12px;font-size:12px;" onclick="openAddProviderModal()">+ Añadir proveedor</button>
+            </div>
+            <div class="cfg-grid" id="custom-providers-grid">
+                <!-- injected by JS -->
+            </div>
+            <div id="custom-providers-empty" style="color:#555;font-size:12px;margin:8px 0 16px 0;display:none;">
+                Sin proveedores personalizados. Añadí Groq, Mistral, DeepSeek y más con su API key.
+            </div>
+
+            <div class="cfg-section-label">Voz (Kokoro TTS)</div>
+            <div class="cfg-grid">
+                <div class="cfg-card cfg-full">
+                    <div class="cfg-card-header">
+                        <span class="cfg-card-icon">🎙</span>
+                        <span class="cfg-card-name">Kokoro TTS</span>
+                        <span class="cfg-card-role">voz en app y Telegram</span>
+                        <span id="tts-availability" style="font-size:10px;color:#555;margin-left:auto;"></span>
+                    </div>
+                    <div class="cfg-field" style="flex-direction:row;align-items:center;gap:12px;">
+                        <span class="cfg-label">Activar voz</span>
+                        <label class="tts-switch">
+                            <input type="checkbox" id="tts-card-switch" onchange="window._sodaTTS && window._sodaTTS.toggle(this.checked)">
+                            <span class="tts-slider"></span>
+                        </label>
+                        <span id="tts-card-label" style="font-size:11px;color:#666;">OFF</span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">Voz activa</span>
+                        <select id="tts-voice-select" class="cfg-select" onchange="window._sodaTTS && window._sodaTTS.setVoice(this.value)">
+                            <option value="">Cargando voces…</option>
+                        </select>
+                    </div>
+                    <div class="cfg-field" style="flex-direction:row;align-items:center;gap:12px;">
+                        <span class="cfg-label">Velocidad</span>
+                        <input type="range" id="tts-speed-slider" min="0.5" max="2.0" step="0.1" value="1.0" style="flex:1;accent-color:var(--violet);"
+                            oninput="document.getElementById('tts-speed-val').textContent=parseFloat(this.value).toFixed(1)+'×'"
+                            onchange="window._sodaTTS && window._sodaTTS.setSpeed(parseFloat(this.value))">
+                        <span id="tts-speed-val" style="font-size:12px;color:#aaa;min-width:32px;">1.0×</span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">Clonar voz</span>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                            <input id="tts-clone-name" class="cfg-input" type="text" placeholder="nombre_voz" style="width:140px;" autocomplete="off">
+                            <input id="tts-clone-file" type="file" accept="audio/*" style="font-size:11px;color:#aaa;">
+                            <button class="cfg-btn cfg-btn-test" onclick="cloneVoice()">Clonar</button>
+                        </div>
+                    </div>
+                    <div class="cfg-field" id="tts-custom-voices-row" style="display:none;">
+                        <span class="cfg-label">Voces clonadas</span>
+                        <div id="tts-custom-voices-list" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+                    </div>
+                    <div class="cfg-row">
+                        <button class="cfg-btn cfg-btn-test" onclick="testTTS()">Probar voz</button>
+                        <span class="cfg-test-msg" id="tts-test-msg"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cfg-section-label">Notificaciones</div>
+            <div class="cfg-grid">
+                <div class="cfg-card">
+                    <div class="cfg-card-header">
+                        <span class="cfg-card-icon">📱</span>
+                        <span class="cfg-card-name">Telegram</span>
+                        <span class="cfg-card-role">notificaciones & respuestas</span>
+                        <span class="cfg-status-dot" id="cfg-dot-telegram"></span>
+                    </div>
+                    <div class="cfg-field">
+                        <span class="cfg-label">TELEGRAM_BOT_TOKEN</span>
+                        <input id="cfg-TELEGRAM_BOT_TOKEN" class="cfg-input" type="password" placeholder="123456789:AAF…" autocomplete="off">
+                    </div>
+                    <div class="cfg-row">
+                        <button class="cfg-btn cfg-btn-test" onclick="pairTelegram()">Vincular bot</button>
+                        <span class="cfg-test-msg" id="cfg-msg-telegram"></span>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /.cfg-wrap -->
+        <div class="cfg-save-bar">
+            <button class="cfg-save-btn" onclick="saveConfig()">Guardar todos los cambios</button>
+            <span class="cfg-save-msg" id="cfg-save-msg"></span>
+        </div>
+        </div><!-- /#config-tab -->
+        </div><!-- /#sistema-cfg -->
+    </div><!-- /#sistema-tab -->
+
+    <!-- ════════ CONECTIVIDAD TAB ════════ -->
+    <div id="conectividad-tab" class="tab-content">
+        <div class="conn-wrap">
+            <div class="conn-title"><i class="fa fa-qrcode"></i> Conectividad Móvil</div>
+            <div class="conn-subtitle">Escaneá el código QR con tu celular para abrir SODA en el navegador. La validación numérica asegura que solo vos puedas conectarte.</div>
+
+            <div class="conn-card" id="conn-card">
+                <!-- QR code -->
+                <div id="conn-qr-wrap">
+                    <div id="conn-qr" style="display:flex;align-items:center;justify-content:center;width:184px;height:184px;color:#555;font-size:12px;">Generando…</div>
+                </div>
+
+                <!-- PIN -->
+                <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                    <span class="conn-pin-label">Código de verificación</span>
+                    <div id="conn-pin">— — — — — —</div>
+                    <span style="font-size:10px;color:var(--t4);">Verificá que este número aparece en la URL del celular</span>
+                </div>
+
+                <!-- URL -->
+                <div class="conn-url" id="conn-url">—</div>
+
+                <!-- Timer -->
+                <div class="conn-timer" style="width:100%">
+                    <span id="conn-timer-text">—</span>
+                    <div class="conn-timer-bar"><div class="conn-timer-fill" id="conn-timer-fill" style="width:100%"></div></div>
+                </div>
+
+                <!-- Status -->
+                <div class="conn-status waiting" id="conn-status">
+                    <span class="conn-status-dot"></span>
+                    <span id="conn-status-text">Esperando conexión…</span>
+                </div>
+
+                <button id="conn-refresh-btn" onclick="connRefresh()"><i class="fa fa-rotate-right"></i> Nuevo código</button>
+            </div>
+
+            <!-- Steps -->
+            <div class="conn-steps" style="margin-top:24px;">
+                <div class="conn-step"><span class="conn-step-num">1</span>Abrí la cámara de tu celular o cualquier app de QR.</div>
+                <div class="conn-step"><span class="conn-step-num">2</span>Apuntá al código QR de arriba y tocá el link.</div>
+                <div class="conn-step"><span class="conn-step-num">3</span>Verificá que el PIN del celular coincide con el de la pantalla.</div>
+                <div class="conn-step"><span class="conn-step-num">4</span>¡Listo! SODA se abre en el navegador de tu móvil.</div>
+            </div>
+        </div>
+    </div><!-- /#conectividad-tab -->
+
+    <!-- ════════ TEST UI TAB ════════ -->
+    <div id="testui-tab" class="tab-content">
+        <div id="testui-toolbar">
+            <button onclick="testUIBack()" title="Atrás"><i class="fa fa-arrow-left"></i></button>
+            <button onclick="testUIForward()" title="Adelante"><i class="fa fa-arrow-right"></i></button>
+            <button onclick="testUIReload()" title="Recargar"><i class="fa fa-refresh"></i></button>
+            <input id="testui-url" type="text" placeholder="URL del proyecto…" onkeydown="if(event.key==='Enter')testUINavigate(this.value)">
+            <button onclick="testUINavigate(document.getElementById('testui-url').value)" title="Ir"><i class="fa fa-play"></i></button>
+            <button onclick="testUIOpenExternal()" title="Abrir en navegador externo" style="margin-left:4px;"><i class="fa fa-external-link"></i></button>
+        </div>
+        <iframe id="testui-frame" style="display:none;" src="about:blank" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+        <img id="testui-screenshot" style="display:none;flex:1;width:100%;object-fit:contain;background:#000;" alt="Captura de pantalla">
+        <div id="testui-empty">
+            <i class="fa fa-desktop"></i>
+            <span>Ejecuta un proyecto para ver la interfaz aquí.</span>
+            <span style="font-size:12px;color:#444;">O ingresa una URL en la barra de arriba.</span>
+        </div>
+        <div id="testui-blocked">
+            <i class="fa fa-ban" style="font-size:38px;color:#444;"></i>
+            <span>Este sitio no permite mostrarse en un iframe.</span>
+            <span style="font-size:12px;color:#555;">Usa el botón <i class="fa fa-external-link"></i> para abrirlo en el navegador.</span>
+        </div>
+        <div id="testui-console-wrap">
+            <div id="testui-console-header">
+                Consola
+                <span onclick="document.getElementById('testui-console').innerHTML=''">limpiar</span>
+            </div>
+            <div id="testui-console"></div>
+        </div>
+    </div><!-- /#testui-tab -->
+
+    <!-- ════════ CÓDIGO TAB ════════ -->
+    <div id="codigo-tab" class="tab-content">
+        <div id="codigo-toolbar">
+            <button onclick="codigoNewFile()" title="Nuevo archivo"><i class="fa fa-plus"></i> Nuevo</button>
+            <button onclick="codigoOpenFromProject()" title="Abrir archivo del proyecto"><i class="fa fa-folder-open"></i> Abrir</button>
+            <button id="codigo-save-btn" onclick="codigoSaveFile()" title="Guardar (Ctrl+S)"><i class="fa fa-save"></i> Guardar</button>
+            <div class="codigo-sep"></div>
+            <div id="codigo-selector">
+                <button class="csel active" data-panel="editor" onclick="codigoShowPanel('editor')">Editor</button>
+                <button class="csel" data-panel="importar" onclick="codigoShowPanel('importar')">Importar</button>
+            </div>
+            <span id="codigo-status"></span>
+        </div>
+        <div id="codigo-file-tabs"></div>
+        <div id="codigo-panels">
+            <div id="codigo-editor-panel">
+                <div id="codigo-editor-container"></div>
+            </div>
+            <div id="codigo-import-panel" style="display:none;">
+                <div class="import-wrap">
+                    <h2>Crear desde código existente</h2>
+                    <p>Pegá tu código, SODA lo interpreta y te pregunta qué querés construir.</p>
+                    <div>
+                        <label class="new-form-label">Nombre del archivo</label>
+                        <div class="import-row">
+                            <input id="import-filename" class="import-filename" type="text" placeholder="main.py · app.js · Program.cs …" value="main.py" spellcheck="false">
+                            <button id="import-analyze-btn" onclick="analyzeImportedCode()">⚡ Analizar código</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="new-form-label">Código fuente</label>
+                        <div id="import-editor-wrap">
+                            <div id="import-editor-container"></div>
+                        </div>
+                    </div>
+                    <div id="import-loading" style="display:none;" class="import-loading">
+                        <span class="import-loading-dot"></span><span class="import-loading-dot"></span><span class="import-loading-dot"></span>
+                        <span>Analizando código con IA…</span>
+                    </div>
+                    <div id="import-analysis-panel">
+                        <div class="import-analysis-header">
+                            <span id="import-lang-badge" class="import-lang-badge">—</span>
+                            <span id="import-frameworks"></span>
+                        </div>
+                        <div id="import-summary"></div>
+                        <div class="import-suggestions">
+                            <div class="import-sug-label">Sugerencias — hacé clic para usar</div>
+                            <div id="import-suggestions-list"></div>
+                        </div>
+                    </div>
+                    <div id="import-intent-section" style="display:none; flex-direction:column; gap:14px;">
+                        <div>
+                            <label class="new-form-label">¿Qué querés construir a partir de este código?</label>
+                            <textarea id="import-intent" class="import-intent-area" placeholder="Ej: Agregar autenticación JWT…"></textarea>
+                        </div>
+                        <div>
+                            <label class="new-form-label">Nombre del proyecto</label>
+                            <input id="import-project-name" class="new-form-input" type="text" placeholder="mi_proyecto" maxlength="60" autocomplete="off">
+                            <div class="new-form-hint">Solo letras, números, guiones y guiones bajos</div>
+                        </div>
+                        <div>
+                            <label class="new-form-label">Temperatura Copilot</label>
+                            <select id="import-temperature" class="new-form-input" style="cursor:pointer;">
+                                <option value="baja">Baja — 1 revisión, rápido</option>
+                                <option value="media" selected>Media — 3 revisiones (recomendado)</option>
+                                <option value="alta">Alta — revisiones ilimitadas, más refinado</option>
+                            </select>
+                        </div>
+                        <span id="import-error"></span>
+                        <button id="import-go-btn" onclick="startFromCode()">🚀 Crear proyecto desde este código</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- /#codigo-tab -->
+
+    <div id="main-tab" class="tab-content active">
     <div id="topbar">
         <span class="brand">SODA</span>
         <span id="model-badge" class="model-badge">--</span>
+        <span id="project-name" style="font-size:11px;color:#666;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Proyecto activo">sin proyecto</span>
+        <div id="ai-pills">
+            <span class="ai-pill unconfigured" id="pill-qwen"    data-ai="Qwen"   title="Qwen (Ollama)">Qwen</span>
+            <button id="ollama-start-btn" onclick="startOllama()" title="Iniciar Ollama">▶ Iniciar</button>
+            <span class="ai-pill unconfigured" id="pill-claude"  data-ai="Claude" title="Claude">Claude</span>
+            <span class="ai-pill unconfigured" id="pill-gemini"  data-ai="Gemini" title="Gemini">Gemini</span>
+        </div>
+        <button id="auto-confirm-btn" onclick="toggleAutoConfirm()" title="Responder 'sí' automáticamente a todas las preguntas de instalación y ejecución">Auto-sí</button>
         <div id="phase-track">
             <span class="phase-step" id="ph-capabilities">CAP</span>
             <span class="phase-sep">›</span>
@@ -200,24 +1302,103 @@
             <span class="phase-step" id="ph-planning">PLAN</span>
             <span class="phase-sep">›</span>
             <span class="phase-step" id="ph-development">DEV</span>
+            <span class="phase-sep">›</span>
+            <span class="phase-step" id="ph-validation">VALID</span>
         </div>
         <div id="status-dot" title="Idle"></div>
-        <button id="tg-btn" onclick="pairTelegram()" title="Pair Telegram" style="padding:2px 10px;background:#1a2a3a;color:#5ba3d9;border:1px solid #2a4a6a;border-radius:3px;font-size:11px;cursor:pointer;margin-left:4px;">TG</button>
+        <span id="token-display" title="Tokens estimados en esta sesión (NO es el saldo de tu cuenta de IA — el pipeline continúa aunque marque alto)">0 tkn</span>
+        <button id="tg-btn" class="tb-btn" onclick="pairTelegram()" title="Vincular Telegram">TG</button>
+        <button id="cost-btn" class="tb-btn" onclick="openCostPanel()" title="Costos y uso de IA">$</button>
+        <button id="settings-btn" class="tb-btn" onclick="openSettings()" title="API Keys y Configuración">⚙</button>
+    </div>
+    <div id="ai-activity-bar">
+        <span id="ai-activity-label">IA ACTIVA</span>
+        <span id="ai-activity-text">—</span>
     </div>
 
     <div id="input-bar">
-        <textarea id="description-input" placeholder="Describe the project to build…" rows="1"></textarea>
-        <button id="run-btn" onclick="startRun()">Run</button>
+        <div id="name-row">
+            <span id="name-label">Nombre del proyecto:</span>
+            <input id="project-name-input" type="text" placeholder="mi_proyecto" maxlength="60" autocomplete="off" spellcheck="false">
+            <span id="name-hint">Solo letras, números, guiones y guiones bajos</span>
+        </div>
+        <div id="temp-row">
+            <span id="temp-label">🤖 Copilot:</span>
+            <select id="copilot-temp-select">
+                <option value="baja">Baja — 1 revisión, rápido</option>
+                <option value="media" selected>Media — 3 revisiones (recomendado)</option>
+                <option value="alta">Alta — revisiones ilimitadas, más refinado</option>
+            </select>
+        </div>
+        <div id="input-row">
+            <textarea id="description-input" placeholder="Describí el proyecto a construir… (Ctrl+Enter para ejecutar)" rows="1"></textarea>
+            <button id="run-btn" onclick="startRun()">Ejecutar</button>
+        </div>
+    </div>
+
+    <div id="progress-wrap">
+        <div id="progress-track"><div id="progress-fill"></div></div>
+        <span id="progress-pct">0%</span>
+        <span id="progress-label">Listo</span>
+        <span id="progress-time"></span>
     </div>
 
     <div id="body">
         <div id="sidebar">
             <div id="tree-section" class="hidden">
-                <div class="panel-header">OBJECTIVES</div>
+                <div class="panel-header">OBJETIVOS</div>
                 <div id="tree-wrap"></div>
             </div>
-            <div class="panel-header">FILES</div>
+            <div id="goal-tree-section" class="hidden">
+                <div id="goal-tree-toggle" onclick="toggleGoalTree()">
+                    ÁRBOL DE OBJETIVOS <span class="gt-arrow">▾</span>
+                </div>
+                <div id="goal-tree-body"></div>
+            </div>
+            <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;">
+                <span>ARCHIVOS</span>
+                <button id="load-files-btn" onclick="loadAllProjectFiles(currentProjectId)" style="font-size:10px;padding:2px 8px;background:rgba(0,229,255,.08);color:var(--cyan);border:1px solid rgba(0,229,255,.2);border-radius:4px;cursor:pointer;" title="Cargar todos los archivos del proyecto">Actualizar</button>
+            </div>
             <div id="file-list"></div>
+            <!-- ── Recursos del proyecto ── -->
+            <div id="recursos-sidebar">
+                <div class="recursos-sb-header" onclick="recursosToggleSidebar()">
+                    <span><i class="fa fa-folder-open"></i> RECURSOS</span>
+                    <div style="display:flex;gap:5px;align-items:center;">
+                        <span id="recursos-count-badge" style="display:none;"></span>
+                        <span id="recursos-sb-arrow">▾</span>
+                    </div>
+                </div>
+                <div id="recursos-sb-body">
+                    <!-- Upload zone compact -->
+                    <div id="recursos-sb-dropzone" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="recursosDrop(event)">
+                        <i class="fa fa-cloud-upload"></i> Arrastrá o
+                        <label style="color:var(--blue);cursor:pointer;text-decoration:underline;">
+                            elegí archivo
+                            <input type="file" id="recursos-file-input" multiple style="display:none" onchange="recursosHandleFiles(this.files)">
+                        </label>
+                    </div>
+                    <!-- URL / text input -->
+                    <div id="recursos-sb-link-row">
+                        <input id="recursos-link-input" class="recursos-sb-input" type="text" placeholder="https:// o texto de referencia…" onkeydown="if(event.key==='Enter')recursosAddText()">
+                        <button onclick="recursosAddText()" title="Agregar"><i class="fa fa-plus"></i></button>
+                    </div>
+                    <!-- List of resources -->
+                    <div id="recursos-list"></div>
+                    <!-- Apply button -->
+                    <button id="recursos-apply-btn" onclick="recursosApplyAll()"><i class="fa fa-magic"></i> Aplicar al proyecto</button>
+                </div>
+            </div>
+            <!-- Intent question overlay (full-page) -->
+            <div id="recursos-intent-box" style="display:none;">
+                <div id="recursos-intent-label"></div>
+                <textarea id="recursos-intent-input" placeholder="Ej: Usar este logo en el header y en el footer de la app…" rows="3"></textarea>
+                <div class="recursos-intent-actions">
+                    <button onclick="recursosSubmitIntent()" class="recursos-intent-ok"><i class="fa fa-check"></i> Guardar</button>
+                    <button onclick="recursosSkipIntent()" class="recursos-intent-skip">Omitir</button>
+                </div>
+            </div>
+
             <div id="hw-panel">
                 <div class="hw-metric">
                     <span class="hw-label">VRAM</span>
@@ -238,435 +1419,530 @@
         </div>
 
         <div id="main-view">
-            <div id="editor-container"></div>
+            <!-- Graph visualization -->
+            <div id="graph-wrap">
+                <div id="graph-toolbar">
+                    <button id="btn-mode-modules" class="active" onclick="cySetMode('modules')" title="Ver módulos del pipeline">Módulos</button>
+                    <button id="btn-mode-files" onclick="cySetMode('files')" title="Ver conexiones reales del código generado">Archivos</button>
+                    <div class="graph-sep"></div>
+                    <button onclick="cyFitGraph()" title="Ajustar vista">⊡ Fit</button>
+                    <button onclick="cyResetLayout()" title="Reorganizar nodos">↺ Layout</button>
+                    <div id="graph-legend">
+                        <span class="g-legend"><span class="g-dot pending"></span>Pendiente</span>
+                        <span class="g-legend"><span class="g-dot generating"></span>Generando</span>
+                        <span class="g-legend"><span class="g-dot done"></span>Listo</span>
+                        <span class="g-legend"><span class="g-dot error"></span>Error</span>
+                    </div>
+                </div>
+                <div id="dag-container">
+                    <div id="dag-empty">
+                        <i class="fa fa-sitemap" style="font-size:44px;"></i>
+                        <span>El grafo aparecerá cuando el plan esté listo.</span>
+                    </div>
+                    <div id="graph-tooltip"></div>
+                </div>
+            </div>
+
             <div id="wisdom-panel" class="hidden"></div>
+            <div id="copilot-box">
+                <div id="copilot-header">
+                    <span>&#9670; COPILOT AUDITANDO</span>
+                    <span id="copilot-phase"></span>
+                </div>
+                <div id="copilot-message"></div>
+                <div id="copilot-change"></div>
+            </div>
+            <div id="question-box">
+                <div id="question-header">
+                    <span id="question-pulse"></span>
+                    SODA NECESITA TU RESPUESTA — pipeline en pausa
+                </div>
+                <div id="question-text"></div>
+                <div id="question-row">
+                    <button id="mic-btn" onclick="toggleMic()" title="Hablar (clic para grabar, clic para detener)"><i class="fa fa-microphone"></i></button>
+                    <textarea id="answer-input" placeholder="Escribí tu respuesta… (Ctrl+Enter para enviar)"></textarea>
+                    <button id="answer-btn" onclick="submitAnswer()">Responder</button>
+                    <button id="skip-btn" onclick="skipAnswer()">Omitir</button>
+                </div>
+            </div>
             <div id="console-wrap">
                 <div id="console-header">
-                    CONSOLE
-                    <span id="console-clear" onclick="document.getElementById('console').innerHTML=''">clear</span>
+                    CONSOLA
+                    <span id="console-clear" onclick="document.getElementById('console').innerHTML=''">limpiar</span>
                 </div>
                 <div id="console"></div>
             </div>
-            <div id="chat-wrap" class="hidden">
-                <textarea id="chat-input" placeholder="Ask to modify the project… (Ctrl+Enter to send)"></textarea>
-                <button id="chat-btn" onclick="sendModification()">Modify</button>
-                <button id="refound-btn" onclick="sendRefound()" title="Refound project with condensed context" style="padding:5px 10px;background:#2d2010;color:#cca700;border:1px solid #cca700;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">Refound</button>
+            <div id="launch-panel">
+                <span id="launch-header">PROYECTO LISTO</span>
+                <input id="launch-cmd" type="text" title="Comando de ejecución — podés editarlo">
+                <button id="launch-btn" onclick="launchProject()">▶ Instalar y Ejecutar</button>
+                <span id="launch-path"></span>
+            </div>
+            <div id="chat-wrap">
+                <textarea id="chat-input" placeholder="Preguntá sobre el proyecto o describí un cambio… (Ctrl+Enter para consultar)"></textarea>
+                <div class="chat-actions">
+                    <button id="ask-btn" onclick="sendQuestion()">Consultar</button>
+                    <button id="chat-btn" onclick="sendModification()">Modificar</button>
+                    <button id="refound-btn" onclick="sendRefound()" title="Resumir y relanzar el pipeline con contexto condensado">Refundar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div><!-- /#main-tab -->
+
+    <!-- Cost overlay -->
+    <div id="cost-overlay" onclick="if(event.target===this)closeCostPanel()">
+        <div id="cost-box">
+            <button id="cost-close" onclick="closeCostPanel()">✕</button>
+            <h2>COSTOS Y USO DE IA</h2>
+            <div class="cost-summary">
+                <div class="cost-stat"><div class="cost-stat-val" id="cost-total">$0.00</div><div class="cost-stat-lbl">Costo total</div></div>
+                <div class="cost-stat"><div class="cost-stat-val" id="cost-calls">0</div><div class="cost-stat-lbl">Llamadas</div></div>
+                <div class="cost-stat"><div class="cost-stat-val" id="cost-tokens-in">0</div><div class="cost-stat-lbl">Tokens in</div></div>
+                <div class="cost-stat"><div class="cost-stat-val" id="cost-tokens-out">0</div><div class="cost-stat-lbl">Tokens out</div></div>
+            </div>
+            <table class="cost-table">
+                <thead><tr><th>Modelo</th><th>Llamadas</th><th>Tokens</th><th>Costo</th><th>Errores</th></tr></thead>
+                <tbody id="cost-rows"></tbody>
+            </table>
+            <div class="cost-alerts" id="cost-alerts-wrap"></div>
+            <a href="/copilot" target="_blank" class="cost-copilot-link">Abrir SODA Copilot (chat con IA) →</a>
+            <div id="cost-refresh-time"></div>
+        </div>
+    </div>
+
+    <!-- Settings overlay -->
+    <div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
+        <div id="settings-box">
+            <h2>⚙ API KEYS Y CONFIGURACIÓN</h2>
+            <div class="settings-row">
+                <div class="settings-label"><span id="dot-ANTHROPIC_API_KEY" class="settings-unset"></span>ANTHROPIC_API_KEY</div>
+                <input id="input-ANTHROPIC_API_KEY" class="settings-input" type="password" placeholder="sk-ant-… (vacío = mantener actual)" autocomplete="off">
+            </div>
+            <div class="settings-row">
+                <div class="settings-label"><span id="dot-GEMINI_API_KEY" class="settings-unset"></span>GEMINI_API_KEY</div>
+                <input id="input-GEMINI_API_KEY" class="settings-input" type="password" placeholder="AIza… (vacío = mantener actual)" autocomplete="off">
+            </div>
+            <div class="settings-row">
+                <div class="settings-label"><span id="dot-OLLAMA_BASE_URL" class="settings-unset"></span>OLLAMA_BASE_URL</div>
+                <input id="input-OLLAMA_BASE_URL" class="settings-input" type="text" placeholder="http://localhost:11434" autocomplete="off">
+                <div class="settings-hint">Por defecto: http://localhost:11434</div>
+            </div>
+            <div class="settings-row">
+                <div class="settings-label"><span id="dot-TELEGRAM_BOT_TOKEN" class="settings-unset"></span>TELEGRAM_BOT_TOKEN <span style="color:#555;font-size:10px;">(optional)</span></div>
+                <input id="input-TELEGRAM_BOT_TOKEN" class="settings-input" type="password" placeholder="123456:AAF… (vacío = mantener actual)" autocomplete="off">
+            </div>
+            <div class="settings-actions">
+                <button class="btn-cancel" onclick="closeSettings()">Cancelar</button>
+                <button class="btn-save" onclick="saveSettings()">Guardar y aplicar</button>
             </div>
         </div>
     </div>
 
+    <script src="/static/js/tts.js"></script>
+    <script src="/static/js/app.js"></script>
     <script>
-        let editor;
-        let files = {};
-        let ramTotal = null;
-        let activeFile = null;
-        let currentProjectId = null;
-        const phases = ['capabilities', 'requirements', 'architecture', 'planning', 'development'];
+    // ── Responsive UI patches ──────────────────────────────────────────────
 
-        // --- Monaco ---
-        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs' } });
-        require(['vs/editor/editor.main'], function () {
-            editor = monaco.editor.create(document.getElementById('editor-container'), {
-                value: '# SODA Mission Control — waiting for pipeline...',
-                language: 'python', theme: 'vs-dark', automaticLayout: true,
-                readOnly: true, minimap: { enabled: false }
-            });
-        });
+    // Mobile sidebar toggle
+    function toggleMobileSidebar() {
+        const sb = document.getElementById('sidebar');
+        const ov = document.getElementById('sidebar-overlay');
+        sb.classList.toggle('mobile-open');
+        ov.classList.toggle('open');
+    }
 
-        function langFromFilename(name) {
-            const ext = name.split('.').pop().toLowerCase();
-            const map = { py:'python', js:'javascript', ts:'typescript', html:'html', css:'css', json:'json', md:'markdown', yml:'yaml', yaml:'yaml', sh:'shell', txt:'plaintext' };
-            return map[ext] || 'plaintext';
-        }
+    // Sub-tab switchers
+    function switchCrear(panel) {
+        document.querySelectorAll('#crear-tab .subtab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('#crear-tab .subtab-panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+        const btn = document.querySelector('#crear-tab .subtab[data-panel="' + panel + '"]');
+        const el = document.getElementById('crear-' + panel);
+        if (btn) btn.classList.add('active');
+        if (el) { el.classList.add('active'); el.style.display = 'flex'; }
+        if (panel === 'codigo')    { typeof initImportEditor === 'function' && initImportEditor(); }
+        if (panel === 'abrir')     { typeof initOpenTab    === 'function' && initOpenTab(); }
+        if (panel === 'reanudar')  { resumeLoadList(); }
+    }
 
-        function iconFromFilename(name) {
-            const ext = name.split('.').pop().toLowerCase();
-            const map = { py:'[py]', js:'[js]', ts:'[ts]', html:'[html]', css:'[css]', json:'[json]', md:'[md]' };
-            return map[ext] || '[file]';
-        }
-
-        function openFile(filename) {
-            if (!editor) return;
-            document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
-            const item = document.querySelector(`.file-item[data-file="${CSS.escape(filename)}"]`);
-            if (item) item.classList.add('active');
-            editor.setModel(monaco.editor.createModel(files[filename], langFromFilename(filename)));
-            activeFile = filename;
-        }
-
-        // --- Objective tree ---
-        function buildTree(levels) {
-            const wrap = document.getElementById('tree-wrap');
-            wrap.innerHTML = '';
-            levels.forEach((mods, i) => {
-                const lvl = document.createElement('div');
-                lvl.className = 'tree-level';
-                const label = document.createElement('div');
-                label.className = 'tree-level-label';
-                label.textContent = `Level ${i}${mods.length > 1 ? ' — parallel' : ''}`;
-                const chips = document.createElement('div');
-                chips.className = 'tree-modules';
-                mods.forEach(mod => {
-                    const chip = document.createElement('span');
-                    chip.className = 'mod-chip';
-                    chip.id = `mod-${mod}`;
-                    chip.textContent = mod;
-                    chips.appendChild(chip);
-                });
-                lvl.appendChild(label);
-                lvl.appendChild(chips);
-                wrap.appendChild(lvl);
-            });
-            document.getElementById('tree-section').classList.remove('hidden');
-        }
-
-        function setModuleState(modName, state) {
-            const chip = document.getElementById(`mod-${modName}`);
-            if (!chip) return;
-            chip.className = `mod-chip ${state}`;
-        }
-
-        // --- Wisdom panel ---
-        function renderWisdom(observations) {
-            const panel = document.getElementById('wisdom-panel');
-            panel.innerHTML = '';
-            if (!observations || observations.length === 0) return;
-            panel.classList.remove('hidden');
-            observations.forEach(obs => {
+    async function resumeLoadList() {
+        const list = document.getElementById('resume-list');
+        const empty = document.getElementById('resume-empty');
+        const loading = document.getElementById('resume-loading');
+        list.innerHTML = '';
+        empty.style.display = 'none';
+        loading.style.display = 'block';
+        try {
+            const r = await fetch('/api/projects/truncated');
+            const data = await r.json();
+            loading.style.display = 'none';
+            const projects = data.projects || [];
+            if (!projects.length) { empty.style.display = 'block'; return; }
+            projects.slice().reverse().forEach(p => {
                 const item = document.createElement('div');
-                item.className = 'wisdom-item';
+                item.className = 'resume-item';
+                const desc = (p.description || '').slice(0, 80);
+                const state = p.state || '?';
                 item.innerHTML = `
-                    <span class="wisdom-tag ${obs.type}">${obs.type.replace('_', ' ')}</span>
-                    <div class="wisdom-body">
-                        <div class="wisdom-msg">${escapeHtml(obs.message)}</div>
-                        ${obs.suggestion ? `<div class="wisdom-sug">${escapeHtml(obs.suggestion)}</div>` : ''}
-                    </div>`;
-                panel.appendChild(item);
+                    <div class="resume-item-info">
+                        <div class="resume-item-id">${p.project_id || p.id}</div>
+                        <div class="resume-item-desc">${desc}</div>
+                    </div>
+                    <span class="resume-item-state">${state}</span>
+                    <button class="resume-item-btn" onclick="resumeProject('${p.project_id || p.id}', this)">Reanudar</button>
+                `;
+                list.appendChild(item);
             });
+        } catch(e) {
+            loading.style.display = 'none';
+            list.innerHTML = '<div style="color:var(--red);font-size:12px;">Error cargando proyectos: ' + e + '</div>';
         }
+    }
 
-        // --- Project Chat ---
-        async function sendModification() {
-            if (!currentProjectId) return;
-            const input = document.getElementById('chat-input');
-            const btn = document.getElementById('chat-btn');
-            const request = input.value.trim();
-            if (!request) { input.focus(); return; }
-
-            input.disabled = true;
-            btn.disabled = true;
-            btn.textContent = 'Analyzing…';
-
-            try {
-                const res = await fetch('/api/modify', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({project_id: currentProjectId, request}),
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    log(data.message || 'Modification failed', 'FAILED');
-                } else {
-                    input.value = '';
-                }
-            } catch(e) {
-                log('Could not reach server', 'FAILED');
-            } finally {
-                input.disabled = false;
+    async function resumeProject(projectId, btn) {
+        if (!projectId) return;
+        btn.disabled = true;
+        btn.textContent = 'Iniciando...';
+        try {
+            const r = await fetch('/api/resume', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({project_id: projectId})
+            });
+            const data = await r.json();
+            if (data.status === 'started') {
+                switchTopTab('main');
+                addLog('Reanudando proyecto: ' + projectId, 'info');
+            } else if (data.status === 'busy') {
+                alert('El pipeline ya está en ejecución. Esperá a que termine.');
                 btn.disabled = false;
-                btn.textContent = 'Modify';
-                input.focus();
+                btn.textContent = 'Reanudar';
+            } else {
+                alert('Error: ' + (data.message || 'desconocido'));
+                btn.disabled = false;
+                btn.textContent = 'Reanudar';
             }
-        }
-
-        // --- Telegram pairing ---
-        async function pairTelegram() {
-            try {
-                const status = await fetch('/api/telegram/status').then(r => r.json());
-                if (status.configured) {
-                    alert(`Telegram already paired (chat_id: ${status.chat_id}). To re-pair, clear soda_config.json.`);
-                    return;
-                }
-                if (!status.has_token) {
-                    alert('No TELEGRAM_BOT_TOKEN in .env. Add it and restart SODA.');
-                    return;
-                }
-                const res = await fetch('/api/telegram/pair').then(r => r.json());
-                alert(`Pairing code: ${res.code}\n\n${res.instruction}`);
-                document.getElementById('tg-btn').style.color = '#cca700';
-            } catch(e) {
-                alert('Could not generate pairing code.');
-            }
-        }
-
-        // Check Telegram status on load
-        fetch('/api/telegram/status').then(r => r.json()).then(s => {
-            const btn = document.getElementById('tg-btn');
-            if (s.configured) { btn.style.color = '#4ec9b0'; btn.title = 'Telegram paired'; }
-            else if (!s.has_token) { btn.style.opacity = '0.3'; btn.title = 'No TELEGRAM_BOT_TOKEN'; }
-        }).catch(() => {});
-
-        async function sendRefound() {
-            if (!currentProjectId) return;
-            if (!confirm('Refound this project? SODA will summarize it and start a clean pipeline with condensed context.')) return;
-            document.getElementById('refound-btn').disabled = true;
-            document.getElementById('chat-btn').disabled = true;
-            try {
-                const res = await fetch('/api/refound', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({project_id: currentProjectId}),
-                });
-                if (!res.ok) {
-                    const err = await res.json();
-                    log(err.message || 'Refoundation failed', 'FAILED');
-                    document.getElementById('refound-btn').disabled = false;
-                    document.getElementById('chat-btn').disabled = false;
-                }
-            } catch(e) {
-                log('Could not reach server', 'FAILED');
-                document.getElementById('refound-btn').disabled = false;
-                document.getElementById('chat-btn').disabled = false;
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const chatInput = document.getElementById('chat-input');
-            if (chatInput) {
-                chatInput.addEventListener('keydown', e => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendModification();
-                });
-            }
-        });
-
-        // --- Run ---
-        async function startRun() {
-            const input = document.getElementById('description-input');
-            const btn = document.getElementById('run-btn');
-            const description = input.value.trim();
-            if (!description) { input.focus(); return; }
-
-            input.disabled = true;
-            btn.disabled = true;
-            btn.textContent = 'Running…';
-
-            try {
-                const res = await fetch('/api/run', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({description}),
-                });
-                if (!res.ok) {
-                    const err = await res.json();
-                    log(err.message || 'Failed to start', 'FAILED');
-                    unlockInput();
-                }
-            } catch(e) {
-                log('Could not reach server', 'FAILED');
-                unlockInput();
-            }
-        }
-
-        function unlockInput() {
-            const input = document.getElementById('description-input');
-            const btn = document.getElementById('run-btn');
-            input.disabled = false;
+        } catch(e) {
+            alert('Error de red: ' + e);
             btn.disabled = false;
-            btn.textContent = 'Run';
+            btn.textContent = 'Reanudar';
+        }
+    }
+
+    function switchSistema(panel) {
+        document.querySelectorAll('#sistema-tab .subtab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('#sistema-tab .subtab-panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+        const btn = document.querySelector('#sistema-tab .subtab[data-panel="' + panel + '"]');
+        const el = document.getElementById('sistema-' + panel);
+        if (btn) btn.classList.add('active');
+        if (el) { el.classList.add('active'); el.style.display = 'flex'; }
+        if (panel === 'estado') { typeof loadStatusTab  === 'function' && loadStatusTab(); }
+        if (panel === 'cfg')    {
+            typeof loadConfigTab     === 'function' && loadConfigTab();
+            typeof loadCustomProviders === 'function' && loadCustomProviders();
+        }
+    }
+
+    // Override switchTopTab to handle legacy names → merged tabs
+    const _origSwitchTopTab = switchTopTab;
+    switchTopTab = function(tabName) {
+        const creatorMap = { 'new': 'nuevo', 'import': 'codigo', 'open': 'abrir' };
+        const sistemaMap = { 'status': 'estado', 'config': 'cfg' };
+
+        function _activateTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const btn = document.querySelector('.tab[data-tab="' + name + '"]');
+            const content = document.getElementById(name + '-tab');
+            if (btn) btn.classList.add('active');
+            if (content) content.classList.add('active');
         }
 
-        document.getElementById('description-input').addEventListener('keydown', e => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startRun();
-        });
+        if (creatorMap[tabName]) {
+            _activateTab('crear');
+            switchCrear(creatorMap[tabName]);
+            return;
+        }
+        if (sistemaMap[tabName]) {
+            _activateTab('sistema');
+            switchSistema(sistemaMap[tabName]);
+            return;
+        }
+        // main / crear / sistema → original behavior
+        _activateTab(tabName);
+    };
 
-        // --- Hardware polling ---
-        async function updateStats() {
-            try {
-                const data = await fetch('/api/stats').then(r => r.json());
-                const vPct = data.vram.total > 0 ? (data.vram.total - data.vram.free) / data.vram.total * 100 : 0;
-                document.getElementById('vram-bar').style.width = vPct + '%';
-                document.getElementById('vram-text').textContent = Math.round(vPct) + '%';
-
-                document.getElementById('cpu-bar').style.width = data.system.cpu_usage + '%';
-                document.getElementById('cpu-text').textContent = Math.round(data.system.cpu_usage) + '%';
-
-                if (!ramTotal) {
-                    const t = await fetch('/api/ram_total').then(r => r.json()).catch(() => null);
-                    ramTotal = t?.ram_total_gb || 64;
+    // Patch config-tab observer: watch sistema-cfg instead
+    document.addEventListener('DOMContentLoaded', () => {
+        const sistemaCfg = document.getElementById('sistema-cfg');
+        if (sistemaCfg) {
+            new MutationObserver(() => {
+                if (sistemaCfg.classList.contains('active')) {
+                    typeof loadCustomProviders === 'function' && loadCustomProviders();
                 }
-                const rPct = Math.max(0, 100 - data.system.ram_free_gb / ramTotal * 100);
-                document.getElementById('ram-bar').style.width = rPct + '%';
-                document.getElementById('ram-text').textContent = Math.round(rPct) + '%';
-
-                if (data.recommendation) {
-                    const [model, mode] = data.recommendation;
-                    document.getElementById('model-badge').textContent = `${model} [${mode}]`;
-                }
-            } catch(e) {}
+            }).observe(sistemaCfg, { attributes: true, attributeFilter: ['class'] });
         }
-        updateStats();
-        setInterval(updateStats, 2000);
+    });
 
-        // --- Phase tracker ---
-        function setPhase(phase, allDone = false) {
-            phases.forEach(p => {
-                const el = document.getElementById('ph-' + p);
-                if (!el) return;
-                el.className = 'phase-step';
-                if (allDone) { el.classList.add('done'); return; }
-                if (p === phase) el.classList.add('active');
-                else if (phases.indexOf(p) < phases.indexOf(phase)) el.classList.add('done');
-            });
-        }
-
-        function setStatus(state) {
-            const dot = document.getElementById('status-dot');
-            dot.className = state;
-        }
-
-        // --- Console ---
-        function log(message, type = 'LOG') {
-            const entry = document.createElement('div');
-            entry.className = `log-entry ${type}`;
-            const ts = new Date().toTimeString().slice(0, 8);
-            entry.innerHTML = `<span class="log-time">${ts}</span><span class="log-msg">${escapeHtml(message)}</span>`;
-            const el = document.getElementById('console');
-            el.appendChild(entry);
-            el.scrollTop = el.scrollHeight;
-        }
-
-        function escapeHtml(s) {
-            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        }
-
-        // --- WebSocket ---
-        function connectWS() {
-            const ws = new WebSocket(`ws://${window.location.host}/ws`);
-
-            ws.onmessage = (event) => {
-                const payload = JSON.parse(event.data);
-                const type = payload.event_type || 'LOG';
-                const msg  = payload.message || '';
-                const data = payload.data || {};
-
-                log(msg, type);
-
-                switch (type) {
-                    case 'START':
-                        setStatus('running');
-                        currentProjectId = data.project_id || null;
-                        document.getElementById('file-list').innerHTML = '';
-                        document.getElementById('tree-wrap').innerHTML = '';
-                        document.getElementById('tree-section').classList.add('hidden');
-                        document.getElementById('wisdom-panel').innerHTML = '';
-                        document.getElementById('wisdom-panel').classList.add('hidden');
-                        document.getElementById('chat-wrap').classList.add('hidden');
-                        files = {};
-                        phases.forEach(p => { const el = document.getElementById('ph-' + p); if(el) el.className = 'phase-step'; });
-                        break;
-
-                    case 'PHASE_START':
-                        if (data.phase && data.phase !== 'wisdom' && data.phase !== 'modification') setPhase(data.phase);
-                        break;
-
-                    case 'CAPABILITIES':
-                        if (data.profile) {
-                            const skills = (data.skills || []).join(', ') || 'none';
-                            log(`Profile: ${data.profile} | Skills: ${skills}`, 'CAPABILITIES');
-                        }
-                        break;
-
-                    case 'WISDOM': {
-                        const wisdomBuf = window._wisdomBuf = window._wisdomBuf || [];
-                        if (data.type !== 'ok') {
-                            wisdomBuf.push(data);
-                            renderWisdom(wisdomBuf);
-                        }
-                        break;
-                    }
-
-                    case 'CHECKPOINT':
-                        if (data.number === 3 && data.levels) buildTree(data.levels);
-                        break;
-
-                    case 'MODULE_START':
-                        if (data.module) setModuleState(data.module, 'running');
-                        break;
-
-                    case 'MODULE_DONE':
-                        if (data.module) setModuleState(data.module, 'done');
-                        break;
-
-                    case 'FILE_GENERATED': {
-                        const { filename, code, validated } = data;
-                        if (!filename || code === undefined) break;
-                        files[filename] = code;
-                        const item = document.createElement('div');
-                        item.className = 'file-item';
-                        item.dataset.file = filename;
-                        item.innerHTML = `<span class="file-icon">${iconFromFilename(filename)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(filename)}</span><span class="file-validated ${validated?'ok':'fail'}">${validated?'OK':'ERR'}</span>`;
-                        item.onclick = () => openFile(filename);
-                        document.getElementById('file-list').appendChild(item);
-                        openFile(filename);
-                        break;
-                    }
-
-                    case 'MODIFICATION_PLAN':
-                        log(`[${data.change_type?.toUpperCase()}] ${data.impact_summary || data.description}`, 'MODIFICATION_PLAN');
-                        break;
-
-                    case 'IMPACT_REPORT': {
-                        const affected = [...(data.directly_affected||[]), ...(data.transitively_affected||[])];
-                        log(`Impact [${data.risk_level}] — affects: ${affected.join(', ') || 'none'}. ${data.risk_reason}`, 'IMPACT_REPORT');
-                        affected.forEach(m => setModuleState(m, 'running'));
-                        break;
-                    }
-
-                    case 'HEALTH_WARN':
-                        log(`[HEALTH L${data.level}] ${data.reason}`, 'HEALTH_WARN');
-                        break;
-
-                    case 'EVOLUTION':
-                        log(`Profile '${data.profile}' updated — ${data.count} learnings captured`, 'EVOLUTION');
-                        break;
-
-                    case 'BRANCH_CREATED':
-                        log(`Branch created: ${data.branch_name} (${data.branch_id})`, 'BRANCH_CREATED');
-                        break;
-
-                    case 'REFOUNDATION':
-                        log(`Refoundation initiated from project ${data.parent_id}`, 'REFOUNDATION');
-                        break;
-
-                    case 'DONE':
-                        setPhase(null, true);
-                        setStatus('done');
-                        unlockInput();
-                        window._wisdomBuf = [];
-                        document.getElementById('chat-wrap').classList.remove('hidden');
-                        break;
-
-                    case 'FAILED':
-                        setStatus('failed');
-                        unlockInput();
-                        break;
-                }
-            };
-
-            ws.onclose = () => setTimeout(connectWS, 3000);
-            ws.onerror = () => ws.close();
-        }
-
-        connectWS();
-
-        // Restore locked state if server already running when UI opens
-        fetch('/api/status').then(r => r.json()).then(d => {
-            if (d.running) {
-                document.getElementById('description-input').disabled = true;
-                document.getElementById('run-btn').disabled = true;
-                document.getElementById('run-btn').textContent = 'Running…';
+    // Close sidebar when a tab is switched on mobile
+    document.querySelectorAll('#tab-bar .tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const sb = document.getElementById('sidebar');
+            const ov = document.getElementById('sidebar-overlay');
+            if (sb.classList.contains('mobile-open')) {
+                sb.classList.remove('mobile-open');
+                ov.classList.remove('open');
             }
-        }).catch(() => {});
+        });
+    });
+
+    // ── Connectivity tab ──────────────────────────────────────────────────────
+    let _connTimer = null;
+    let _connExpires = 0;
+    let _connQR = null;
+
+    async function connLoad() {
+        const qrWrap = document.getElementById('conn-qr');
+        const pinEl = document.getElementById('conn-pin');
+        const urlEl = document.getElementById('conn-url');
+        const statusEl = document.getElementById('conn-status');
+        const statusText = document.getElementById('conn-status-text');
+        const card = document.getElementById('conn-card');
+
+        qrWrap.textContent = 'Generando…';
+        pinEl.textContent = '— — — — — —';
+        urlEl.textContent = '—';
+        statusEl.className = 'conn-status waiting';
+        statusText.textContent = 'Esperando conexión…';
+        card.classList.remove('paired');
+
+        try {
+            const res = await fetch('/api/connectivity/info');
+            const d = await res.json();
+
+            // Display PIN with spaces for readability
+            pinEl.textContent = d.pin.split('').join(' ');
+            urlEl.textContent = d.connect_url;
+
+            // Generate QR
+            qrWrap.innerHTML = '';
+            if (typeof QRCode !== 'undefined') {
+                if (_connQR) { _connQR = null; }
+                _connQR = new QRCode(qrWrap, {
+                    text: d.connect_url,
+                    width: 184,
+                    height: 184,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M,
+                });
+            } else {
+                qrWrap.innerHTML = '<span style="font-size:11px;color:#555;">qrcode.js no cargó.<br>Usá la URL de abajo.</span>';
+            }
+
+            // Start countdown
+            _connExpires = Date.now() + d.expires_in * 1000;
+            if (_connTimer) clearInterval(_connTimer);
+            _connTimer = setInterval(() => {
+                const left = Math.max(0, Math.floor((_connExpires - Date.now()) / 1000));
+                const pct = (left / d.expires_in) * 100;
+                document.getElementById('conn-timer-text').textContent =
+                    left > 0 ? `Expira en ${left}s` : 'Expirado';
+                document.getElementById('conn-timer-fill').style.width = pct + '%';
+                document.getElementById('conn-timer-fill').style.background =
+                    left < 60 ? 'var(--red)' : left < 120 ? 'var(--amber)' : 'linear-gradient(90deg,var(--green),var(--cyan))';
+                if (left === 0) {
+                    clearInterval(_connTimer);
+                    _connTimer = null;
+                }
+            }, 1000);
+        } catch (e) {
+            qrWrap.textContent = 'Error al generar código';
+            console.error('connLoad error', e);
+        }
+    }
+
+    function connRefresh() { connLoad(); }
+
+    // Listen for MOBILE_CONNECTED WebSocket event
+    document.addEventListener('SODA_WS_EVENT', (e) => {
+        if (e.detail && e.detail.event_type === 'MOBILE_CONNECTED') {
+            const card = document.getElementById('conn-card');
+            const statusEl = document.getElementById('conn-status');
+            const statusText = document.getElementById('conn-status-text');
+            if (card) card.classList.add('paired');
+            if (statusEl) { statusEl.className = 'conn-status connected'; }
+            if (statusText) { statusText.textContent = '¡Móvil conectado exitosamente!'; }
+            if (_connTimer) { clearInterval(_connTimer); _connTimer = null; }
+        }
+    });
+
+    // Auto-load when conectividad tab is clicked
+    document.querySelectorAll('.tab[data-tab="conectividad"]').forEach(btn => {
+        btn.addEventListener('click', () => setTimeout(connLoad, 50));
+    });
     </script>
+<!-- Add Provider Modal -->
+<div id="add-provider-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px;padding:28px 32px;width:440px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.6);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <span style="font-size:15px;font-weight:700;color:#ffffff;">Añadir proveedor de IA</span>
+            <button onclick="closeAddProviderModal()" style="background:none;border:none;color:#888;font-size:18px;cursor:pointer;">✕</button>
+        </div>
+
+        <div style="margin-bottom:14px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">PROVEEDOR CONOCIDO</label>
+            <select id="modal-known-select" class="cfg-select" onchange="onKnownProviderSelect(this.value)" style="width:100%;">
+                <option value="">— seleccionar o configurar custom —</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom:14px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">NOMBRE INTERNO</label>
+            <input id="modal-name" class="cfg-input" type="text" placeholder="groq" style="width:100%;" autocomplete="off">
+        </div>
+
+        <div style="margin-bottom:14px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">API KEY</label>
+            <input id="modal-api-key" class="cfg-input" type="password" placeholder="sk-…" style="width:100%;" autocomplete="off">
+        </div>
+
+        <div style="margin-bottom:14px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">MODELO</label>
+            <input id="modal-model" class="cfg-input" type="text" placeholder="llama-3.3-70b-versatile" style="width:100%;" autocomplete="off">
+        </div>
+
+        <div style="margin-bottom:14px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">BASE URL <span style="color:#555;">(auto para proveedores conocidos)</span></label>
+            <input id="modal-base-url" class="cfg-input" type="text" placeholder="https://api.proveedor.com/v1" style="width:100%;" autocomplete="off">
+        </div>
+
+        <div style="margin-bottom:20px;">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px;">MÉTODO DE COMUNICACIÓN</label>
+            <select id="modal-driver-type" class="cfg-select" style="width:100%;">
+                <option value="openai_compat">OpenAI-compatible (más común)</option>
+            </select>
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button class="cfg-btn" onclick="closeAddProviderModal()" style="background:#111111;color:#546e7a;">Cancelar</button>
+            <button class="cfg-btn cfg-btn-start" id="modal-save-btn" onclick="saveCustomProvider()">Guardar proveedor</button>
+        </div>
+        <div id="modal-msg" style="font-size:11px;margin-top:10px;color:#f9a825;min-height:16px;"></div>
+    </div>
+</div>
+
+<style>
+#add-provider-modal.open { display:flex !important; }
+.custom-prov-card { position:relative; }
+.custom-prov-delete { position:absolute;top:8px;right:8px;background:rgba(220,50,50,0.15);border:1px solid rgba(220,50,50,0.3);color:#f88;font-size:11px;padding:2px 8px;border-radius:4px;cursor:pointer;transition:background 0.2s; }
+.custom-prov-delete:hover { background:rgba(220,50,50,0.35); }
+</style>
+
+<script>
+// Keep both TTS switches in sync
+function _syncTTSSwitches(state) {
+    ['tts-toggle-switch','tts-card-switch'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = state;
+    });
+    const lbl = document.getElementById('tts-toggle-label');
+    if (lbl) lbl.textContent = state ? 'Voz ON' : 'Voz OFF';
+    const lbl2 = document.getElementById('tts-card-label');
+    if (lbl2) lbl2.textContent = state ? 'ON' : 'OFF';
+}
+// Override _sodaTTS.toggle to also sync card switch
+document.addEventListener('DOMContentLoaded', () => {
+    const orig = window._sodaTTS;
+    if (!orig) return;
+    const _origToggle = orig.toggle.bind(orig);
+    orig.toggle = async function(state) {
+        const result = await _origToggle(state);
+        _syncTTSSwitches(orig.enabled);
+        return result;
+    };
+    // Sync initial state
+    _syncTTSSwitches(orig.enabled);
+    // Check availability
+    fetch('/api/tts/status').then(r => r.json()).then(d => {
+        const avail = document.getElementById('tts-availability');
+        if (avail) avail.textContent = d.available ? '✓ disponible' : '✗ no instalado';
+        _syncTTSSwitches(d.available && d.enabled);
+        // Render custom voice chips
+        _renderCustomVoiceChips(d.custom || []);
+    }).catch(() => {});
+});
+
+function _renderCustomVoiceChips(voices) {
+    const row = document.getElementById('tts-custom-voices-row');
+    const list = document.getElementById('tts-custom-voices-list');
+    if (!row || !list) return;
+    list.innerHTML = '';
+    if (!voices.length) { row.style.display = 'none'; return; }
+    row.style.display = '';
+    voices.forEach(v => {
+        const chip = document.createElement('span');
+        chip.style.cssText = 'background:#1a1a1a;border:1px solid #333;border-radius:20px;padding:3px 10px;font-size:11px;color:#ccc;display:flex;align-items:center;gap:6px;';
+        chip.innerHTML = `${v} <button onclick="deleteTTSVoice('${v}')" style="background:none;border:none;color:#f66;cursor:pointer;font-size:13px;line-height:1;padding:0;">×</button>`;
+        list.appendChild(chip);
+    });
+}
+
+async function cloneVoice() {
+    const name = (document.getElementById('tts-clone-name')?.value || '').trim();
+    const fileInput = document.getElementById('tts-clone-file');
+    const msg = document.getElementById('tts-test-msg');
+    if (!name || !fileInput?.files?.length) {
+        if (msg) { msg.style.color = '#f66'; msg.textContent = 'Escribí un nombre y seleccioná un archivo de audio.'; }
+        return;
+    }
+    if (msg) { msg.style.color = '#aaa'; msg.textContent = 'Clonando voz…'; }
+    const form = new FormData();
+    form.append('name', name);
+    form.append('audio', fileInput.files[0]);
+    try {
+        const r = await fetch('/api/tts/clone_voice', { method: 'POST', body: form });
+        const d = await r.json();
+        if (r.ok) {
+            if (msg) { msg.style.color = 'var(--green)'; msg.textContent = `Voz '${d.voice}' clonada OK.`; }
+            // Refresh voice list
+            const s = await (await fetch('/api/tts/status')).json();
+            if (window._sodaTTS) {
+                const sel = document.getElementById('tts-voice-select');
+                if (sel) window._sodaTTS.setVoice(name);
+            }
+            _renderCustomVoiceChips(s.custom || []);
+        } else {
+            if (msg) { msg.style.color = '#f66'; msg.textContent = d.error || 'Error al clonar.'; }
+        }
+    } catch (e) {
+        if (msg) { msg.style.color = '#f66'; msg.textContent = String(e); }
+    }
+}
+
+async function deleteTTSVoice(voice) {
+    try {
+        const r = await fetch(`/api/tts/voices/${encodeURIComponent(voice)}`, { method: 'DELETE' });
+        const d = await r.json();
+        if (r.ok) {
+            const s = await (await fetch('/api/tts/status')).json();
+            _renderCustomVoiceChips(s.custom || []);
+        }
+    } catch (_) {}
+}
+
+async function testTTS() {
+    const msg = document.getElementById('tts-test-msg');
+    if (msg) { msg.style.color = '#aaa'; msg.textContent = 'Generando audio…'; }
+    if (!window._sodaTTS?.enabled) {
+        if (msg) { msg.style.color = '#f66'; msg.textContent = 'Activá la voz primero.'; }
+        return;
+    }
+    await window._sodaTTS.speak('Hola, soy SODA. Estoy listo para ayudarte.');
+    if (msg) { msg.style.color = 'var(--green)'; msg.textContent = 'Reproduciendo…'; }
+}
+</script>
+
+
 </body>
 </html>

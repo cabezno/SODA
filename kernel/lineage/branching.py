@@ -1,5 +1,6 @@
 import shutil
 import json
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -84,3 +85,91 @@ class BranchManager:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             meta["state"] = "done"
             meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    # Comparative branching
+    # ------------------------------------------------------------------
+
+    async def run_both_and_compare(
+        self,
+        parent_id: str,
+        branch_id: str,
+        run_command: str,
+        install_command: str = "",
+        notify_fn=None,
+    ) -> dict:
+        """
+        Run both parent and branch versions, compare smoke results, and return
+        a comparison report so the user can choose which to adopt.
+        """
+        from kernel.execution.project_runner import ProjectRunner
+        from kernel.execution.smoke_tester import SmokeTester
+
+        _notify = notify_fn or (lambda msg, t, d: None)
+        runner = ProjectRunner()
+        tester = SmokeTester()
+
+        async def _setup_version(project_id: str, label: str) -> dict:
+            workspace = self.projects_dir / project_id
+            _notify(f"Arrancando versión {label}…", "LOG", {"branch": label, "project_id": project_id})
+            result = await runner.setup_and_verify(
+                project_workspace=workspace,
+                run_command=run_command,
+                install_command=install_command,
+                notify_fn=_notify,
+            )
+            smoke = result.get("smoke", {})
+            base_url = smoke.get("target_url", "")
+            suite_result = None
+            if base_url and smoke.get("passed"):
+                meta_path = workspace / "metadata.json"
+                arch = {}
+                if meta_path.exists():
+                    try:
+                        arch = json.loads(meta_path.read_text(encoding="utf-8")).get("architecture", {})
+                    except Exception:
+                        pass
+                source_dir = workspace / "source"
+                suite = await tester.run_suite_async(base_url, arch, source_dir if source_dir.exists() else None)
+                suite_result = suite.to_dict()
+            return {
+                "project_id": project_id,
+                "label": label,
+                "setup": result,
+                "smoke_suite": suite_result,
+                "score": suite_result["passed"] if suite_result else (1 if smoke.get("passed") else 0),
+            }
+
+        # Run both in parallel
+        raw_parent, raw_branch = await asyncio.gather(
+            _setup_version(parent_id, "main"),
+            _setup_version(branch_id, "branch"),
+            return_exceptions=True,
+        )
+
+        _error_result = lambda label: {
+            "project_id": parent_id if label == "main" else branch_id,
+            "label": label, "setup": {}, "smoke_suite": None, "score": 0,
+            "error": True,
+        }
+        parent_result = _error_result("main") if isinstance(raw_parent, Exception) else raw_parent
+        branch_result = _error_result("branch") if isinstance(raw_branch, Exception) else raw_branch
+        if isinstance(raw_parent, Exception):
+            _notify(f"Error arrancando versión main: {raw_parent}", "HEALTH_WARN", {})
+        if isinstance(raw_branch, Exception):
+            _notify(f"Error arrancando versión branch: {raw_branch}", "HEALTH_WARN", {})
+
+        recommendation = "branch" if branch_result["score"] >= parent_result["score"] else "main"
+        comparison = {
+            "main": parent_result,
+            "branch": branch_result,
+            "recommendation": recommendation,
+            "scores": {"main": parent_result["score"], "branch": branch_result["score"]},
+        }
+        _notify(
+            f"Comparación completa — recomendación: {recommendation} "
+            f"(main={parent_result['score']}, branch={branch_result['score']})",
+            "LOG",
+            comparison,
+        )
+        return comparison
