@@ -1,0 +1,266 @@
+================================================================================
+  SODA V2 — SUGERENCIAS DE MEJORA: MOTOR RECURSIVO
+  Fecha: 2026-04-30
+================================================================================
+
+
+DESCRIPCION GENERAL DEL MOTOR
+-------------------------------------------------------------------------------
+El motor recursivo de SODA V2 es un compilador de software en 5 capas inspirado
+en la forma en que un compilador procesa un AST (Abstract Syntax Tree). En lugar
+de fases lineales (CAP -> WISDOM -> REQ -> ARCH -> DEV), el nuevo modelo usa
+contratos Pydantic como unidad universal de datos y descompone el problema
+recursivamente hasta llegar a unidades atomicas generables.
+
+Flujo completo:
+  Usuario -> Capa 0 -> Capa 1 -> Capa 2 (loop) -> Capa 3+4+5 (loop) -> Archivos
+
+  Capa 0 - Wisdom (layer0_wisdom.py)
+    Gemini evalua si el prompt tiene ambiguedades de negocio. Si las hay, hace
+    hasta 3 preguntas (en lenguaje no tecnico). Ciclo maximo: 5 iteraciones.
+
+  Capa 1 - Genesis (genesis.py)
+    Gemini-2.5-pro convierte la descripcion en el contrato raiz ROOT-000.
+    Forzado por Python a: level=0, is_atomic=False, status=PENDING_DECOMPOSITION.
+
+  Capa 2 - Descomposicion Recursiva (decompose_tree)
+    Loop while True que procesa un contrato a la vez. Gemini descompone cada
+    contrato en sub-contratos. Valida DAG y flujo de datos en cada paso.
+    Failsafe: si level >= 15, fuerza is_atomic=True. Max 3 reintentos con
+    feedback del error al siguiente intento.
+
+  Capa 3 - Tech Lead (_run_layer3)
+    Traduce tipos abstractos a tipos nativos del stack (temperature=0).
+    Si falla el parse, usa el contrato original sin avisar.
+
+  Capa 4 - Coder + Capa 5 - QA (_run_layer4_and_5_with_retries)
+    Primer ciclo: Qwen genera -> PolyglotValidator valida sintaxis -> Gemini QA
+    aprueba/rechaza. 3 intentos. Si falla: escala a Gemini por la cadena
+    flash-lite -> flash -> 2.5-flash -> 2.5-pro. 3 intentos por modelo.
+
+  Ejecucion Bottom-Up (execute_bottom_up)
+    Ordena contratos atomicos con graphlib.TopologicalSorter. Genera en orden
+    topologico. Inyecta firmas de dependencias ya generadas (Dependency
+    Irrigation). Guarda cada archivo al disco inmediatamente.
+
+  FinopsRouter
+    4 perfiles de costo: economy, auto, balanced, premium. Cada perfil asigna
+    un modelo Gemini diferente a cada capa. escalate_model() sube un escalon
+    cuando se agotan los intentos.
+
+
+================================================================================
+  SUGERENCIAS DE MEJORA (ordenadas por prioridad)
+================================================================================
+
+
+[1] PARALELISMO EN GENERACION DE CODIGO
+Impacto: ALTO | Complejidad: MEDIA
+-------------------------------------------------------------------------------
+El decompose_tree y el execute_bottom_up son completamente secuenciales.
+Los contratos sin dependencias entre si podrian procesarse con asyncio.gather().
+
+El FinopsRouter ya tiene un campo parallel_agents en cada ModelLineup (ej.
+premium = 3) pero ese valor nunca se usa en el motor. Es infraestructura
+preparada que solo falta activar.
+
+Para un proyecto de 20 modulos con dependencias planas, esto podria ser
+3 a 4 veces mas rapido.
+
+Propuesta:
+  - En decompose_tree: agrupar contratos del mismo nivel sin dependencias
+    entre si y descomponerlos en paralelo con asyncio.gather().
+  - En execute_bottom_up: identificar grupos del mismo nivel topologico y
+    generarlos en paralelo, respetando el campo parallel_agents del lineup.
+  - El semaforo asyncio.Semaphore(lineup.parallel_agents) controlaria la
+    concurrencia para no saturar la API.
+
+
+[2] PERSISTENCIA INCREMENTAL DEL ARBOL
+Impacto: ALTO | Complejidad: BAJA
+-------------------------------------------------------------------------------
+El soda_v2_tree.json solo se escribe cuando termina la descomposicion completa
+(al final de decompose_tree). Si el proceso cae a mitad de la Capa 2, se pierde
+todo el progreso. En proyectos grandes con 15-20 contratos, esto es costoso.
+
+Propuesta:
+  - Guardar el pool al disco despues de cada descomposicion exitosa dentro del
+    loop de decompose_tree, no al final.
+  - Agregar un campo opcional "checkpoint_at" en el JSON guardado para saber
+    hasta donde se llego.
+  - resume() ya tiene la logica para retomar desde el arbol existente; solo
+    faltaria que el arbol refleje el estado real en cada paso.
+
+
+[3] FEEDBACK ESTRUCTURADO EN CAPA 2
+Impacto: ALTO | Complejidad: BAJA
+-------------------------------------------------------------------------------
+Cuando la validacion del contrato falla (Pydantic ValidationError o
+TopologyError), el string crudo del error se inyecta como feedback al siguiente
+intento. Gemini recibe algo como:
+  "1 validation error for SodaContract\ncontract_id\n  field required (type=missing)"
+
+Gemini necesita instrucciones directas, no stack traces. Un formateador que
+traduzca ValidationError.errors() a lenguaje natural mejoraria mucho la tasa
+de exito en reintento.
+
+Propuesta:
+  - Crear un helper format_validation_feedback(exc) que convierta los errores
+    de Pydantic a instrucciones como:
+      "El campo 'contract_id' es obligatorio y no fue incluido."
+      "El campo 'dependencies' debe ser una lista, no un string."
+  - Hacer lo mismo para TopologyValidator: en vez de "cycle detected",
+    devolver "El contrato X depende de Y que aun no existe en el pool."
+
+
+[4] LAYER 4 SIN MODELO PROPIO
+Impacto: MEDIO | Complejidad: MUY BAJA
+-------------------------------------------------------------------------------
+El fallback de Capa 4 (cuando Qwen falla) usa lineup.layer5_qa para generar
+codigo. Ese es el modelo de QA, no de generacion. El ModelLineup no tiene un
+campo layer4_coder dedicado.
+
+Esto significa que en el lineup "premium", el coder fallback es el mismo modelo
+que el auditor, sin distincion de temperatura ni instrucciones optimizadas para
+generacion de codigo largo.
+
+Propuesta:
+  - Agregar campo layer4_coder a ModelLineup.
+  - En economy/balanced: layer4_coder = "gemini-2.0-flash" (mismo que hoy).
+  - En premium: layer4_coder = "gemini-2.5-pro" con temperatura 0.1.
+  - El loop de fallback en _run_layer4_and_5_with_retries arrancaria desde
+    lineup.layer4_coder en vez de lineup.layer5_qa.
+
+
+[5] CENTRALIZACION DE LA LOGICA DE LENGUAJE
+Impacto: MEDIO | Complejidad: MUY BAJA
+-------------------------------------------------------------------------------
+La deteccion de lenguaje a partir de skills esta copiada en 3 lugares:
+  - orchestrator.py -> run()
+  - orchestrator.py -> resume()
+  - recursive_engine.py -> _run_layer4_and_5_with_retries
+
+Si se agrega skill_swift o skill_kotlin hay que actualizar 3 archivos distintos.
+El mapeo de extension de archivo (.py, .ts, .go, .rs) tambien esta duplicado.
+
+Propuesta:
+  - Crear un modulo kernel/utils/language_detector.py con dos funciones:
+      detect_language(skills: list[str]) -> str
+      language_to_extension(lang: str) -> str
+  - Reemplazar los 3 bloques duplicados con llamadas a ese modulo.
+
+
+[6] ARCHIVOS DEBUG SUELTOS EN LA RAIZ
+Impacto: BAJO | Complejidad: MUY BAJA
+-------------------------------------------------------------------------------
+El engine escribe DEBUG_QWEN_*.txt y DEBUG_GEMINI_*.txt con open() sin path
+absoluto, lo que los crea en el directorio de trabajo actual (raiz de SODA).
+Cada ejecucion genera N archivos por contrato por intento en la raiz del
+proyecto.
+
+Propuesta:
+  - Cambiar open(f"DEBUG_QWEN_...") a open(workspace / "logs" / f"debug_qwen_...")
+  - Envolver en un flag de configuracion (ej. self.debug_mode = False) para
+    que en produccion no genere los archivos.
+  - O directamente eliminar el bloque DEBUG si ya no es necesario para el
+    desarrollo del motor.
+
+
+[7] STATUS COMO STRINGS MAGICOS
+Impacto: BAJO | Complejidad: MUY BAJA
+-------------------------------------------------------------------------------
+SodaContract.status acepta cualquier string. Los valores:
+  "PENDING_DECOMPOSITION", "DECOMPOSED", "PENDING_EXECUTION", "COMPLETED"
+estan dispersos por decompose_tree, execute_bottom_up y resume(). Un typo
+en cualquiera de ellos causaria un bug silencioso.
+
+Propuesta:
+  - Agregar a models_v2.py:
+      class ContractStatus(str, Enum):
+          PENDING_DECOMPOSITION = "PENDING_DECOMPOSITION"
+          DECOMPOSED = "DECOMPOSED"
+          PENDING_EXECUTION = "PENDING_EXECUTION"
+          COMPLETED = "COMPLETED"
+  - Cambiar el campo status en SodaContract a ContractStatus.
+  - Los IDEs y el linter detectarian errores de tipeo inmediatamente.
+
+
+[8] COLISION DE IDs DE CONTRATO
+Impacto: MEDIO | Complejidad: BAJA
+-------------------------------------------------------------------------------
+La IA genera IDs como "AUTH-001", "DB-002". No hay validacion de unicidad.
+Si dos ramas del arbol generan el mismo ID, el segundo sobreescribe al primero
+en el pool dict sin ninguna advertencia. El TopologyValidator detecta ciclos
+pero no IDs duplicados.
+
+Propuesta:
+  - En _run_layer2_with_retries, antes de agregar sub_contracts al pool,
+    verificar que ningun contract_id nuevo ya existe en current_pool ni en los
+    otros sub_contracts del mismo batch.
+  - Si hay colision: agregarla al feedback del siguiente intento con instruccion
+    explicita de usar IDs unicos.
+  - Como ultimo recurso: auto-sufijo con un contador (AUTH-001-a, AUTH-001-b).
+
+
+[9] EXTRACCION DE FIRMAS FRAGIL POR LENGUAJE
+Impacto: MEDIO | Complejidad: MEDIA
+-------------------------------------------------------------------------------
+La "Dependency Irrigation" extrae firmas con:
+  re.match(r'^\s*(class|def|function|export|interface|type|public|private)\s+', line)
+
+Esta regex no cubre:
+  - Go: func, type, struct (sin "public")
+  - Rust: pub fn, impl, pub struct
+  - C++: tipos de retorno antes del nombre de funcion
+  - TypeScript: const exportado con arrow functions
+
+Cuando no encuentra firmas, usa code[:500], que puede ser solo imports.
+
+Propuesta:
+  - Crear extractores por lenguaje en kernel/utils/signature_extractor.py:
+      extract_signatures(code: str, language: str) -> list[str]
+  - Python: usar el modulo ast de la stdlib para extraer funciones y clases.
+  - TypeScript/JS: regex extendida para cubrir export const/function/class.
+  - Go/Rust: regex especificas para sus patrones de declaracion.
+  - Fallback: primeras 30 lineas (mas util que 500 chars del principio).
+
+
+[10] RESPUESTAS DE WISDOM NO PERSISTEN ENTRE SESIONES
+Impacto: BAJO | Complejidad: BAJA
+-------------------------------------------------------------------------------
+Si resume() necesita reiniciar desde cero (sin ningun archivo V2 previo),
+vuelve a correr la Capa 0 (Wisdom) y puede volver a hacerle las mismas
+preguntas al usuario que ya respondio en la sesion anterior.
+
+La descripcion enriquecida que genera layer0_wisdom.py no se guarda por
+separado; solo queda embebida en ROOT-000 si genesis llego a ejecutarse.
+
+Propuesta:
+  - Guardar la descripcion final que devuelve resolve_ambiguities() en un
+    archivo wisdom_output.txt dentro del workspace, ademas de actualizar
+    project.description.
+  - En resume(), si wisdom_output.txt existe, saltar la Capa 0 directamente
+    y usar ese texto como descripcion final.
+
+
+================================================================================
+  TABLA RESUMEN
+================================================================================
+
+  #   Sugerencia                              Impacto  Complejidad
+  --- --------------------------------------- -------- -----------
+  1   Paralelismo en generacion               ALTO     MEDIA
+  2   Persistencia incremental del arbol      ALTO     BAJA
+  3   Feedback estructurado en Capa 2         ALTO     BAJA
+  4   Layer 4 con modelo propio               MEDIO    MUY BAJA
+  5   Centralizar logica de lenguaje          MEDIO    MUY BAJA
+  6   Archivos DEBUG al workspace             BAJO     MUY BAJA
+  7   Status como Enum                        BAJO     MUY BAJA
+  8   Validacion de unicidad de IDs           MEDIO    BAJA
+  9   Extraccion de firmas por lenguaje       MEDIO    MEDIA
+  10  Persistir respuestas Wisdom             BAJO     BAJA
+
+
+================================================================================
+  FIN DEL DOCUMENTO
+================================================================================

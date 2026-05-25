@@ -1,0 +1,42 @@
+```php
+<?php
+
+function sendEmail($recipient_email_address, $form_field_names) {
+    // Extract form field values from POST request
+    $form_data = array();
+    foreach ($form_field_names as $field_name) {
+        if (isset($_POST[$field_name])) {
+            $form_data[$field_name] = $_POST[$field_name];
+        } else {
+            return "Error: Missing form field value for '$field_name'.";
+        }
+    }
+
+    // Construct email message
+    $subject = "New Form Submission";
+    $message = "Form Data:\n";
+    foreach ($form_data as $key => $value) {
+        $message .= "$key: $value\n";
+    }
+
+    // Set email headers
+    $headers = "From: no-reply@example.com\r\n";
+
+    // Send email
+    if (mail($recipient_email_address, $subject, $message, $headers)) {
+        return "Email sent successfully.";
+    } else {
+        return "Failed to send email.";
+    }
+}
+
+// Example usage
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $recipient_email_address = $_POST['recipient_email_address'];
+    $form_field_names = json_decode($_POST['form_field_names'], true);
+    echo sendEmail($recipient_email_address, $form_field_names);
+} else {
+    echo "Invalid request method.";
+}
+?>
+```

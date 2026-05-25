@@ -15,6 +15,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from kernel.communication.messaging_gateway import MessagingGateway
 from kernel.communication.user_interaction import get_gateway
+from kernel.drivers.gemini_driver import GeminiDriver
 from kernel.external.system_actions import SystemActionsExecutor
 from kernel.projects.project_manager import ProjectManager
 
@@ -25,6 +26,15 @@ _PENDING_VOICE_SAMPLE: set[str] = set()  # chat_ids waiting for a voice referenc
 _IA_TIMEOUT_SECS = 300  # 5 minutes inactivity before asking
 _ia_sessions: dict[str, dict] = {}
 # chat_id → {"active": bool, "task": asyncio.Task|None, "waiting_close": bool}
+
+# Global driver instance to avoid re-probing on every message (Error 10)
+_gemini_chat_driver: Optional[GeminiDriver] = None
+
+def _get_gemini_driver() -> GeminiDriver:
+    global _gemini_chat_driver
+    if _gemini_chat_driver is None:
+        _gemini_chat_driver = GeminiDriver()
+    return _gemini_chat_driver
 
 
 def _split_message(text: str, limit: int = 4096) -> list[str]:
@@ -148,33 +158,54 @@ class TelegramGateway(MessagingGateway):
         self._history: dict[str, collections.deque] = collections.defaultdict(
             lambda: collections.deque(maxlen=self._HISTORY_MAXLEN * 2)
         )
+        # Deduplicación de preguntas: evita reenviar la misma pregunta activa
+        self._last_question_sent: Optional[str] = None
 
     def is_configured(self) -> bool:
         return bool(self._token and self._chat_id)
 
     async def send(self, message: str, data: Optional[dict] = None) -> bool:
-        return await self.send_from_loop(message)
+        # SODA FUSION: Always attempt to speak if configured
+        await self.send_from_loop(message)
+        if self.is_configured():
+             await self._tts_speak(message)
+        return True
 
     async def send_from_loop(self, text: str) -> bool:
         """Enqueue for rate-limited delivery — safe from any event loop context."""
         if not self.is_configured():
             return False
         _ensure_send_worker(self._token)
-        _send_queue.put((self._chat_id, text))
+        # Clean markdown for plain text messages to avoid raw asterisks in some clients
+        clean_text = text.replace("**", "").replace("__", "")
+        _send_queue.put((self._chat_id, clean_text))
         return True
 
     async def send_event(self, event_type: str, text: str, data: Optional[dict] = None) -> bool:
         """Send event notification. DONE events include an inline ▶ Ejecutar button.
-        USER_QUESTION events send a voice message when TTS is enabled."""
+        Important events now ALWAYS trigger TTS by default in FUSION."""
         if not self.is_configured():
             return False
+        
         project_id = (data or {}).get("project_id", "")
+        
         if event_type == "DONE" and project_id:
             await self._send_with_play_button(text, project_id)
-            await self._tts_speak("Proyecto terminado. El código está listo.")
+            await self._tts_speak(f"Misión completada. {text}")
             return True
+            
         if event_type == "USER_QUESTION":
+            if text == self._last_question_sent:
+                return True
+            self._last_question_sent = text
             return await self._send_voice_question(text, data)
+            
+        if event_type in ("PHASE_START", "SUCCESS", "HEALTH_WARN", "ERROR"):
+            await self.send_from_loop(text)
+            await self._tts_speak(text)
+            return True
+
+        self._last_question_sent = None
         return await self.send_from_loop(text)
 
     async def _send_voice_question(self, text: str, data: Optional[dict] = None) -> bool:
@@ -314,6 +345,7 @@ class TelegramGateway(MessagingGateway):
         self._app.add_handler(CommandHandler("voz", self._cmd_voz))
         self._app.add_handler(CommandHandler("ia", self._cmd_ia))
         self._app.add_handler(CommandHandler("reparar", self._cmd_reparar))
+        self._app.add_handler(CommandHandler("addskill", self._cmd_addskill))
         self._app.add_handler(CallbackQueryHandler(self._handle_callback))
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text))
         self._app.add_handler(MessageHandler(filters.VOICE, self._handle_voice))
@@ -321,7 +353,12 @@ class TelegramGateway(MessagingGateway):
         async with self._app:
             await self._app.start()
             await self._app.updater.start_polling(drop_pending_updates=False)
-            await asyncio.Event().wait()  # block until thread is killed
+            # Use a short sleep loop instead of blocking forever — allows clean shutdown
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                pass
 
     async def _handle_callback(self, update: Update, ctx: ContextTypes):
         """Handle inline keyboard button presses (▶ Ejecutar / 🔧 Auto-Fix)."""
@@ -380,7 +417,7 @@ class TelegramGateway(MessagingGateway):
         await query.edit_message_reply_markup(reply_markup=None)
         await query.message.reply_text(
             f"Iniciando Auto-Fix para '{project_id}'...\n"
-            "Intentará 3 estrategias de ejecución y si fallan, llamará a Claude CLI."
+            "Intentará 3 estrategias de ejecución y si fallan, llamará a Gemini CLI."
         )
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -426,6 +463,7 @@ class TelegramGateway(MessagingGateway):
             "  /cancel                   — cancelar operacion en curso\n"
             "  /mas_tiempo               — extender 15 min el timeout\n"
             "  /voz                      — registrar muestra de voz para TTS\n"
+            "  /addskill <url> [lang]    — importar skill desde skills.sh\n"
             "  /ia                       — abrir sesion interactiva con Qwen\n"
             "  /reparar [etapa] [--aplicar] — autoreparacion del sistema\n"
             "  /pair <CODE>              — vincular este chat\n\n"
@@ -446,9 +484,39 @@ class TelegramGateway(MessagingGateway):
             await update.message.reply_text("Invalid or expired code.")
 
     async def _cmd_status(self, update: Update, ctx: ContextTypes):
+        chat_id = str(update.effective_chat.id)
+        if chat_id != self._chat_id:
+            return
         from ui.server import _pipeline_running
-        msg = "Pipeline en ejecución..." if _pipeline_running else "Idle — listo para un nuevo proyecto."
-        await update.message.reply_text(f"SODA: {msg}")
+        lines = ["SODA Status"]
+        lines.append("Pipeline en ejecución..." if _pipeline_running else "Idle — listo para un nuevo proyecto.")
+
+        # Enrich with contract-level status if an active project exists
+        try:
+            import httpx
+            r = httpx.get(f"{_SERVER_URL}/api/projects", timeout=2)
+            if r.status_code == 200:
+                projects = r.json().get("projects", [])
+                if projects:
+                    latest = projects[0]
+                    pid = latest.get("id", "")
+                    r2 = httpx.get(f"{_SERVER_URL}/api/project/{pid}/status", timeout=2)
+                    if r2.status_code == 200:
+                        s = r2.json()
+                        lines.append(f"\nProyecto: {pid}")
+                        lines.append(f"Estado: {s.get('state', '?')}")
+                        lines.append(f"Descripción: {s.get('description', '')[:80]}")
+                        contracts = s.get("contracts", {})
+                        if contracts:
+                            lines.append("Contratos: " + ", ".join(f"{k}={v}" for k, v in contracts.items()))
+                        lines.append(f"Archivos generados: {len(s.get('source_files', []))}")
+                        pending = s.get("pending_count", 0)
+                        if pending:
+                            lines.append(f"Pendientes: {pending}")
+        except Exception:
+            pass
+
+        await update.message.reply_text("\n".join(lines))
 
     async def _cmd_mas_tiempo(self, update: Update, ctx: ContextTypes):
         chat_id = str(update.effective_chat.id)
@@ -662,20 +730,27 @@ class TelegramGateway(MessagingGateway):
     async def _chat_with_ai(self, chat_id: str, message: str) -> str:
         """Multi-turn AI chat with conversation history."""
         try:
-            from kernel.drivers.claude_driver import ClaudeDriver
+            from kernel.drivers.gemini_driver import GeminiDriver
             system = self._build_system_prompt()
             history = self._history[chat_id]
-
+            
             # Add current user message to history
             history.append({"role": "user", "content": message})
-
-            claude = ClaudeDriver()
-            messages = list(history)
-            response = await claude.chat(system, messages, max_tokens=1024)
-
-            if response:
-                history.append({"role": "assistant", "content": response})
-            return response or "No pude generar una respuesta."
+            
+            # Formatear el historial para el driver que solo acepta un string plano
+            formatted_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
+            
+            gemini = _get_gemini_driver()
+            response = await gemini.call(
+                system_prompt=system, 
+                user_message=formatted_history, 
+                max_tokens=1024
+            )
+            
+            reply_text = response.content
+            if reply_text:
+                history.append({"role": "assistant", "content": reply_text})
+            return reply_text or "No pude generar una respuesta."
         except Exception as e:
             return f"Error al procesar tu mensaje: {e}"
 
@@ -846,7 +921,7 @@ class TelegramGateway(MessagingGateway):
                 await update.message.reply_text(chunk)
             await self._tts_speak(response)
             return
-        # 4. Free AI chat with Claude + TTS reply
+        # 4. Free AI chat with Gemini + TTS reply
         await update.message.chat.send_action("typing")
         response = await self._chat_with_ai(chat_id, text)
         for chunk in _split_message(response):
@@ -919,6 +994,18 @@ class TelegramGateway(MessagingGateway):
         except Exception as e:
             print(f"  [TTS] muestra de voz actual falló: {e}")
 
+    async def _safe_reply(self, update: Update, text: str, **kwargs):
+        """Send a reply with a basic retry on timeout."""
+        for attempt in range(2):
+            try:
+                return await update.message.reply_text(text, **kwargs)
+            except Exception as e:
+                if "Timed out" in str(e) and attempt == 0:
+                    await asyncio.sleep(1)
+                    continue
+                print(f"  [Telegram] _safe_reply failed: {e}")
+                break
+
     async def _handle_voice(self, update: Update, ctx: ContextTypes):
         """Transcribe an incoming voice message and route through shared _route_text."""
         chat_id = str(update.effective_chat.id)
@@ -931,20 +1018,20 @@ class TelegramGateway(MessagingGateway):
         try:
             from kernel.stt.whisper_stt import WhisperSTT, is_available as stt_available
             if not stt_available():
-                await update.message.reply_text("STT no disponible — revisá los logs del servidor.")
+                await self._safe_reply(update, "STT no disponible — revisá los logs del servidor.")
                 return
             await update.message.chat.send_action("typing")
             voice_file = await update.message.voice.get_file()
             ogg_bytes = await voice_file.download_as_bytearray()
             text = WhisperSTT.get().transcribe_bytes(bytes(ogg_bytes), "ogg")
             if not text:
-                await update.message.reply_text("No pude entender el audio. Intentá de nuevo.")
+                await self._safe_reply(update, "No pude entender el audio. Intentá de nuevo.")
                 return
-            await update.message.reply_text(f'Entendí: "{text}"')
+            await self._safe_reply(update, f'Entendí: "{text}"')
             await self._route_text(chat_id, text, update)
         except Exception as e:
             print(f"  [Telegram] _handle_voice error: {e}")
-            await update.message.reply_text(f"Error al procesar audio: {e}")
+            await self._safe_reply(update, f"Error al procesar audio: {e}")
 
     async def _handle_audio(self, update: Update, ctx: ContextTypes):
         """Handle uploaded audio files — used for voice sample registration."""
@@ -1019,6 +1106,47 @@ class TelegramGateway(MessagingGateway):
                 )
         except Exception as e:
             await update.message.reply_text(f"Error al iniciar autoreparacion: {e}")
+
+    async def _cmd_addskill(self, update: Update, ctx: ContextTypes):
+        """
+        Import a community skill from a skills.sh URL.
+        Usage: /addskill <url> [lang]
+        Example: /addskill https://raw.githubusercontent.com/.../SKILL.md typescript
+        """
+        chat_id = str(update.effective_chat.id)
+        if chat_id != self._chat_id:
+            return
+
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_text(
+                "Uso: /addskill <url> [lang]\n"
+                "Ejemplo: /addskill https://raw.githubusercontent.com/.../SKILL.md python"
+            )
+            return
+
+        url = args[0]
+        target_lang = args[1] if len(args) > 1 else "python"
+        await update.message.reply_text(f"Importando skill desde:\n{url}\nIdioma: {target_lang}")
+
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(
+                    f"{_SERVER_URL}/api/skills/add",
+                    json={"url": url, "target_lang": target_lang},
+                )
+            data = r.json()
+            if data.get("status") == "ok":
+                issues = data.get("quality", {}).get("issues", [])
+                quality_note = (" Advertencias: " + "; ".join(issues)) if issues else " Sin problemas de calidad."
+                await update.message.reply_text(
+                    f"Skill importada: {data['skill_name']}{quality_note}"
+                )
+            else:
+                await update.message.reply_text(f"Error: {data.get('message', 'desconocido')}")
+        except Exception as e:
+            await update.message.reply_text(f"Error al importar skill: {e}")
 
     async def _cmd_projects(self, update: Update, ctx: ContextTypes):
         from pathlib import Path

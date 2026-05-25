@@ -1,0 +1,60 @@
+# AUDITORÍA TÉCNICA SODA: CAPACIDADES REALES IMPLEMENTADAS (Ground Truth)
+========================================================================
+
+Este informe detalla las funcionalidades de SODA basándose exclusivamente en el análisis de su código fuente (`kernel/`), ignorando documentos externos. Representa la "verdad de ejecución" del sistema al 5 de Mayo de 2026.
+
+---
+
+## 🟢 METODOLOGÍA DE ESTE INFORME
+A diferencia de versiones anteriores, este documento no resume manuales. Se ha generado tras un escaneo estático de los métodos asíncronos, clases de orquestación y modelos de datos en el directorio `kernel/`. Cada capacidad listada aquí tiene un respaldo lógico directo en el código Python de SODA.
+
+---
+
+## 1. ORQUESTACIÓN DETERMINÍSTICA Y MÁQUINA DE ESTADOS
+El `SodaOrchestrator` implementa una máquina de estados finitos (`ProjectState`) con las siguientes transiciones lógicas verificadas:
+*   **Gestión de Proyectos:** CRUD de workspaces en `projects/` vía `ProjectManager`.
+*   **Telemetría BlackBox:** El `SodaLogger` captura cada evento asíncrono y lo persiste en `event_history.jsonl` y `system_trace.log` para análisis forense.
+*   **Inyección de Restricciones:** La clase `RequirementsStore` garantiza que el deseo original del usuario se inyecte como un bloque de "Constraint" inviolable en cada llamada a la IA, mitigando la alucinación.
+
+---
+
+## 2. MOTOR RECURSIVO V2 (SODA-CORE)
+La lógica en `kernel/orchestration/recursive_engine.py` y `models_v2.py` revela una arquitectura de contratos:
+*   **Descomposición de Árbol:** Uso del algoritmo de Kahn (ordenamiento topológico) para convertir interfaces abstractas en un DAG (Grafo Acíclico Dirigido) de ejecución.
+*   **Contratos Tipados:** Los objetos `SodaContract` validan estrictamente las entradas y salidas, prohibiendo nombres de variables ambiguos (vía `BANNED_WORDS` como 'data', 'obj', 'val').
+*   **Protocolo Multi-Archivo:** El `PolyglotValidator` implementa un extractor por etiquetas `<FILE path="...">` con fallback de limpieza de markdown heurística.
+
+---
+
+## 3. RESILIENCIA Y AUTOREPARACIÓN (AUTO-FIX)
+SODA contiene lógica de "curación" activa única en su clase:
+*   **RuntimeHealer (Forense):** Localizado en `kernel/selfrepair/runtime_healer.py`. Si el orquestador falla, captura el `traceback`, extrae los últimos 15 eventos de log y el código fuente del kernel implicado, pide un parche a Gemini-3.1-Pro y **aplica el fix al propio código de SODA en caliente** usando `importlib.reload`.
+*   **BootAgent (Fix Loop):** Implementa un bucle de hasta 3 rondas que lee errores de consola (stdout/stderr). Detecta `ModuleNotFoundError` de forma determinística y edita el `requirements.txt` sin intervención de IA.
+*   **GoalIntegrityValidator:** Escaneo de cabeceras `# goal_id:` en cada archivo `.py` para evitar código huérfano y garantizar que cada línea de código tenga un objetivo de negocio asociado.
+
+---
+
+## 4. GESTIÓN DE INTELIGENCIA Y FINOPS
+El enrutamiento de IA no es aleatorio, está gobernado por `kernel/intelligence/finops_router.py`:
+*   **Escalado de Fallback:** Jerarquía estricta de reintentos: `Qwen (Local) -> Gemini Flash -> Gemini Pro -> DeepSeek -> Claude Sonnet`. Si un modelo local falla en sintaxis, el sistema escala automáticamente a un modelo cloud de mayor precisión.
+*   **Alineaciones (Lineups):** Perfiles predefinidos (`economy`, `balanced`, `premium`) que ajustan la temperatura de la IA y el número de agentes paralelos permitidos (de 1 a 4).
+
+---
+
+## 5. INFRAESTRUCTURA Y RUNTIME
+*   **Docker Sandbox:** Implementado en `kernel/docker_sandbox.py` usando `npipe` para Windows. Utiliza transferencia de archivos vía `tar` en memoria y ejecución efímera.
+*   **ProjectRunner:** Gestión de árboles de procesos Windows usando `taskkill /F /T` para evitar puertos "zombies" de Node.js o Python.
+*   **SmokeTester:** Verificación de vida HTTP que acepta rangos 200-499 como señal de "servicio levantado".
+*   **PortManager:** Reserva dinámica de puertos libres para evitar colisiones entre proyectos concurrentes.
+
+---
+
+## 6. CAPACIDADES AVANZADAS DE INTERFAZ
+*   **VisualInspector:** Uso de `VisionCapturer` para tomar screenshots y Gemini para realizar "Visual QA".
+*   **Dual-Stream Generation:** Lógica para generar código en dos hilos paralelos y comparar resultados.
+*   **Modificación Dinámica:** El `GoalInterpreter` detecta ambigüedad en peticiones de cambio y lanza el `UserInteractionGateway` para preguntar al usuario antes de proceder.
+
+---
+**Informe de Auditoría de Código - Gemini CLI**
+**Metodología: Análisis de código fuente (Ground Truth)**
+**Archivo: gemini5-5.txt**

@@ -27,9 +27,9 @@ class ImpactReport:
 
 
 class ImpactAnalyzer:
-    def __init__(self, claude_driver, context_builder):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver, context_builder):
         self.builder = context_builder
+        self.gemini = gemini_driver
 
     async def analyze(self, plan: ModificationPlan, architecture: dict) -> ImpactReport:
         modules_summary = json.dumps(
@@ -41,8 +41,8 @@ class ImpactAnalyzer:
             f"MODIFICATION PLAN:\n{json.dumps(plan.to_dict(), indent=2)}\n\n"
             f"MODULE DEPENDENCY GRAPH:\n{modules_summary}"
         )
-        payload = self.builder.build_payload("claude", "impact_analyzer", task)
-        raw = await self.claude.prompt(payload["system"], payload["user"])
+        payload = self.builder.build_payload("gemini", "impact_analyzer", task)
+        raw = await self.gemini.prompt(payload["system"], payload["user"])
         return self._parse(raw, architecture)
 
     def _parse(self, text: str, architecture: dict) -> ImpactReport:

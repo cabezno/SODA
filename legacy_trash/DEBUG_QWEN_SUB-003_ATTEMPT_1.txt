@@ -1,0 +1,14 @@
+```javascript
+// dependencies.js
+
+/**
+ * @typedef {Object} Credentials
+ * @property {string} user - SMTP server username.
+ * @property {string} pass - SMTP server password.
+ */
+
+/**
+ * @typedef {Object} EmailAddress
+ * @property {string} address - The email address of the recipient.
+ */
+```

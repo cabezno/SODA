@@ -1,0 +1,61 @@
+================================================================================
+  SODA V2 — GUÍA DE CONEXIÓN Y TESTEO EN ANDROID
+  Fecha: 2026-05-02
+================================================================================
+
+SODA admite dos modalidades de despliegue móvil para que pruebes tus apps en 
+un dispositivo real de forma inmediata.
+
+-------------------------------------------------------------------------------
+OPCIÓN 1: EXPO (React Native) — Prioridad: ALTA (Inalámbrica)
+-------------------------------------------------------------------------------
+Ideal para: Prototipado ultra-rápido, UI/UX y apps híbridas.
+Requisitos: No requiere cables ni SDK de Android.
+
+PASOS DE CONFIGURACIÓN:
+1. En tu móvil: Descarga la app "Expo Go" desde la Play Store.
+2. En tu PC: Asegúrate de que tu móvil y tu PC estén conectados a la misma 
+   red WiFi.
+3. Desarrollo: Cuando SODA termine de generar el proyecto, ejecutará 
+   automáticamente 'npx expo start'.
+4. Vinculación: SODA mostrará un código QR en la consola o en la interfaz web.
+5. Ejecución: Abre la app "Expo Go" en tu móvil y elige "Scan QR Code".
+
+Diferencial SODA: Cada cambio que Qwen realice en el código se reflejará en tu 
+móvil en menos de 2 segundos sin necesidad de recargar.
+
+-------------------------------------------------------------------------------
+OPCIÓN 2: ADB (Android Debug Bridge) — Prioridad: MEDIA (Nativo)
+-------------------------------------------------------------------------------
+Ideal para: Apps nativas (Kotlin/Java), acceso a hardware específico (Bluetooth, 
+Sensores) y compilación de APKs finales.
+Requisitos: Cable USB, SDK Platform-Tools instalado en la PC.
+
+PASOS DE CONFIGURACIÓN:
+1. En tu móvil: 
+   - Ve a Ajustes -> Información del teléfono.
+   - Pulsa 7 veces sobre "Número de compilación" para activar Modo Desarrollador.
+   - Ve a Ajustes -> Sistema -> Opciones de desarrollador.
+   - Activa "Depuración USB".
+2. Conexión: Conecta el móvil a la PC vía USB. Acepta el mensaje de "Permitir 
+   depuración" que aparecerá en la pantalla del celular.
+3. En tu PC: Verifica la conexión abriendo una terminal y escribiendo:
+   > adb devices
+   (Debería aparecer el ID de tu dispositivo seguido de "device").
+
+FLUJO DE TRABAJO SODA (Loop de Autocorrección):
+1. SODA compila el proyecto usando Gradle.
+2. SODA instala el APK automáticamente vía 'adb install'.
+3. SODA monitorea 'adb logcat'. Si la app crashea en tu mano, el BootAgent 
+   captura el log del error, lo analiza con DeepSeek y reinstala la versión 
+   corregida automáticamente.
+
+-------------------------------------------------------------------------------
+RESUMEN TÉCNICO
+-------------------------------------------------------------------------------
+- Expo: Usa el stack JS/TS. Validación por balance de llaves.
+- ADB: Usa el stack Kotlin/Java. Validación por balance de llaves + Logcat.
+
+SODA elegirá automáticamente la mejor opción basada en las 'skills' detectadas
+en tu requerimiento (ej: skill_react_native vs skill_android_kotlin).
+================================================================================

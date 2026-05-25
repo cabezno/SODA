@@ -1,0 +1,147 @@
+```cpp
+#include <string>
+#include <vector>
+#include <stdexcept> // For std::exception
+
+// Include libcurl for HTTP requests
+#include <curl/curl.h>
+
+// Include nlohmann/json for JSON handling
+#include "nlohmann/json.hpp"
+
+// Alias for convenience
+using json = nlohmann::json;
+
+// --- Contract Interface Definitions ---
+
+// Input: ai_api_credentials (abstract_type: Configuration(Credentials))
+// Represents API keys and endpoint details.
+struct AIAPICredentials {
+    std::string api_key;
+    std::string api_endpoint;
+};
+
+// Input: ai_prompt_payload (abstract_type: Object)
+// This will be directly represented by a nlohmann::json object.
+
+// Output: ai_model_response (abstract_type: Object)
+// This will be directly represented by a nlohmann::json object.
+
+// Output: api_call_error (abstract_type: String)
+// This will be directly represented by a std::string.
+
+// --- Helper Function for libcurl write callback ---
+// This callback accumulates the response data into a std::string buffer.
+// It is called by libcurl multiple times as data arrives.
+size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
+// --- Main Contract Implementation Function ---
+// Implements the AI-CONNECTOR-005 contract: External AI Model API Connector.
+// This function securely connects to external AI models, handles authentication,
+// request formatting, robust response parsing, and error management.
+void execute_ai_connector_005(
+    const AIAPICredentials& ai_api_credentials,
+    const json& ai_prompt_payload,
+    json& ai_model_response,
+    std::string& api_call_error) {
+
+    CURL* curl = nullptr;
+    CURLcode res;
+    std::string response_buffer; // Buffer to accumulate the entire raw HTTP response body
+    struct curl_slist* headers = nullptr;
+
+    // Clear previous error and response
+    api_call_error.clear();
+    ai_model_response = json(); // Initialize to an empty JSON object
+
+    // Initialize libcurl global environment (should ideally be done once per application)
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    // Initialize a curl easy handle
+    curl = curl_easy_init();
+
+    if (curl) {
+        try {
+            // 1. Set API Endpoint URL
+            curl_easy_setopt(curl, CURLOPT_URL, ai_api_credentials.api_endpoint.c_str());
+
+            // 2. Set HTTP Headers for Authorization and Content-Type
+            std::string auth_header = "Authorization: Bearer " + ai_api_credentials.api_key;
+            headers = curl_slist_append(headers, auth_header.c_str());
+            headers = curl_slist_append(headers, "Content-Type: application/json");
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+            // 3. Set Request Payload (JSON string)
+            std::string payload_str = ai_prompt_payload.dump();
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_str.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload_str.length());
+
+            // 4. Set Write Callback to accumulate the entire response body
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_buffer);
+
+            // Optional: Set a timeout for the request (e.g., 60 seconds)
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+
+            // Optional: Follow HTTP redirects
+            curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+            // 5. Perform the HTTP request
+            res = curl_easy_perform(curl);
+
+            // 6. Error Handling and Response Parsing
+            if (res != CURLE_OK) {
+                api_call_error = "API call failed: " + std::string(curl_easy_strerror(res));
+            } else {
+                long http_code = 0;
+                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+                if (http_code >= 200 && http_code < 300) {
+                    // HTTP request was successful, now parse the accumulated JSON response
+                    if (!response_buffer.empty()) {
+                        try {
+                            ai_model_response = json::parse(response_buffer);
+                        } catch (const json::parse_error& e) {
+                            api_call_error = "JSON parsing error in AI model response: " + std::string(e.what()) + ". Raw response: " + response_buffer;
+                        } catch (const std::exception& e) {
+                            api_call_error = "Unexpected error during JSON parsing: " + std::string(e.what()) + ". Raw response: " + response_buffer;
+                        }
+                    } else {
+                        api_call_error = "API call successful, but received an empty response body.";
+                    }
+                } else {
+                    // API call returned an HTTP error status code
+                    api_call_error = "API call failed with HTTP status code: " + std::to_string(http_code);
+                    if (!response_buffer.empty()) {
+                        // Attempt to parse the error response if it's JSON
+                        try {
+                            ai_model_response = json::parse(response_buffer);
+                            api_call_error += ". Error details: " + ai_model_response.dump();
+                        } catch (const json::parse_error&) {
+                            api_call_error += ". Raw error response: " + response_buffer;
+                        } catch (const std::exception&) {
+                            api_call_error += ". Raw error response: " + response_buffer;
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            api_call_error = "An unexpected internal error occurred: " + std::string(e.what());
+        }
+
+        // 7. Cleanup libcurl resources
+        if (headers) {
+            curl_slist_free_all(headers);
+        }
+        curl_easy_cleanup(curl);
+    } else {
+        api_call_error = "Failed to initialize libcurl. Ensure libcurl is correctly installed and configured.";
+    }
+
+    // Cleanup libcurl global environment (should ideally be done once per application)
+    curl_global_cleanup();
+}
+```

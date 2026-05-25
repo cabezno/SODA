@@ -1,0 +1,92 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Responsive React Landing Page</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+  .container {
+    max-width: 800px;
+    margin: auto;
+    padding: 20px;
+  }
+  @media (max-width: 600px) {
+    .container {
+      padding: 10px;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/javascript">
+// React component
+import React, { useState } from 'react';
+import ReactDOM from 'react-dom';
+
+const LandingPage = ({ product_info_content, backend_api_endpoint }) => {
+  const [email, setEmail] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await fetch(backend_api_endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email })
+      });
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      alert('Thank you for signing up!');
+    } catch (error) {
+      console.error('There was a problem with the submission:', error);
+    }
+  };
+
+  return (
+    <div className="container">
+      <h1>{product_info_content.title}</h1>
+      <p>{product_info_content.description}</p>
+      <form onSubmit={handleSubmit}>
+        <label htmlFor="email">Email:</label>
+        <input
+          type="email"
+          id="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <button type="submit">Sign up for updates...</button>
+      </form>
+    </div>
+  );
+};
+
+// Render the component
+const product_info_content = {
+  title: 'Welcome to Our Product',
+  description: 'Don\'t miss out on our latest offers and news. Sign up now!'
+};
+const backend_api_endpoint = 'YOUR_BACKEND_API_ENDPOINT_HERE';
+
+ReactDOM.render(
+  <LandingPage 
+    product_info_content={product_info_content} 
+    backend_api_endpoint={backend_api_endpoint}
+  />,
+  document.getElementById('root')
+);
+</script>
+</body>
+</html>
+```

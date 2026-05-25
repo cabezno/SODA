@@ -10,9 +10,8 @@ SPECIALIZE_THRESHOLD = 3
 
 
 class ProfileEvolutionEngine:
-    def __init__(self, gemini_driver, context_builder, claude_driver=None):
+    def __init__(self, gemini_driver, context_builder):
         self.gemini = gemini_driver
-        self.claude = claude_driver
         self.builder = context_builder
         self.profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
         # Optional callback: notify_fn(message, event_type, data)
@@ -55,9 +54,9 @@ class ProfileEvolutionEngine:
         from kernel.utils.ai_fallback import is_capacity_error
         payload = self.builder.build_payload("gemini", "profile_evolution", task)
         raw = (await self.gemini.call(payload["system"], payload["user"])).content
-        if is_capacity_error(raw) and self.claude:
-            fallback = self.builder.build_payload("claude", "profile_evolution", task)
-            raw = self.claude.prompt(fallback["system"], fallback["user"])
+        if is_capacity_error(raw) and self.gemini:
+            fallback = self.builder.build_payload("gemini", "profile_evolution", task)
+            raw = await self.gemini.prompt(fallback["system"], fallback["user"])
         learnings = self._parse(raw)
         self._persist(project_id, profile_name, learnings)
         self._check_specialization_opportunity(profile_name, skills)

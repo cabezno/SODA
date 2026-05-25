@@ -20,12 +20,11 @@ class ProjectValidator:
 
     def __init__(
         self,
-        claude_driver,
         gemini_driver,
         context_builder,
         notify_fn: Callable = None,
     ):
-        self.claude  = claude_driver
+        self.gemini  = gemini_driver
         self.gemini  = gemini_driver
         self.builder = context_builder
         self.notify  = notify_fn or (lambda *a, **kw: None)
@@ -185,15 +184,24 @@ class ProjectValidator:
     ) -> list[dict]:
         sources = self._collect_sources(source_dir)
         arch_text = json.dumps(architecture or {}, ensure_ascii=False, indent=2)
+        # Normalize absolute paths in build errors to relative ones so the AI
+        # returns paths that match the ### headers in sources (relative to source_dir).
+        normalized_errors = build_errors
+        src_str = str(source_dir).replace("\\", "/")
+        normalized_errors = normalized_errors.replace(str(source_dir), "").replace(src_str, "")
         task = (
             f"DESCRIPCIÓN DEL PROYECTO:\n{project_description}\n\n"
             f"ARQUITECTURA ACTUAL:\n{arch_text}\n\n"
-            f"ERRORES DE BUILD:\n{build_errors[:4000]}\n\n"
-            f"ARCHIVOS DEL PROYECTO:\n{sources}"
+            f"ERRORES DE BUILD:\n{normalized_errors[:6000]}\n\n"
+            f"ARCHIVOS DEL PROYECTO (paths relativos a source/):\n"
+            f"IMPORTANTE: el campo 'file' de tu respuesta JSON debe coincidir EXACTAMENTE "
+            f"con el path del header ### correspondiente (ej: si el header es ### src/main.py, "
+            f"devolvé \"file\": \"src/main.py\").\n\n"
+            f"{sources}"
         )
         from kernel.utils.ai_fallback import is_capacity_error
         ai_failures: list[str] = []
-        for driver, provider in [(self.claude, "claude"), (self.gemini, "gemini")]:
+        for driver, provider in [(self.gemini, "gemini"), (self.gemini, "gemini")]:
             if driver is None:
                 continue
             try:
@@ -358,9 +366,21 @@ class ProjectValidator:
                 reason = fix.get("reason", "")
                 if not filepath or not code:
                     continue
+                # If AI returned an absolute path, try to make it relative to source_dir
+                fp_path = Path(filepath)
+                if fp_path.is_absolute():
+                    try:
+                        filepath = fp_path.relative_to(source_dir).as_posix()
+                    except ValueError:
+                        filepath = fp_path.name  # last resort: just the filename
+                else:
+                    filepath = filepath.replace("\\", "/")
                 target = source_dir / filepath
+                is_new_file = not target.exists()
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(code, encoding="utf-8")
+                if is_new_file:
+                    print(f"    [FIX] WARNING: created new file (path may be wrong): {filepath}")
                 self.notify(
                     f"[Ronda {round_num}] Corregido: {filepath}" + (f" — {reason}" if reason else ""),
                     "FILE_GENERATED",

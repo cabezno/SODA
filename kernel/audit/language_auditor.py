@@ -4,7 +4,7 @@ LanguageAuditor: post-generation code audit with language-specific rules.
 Flow:
   1. detect_language()  — infer stack from files + architecture
   2. audit_project()    — run all mechanical rules (no AI needed)
-  3. If violations found → request_ai_fix() asks Claude/Gemini for fixes
+  3. If violations found → request_ai_fix() asks Gemini/Gemini for fixes
   4. Returns AuditResult with violations, score, and AI-generated patches
 
 Rules are pure Python functions: (source_dir, architecture) → list[AuditViolation].
@@ -477,8 +477,8 @@ class LanguageAuditor:
     Optionally requests AI-generated fixes for found violations.
     """
 
-    def __init__(self, claude_driver=None, gemini_driver=None, context_builder=None, notify_fn=None):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver=None, context_builder=None, notify_fn=None):
+        self.gemini = gemini_driver
         self.gemini = gemini_driver
         self.builder = context_builder
         self.notify = notify_fn or (lambda *a, **kw: None)
@@ -555,7 +555,7 @@ class LanguageAuditor:
     ) -> list[dict]:
         if not result.violations:
             return []
-        if not self.claude and not self.gemini:
+        if not self.gemini and not self.gemini:
             return []
 
         violations_text = "\n".join(
@@ -577,7 +577,7 @@ class LanguageAuditor:
             f'[{{"file": "ruta/relativa", "code": "contenido completo", "reason": "qué resuelve"}}]'
         )
 
-        for driver, provider in [(self.claude, "claude"), (self.gemini, "gemini")]:
+        for driver, provider in [(self.gemini, "gemini"), (self.gemini, "gemini")]:
             if driver is None:
                 continue
             try:

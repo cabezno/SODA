@@ -5,9 +5,8 @@ import yaml
 
 
 class SkillMatcher:
-    def __init__(self, gemini_driver, context_builder, claude_driver=None):
+    def __init__(self, gemini_driver, context_builder):
         self.gemini = gemini_driver
-        self.claude = claude_driver
         self.builder = context_builder
         self.skills_dir = Path(__file__).resolve().parent.parent.parent / "skills"
 
@@ -97,9 +96,9 @@ class SkillMatcher:
     async def _call_gemini(self, payload: dict, role: str = "skill_matcher", task: str = "") -> str:
         from kernel.utils.ai_fallback import is_capacity_error
         result = (await self.gemini.call(payload["system"], payload["user"])).content
-        if is_capacity_error(result) and self.claude:
-            fallback = self.builder.build_payload("claude", role, task)
-            result = await self.claude.prompt(fallback["system"], fallback["user"])
+        if is_capacity_error(result) and self.gemini:
+            fallback = self.builder.build_payload("gemini", role, task)
+            result = await self.gemini.prompt(fallback["system"], fallback["user"])
         return result
 
     @staticmethod
@@ -120,21 +119,24 @@ class SkillMatcher:
     def load_skill_context(self, skill_names: list[str], role: str = "code_generator") -> str:
         """Returns skill content filtered by load_level for the given role.
 
-        load_level values:
-          full      — system_prompt + all knowledge files
-          summary   — first 30 lines of system_prompt only
-          checklist — only knowledge files named checklist*.md; falls back to last knowledge file
+        Optimized for token efficiency:
+        - First skill (primary) gets requested load_level.
+        - Subsequent skills get 'summary' to avoid context bloat.
         """
         available = self._load_available_skills()
         by_name = {s["name"]: s for s in available}
         parts = []
-        for name in skill_names:
+        
+        for i, name in enumerate(skill_names):
             skill = by_name.get(name)
             if not skill:
                 continue
             skill_dir: Path = skill["_path"]
+            
+            # Token optimization: only the first skill is "full"
+            is_primary = (i == 0)
+            
             roles_cfg = skill.get("applies_to_roles", {})
-            # Support both old flat-list format and new dict format
             if isinstance(roles_cfg, list):
                 load_level = "full" if role in roles_cfg else "summary"
             elif isinstance(roles_cfg, dict):
@@ -143,20 +145,25 @@ class SkillMatcher:
             else:
                 load_level = "full"
 
+            # Downgrade non-primary skills to summary to prevent token leakage
+            if not is_primary and load_level == "full":
+                load_level = "summary"
+
             sp = skill_dir / "system_prompt.md"
             knowledge_dir = skill_dir / "knowledge"
 
             if load_level == "full":
                 if sp.exists():
-                    parts.append(sp.read_text(encoding="utf-8").strip())
+                    parts.append(f"### SKILL: {name}\n" + sp.read_text(encoding="utf-8").strip())
                 if knowledge_dir.exists():
-                    for kf in sorted(knowledge_dir.glob("*.md")):
+                    # Limit to 2 knowledge files per skill to save tokens
+                    for kf in sorted(knowledge_dir.glob("*.md"))[:2]:
                         parts.append(kf.read_text(encoding="utf-8").strip())
 
             elif load_level == "summary":
                 if sp.exists():
                     lines = sp.read_text(encoding="utf-8").splitlines()
-                    parts.append("\n".join(lines[:30]).strip())
+                    parts.append(f"### SKILL: {name} (Summary)\n" + "\n".join(lines[:20]).strip())
 
             elif load_level == "checklist":
                 if knowledge_dir.exists():

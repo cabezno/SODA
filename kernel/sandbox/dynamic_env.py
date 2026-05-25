@@ -72,8 +72,13 @@ class DynamicEnvironment:
                 cwd=str(self.workspace),
             )
             if not result.success:
-                self._emit(f"Error creando venv: {result.stderr[:300]}", "SANDBOX_ERROR")
-                return False
+                # WinError 183 / "already exists": concurrent ensure_venv() beat us — treat as success
+                stderr_lower = result.stderr.lower()
+                if "183" in result.stderr or "already exists" in stderr_lower or "ya existe" in stderr_lower:
+                    pass  # race condition — venv was created by a parallel call
+                else:
+                    self._emit(f"Error creando venv: {result.stderr[:300]}", "SANDBOX_ERROR")
+                    return False
             self._emit("Entorno virtual creado.", "SANDBOX_INIT")
         self._ready = True
         return True

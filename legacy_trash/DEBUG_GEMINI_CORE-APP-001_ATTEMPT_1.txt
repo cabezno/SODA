@@ -1,0 +1,205 @@
+```cpp
+// CORE-APP-001: Windows Desktop Application Framework
+// This file establishes the foundational C++ Windows desktop application framework,
+// including window management, event handling, and basic UI structure to host other modules.
+
+#include <windows.h>
+#include <tchar.h> // For _T macro and generic text mappings (UNICODE/ANSI compatibility)
+#include <string>  // For std::wstring or std::string if needed, though not strictly used in this minimal example
+#include <sstream> // For std::wstringstream or std::stringstream for debug output
+
+// Global Variables (for simplicity in this foundational example)
+// These define the window class name and store the application instance handle.
+const TCHAR g_szClassName[] = _T("WindowsUIFrameworkClass");
+HINSTANCE g_hInst = NULL;
+
+// Forward declaration of the Window Procedure (WndProc)
+// This function will handle all messages sent to our main application window.
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// WinMain: The entry point for all Windows GUI applications.
+// It initializes the application, registers the window class, creates the main window,
+// and contains the message loop for event handling.
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+    // Store the application instance handle for later use (e.g., loading resources).
+    g_hInst = hInstance;
+
+    WNDCLASSEX wc; // Structure to define the window class attributes.
+    HWND hwnd;     // Handle to our main application window.
+    MSG Msg;       // Structure to hold messages retrieved from the message queue.
+
+    // Step 1: Registering the Window Class
+    // This defines the characteristics of the window(s) we will create.
+    wc.cbSize        = sizeof(WNDCLASSEX);          // Size of this structure.
+    wc.style         = CS_HREDRAW | CS_VREDRAW;     // Redraw the window if its size changes.
+    wc.lpfnWndProc   = WndProc;                     // Pointer to the window procedure.
+    wc.cbClsExtra    = 0;                           // No extra bytes for class.
+    wc.cbWndExtra    = 0;                           // No extra bytes for window.
+    wc.hInstance     = hInstance;                   // Handle to the application instance.
+    wc.hIcon         = LoadIcon(NULL, IDI_APPLICATION); // Default application icon.
+    wc.hCursor       = LoadCursor(NULL, IDC_ARROW);     // Default arrow cursor.
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);      // Default window background color.
+    wc.lpszMenuName  = NULL;                            // No menu for this window.
+    wc.lpszClassName = g_szClassName;               // Name of the window class.
+    wc.hIconSm       = LoadIcon(NULL, IDI_APPLICATION); // Small icon for taskbar/alt-tab.
+
+    // Attempt to register the window class. If it fails, display an error and exit.
+    if (!RegisterClassEx(&wc))
+    {
+        MessageBox(NULL, _T("Window Registration Failed!"), _T("Error"), MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Step 2: Creating the Window
+    // Create an instance of our registered window class.
+    hwnd = CreateWindowEx(
+        WS_EX_CLIENTEDGE,           // Extended window style (e.g., sunken edge).
+        g_szClassName,              // The name of the window class to create.
+        _T("Windows Desktop Application"), // The text that appears in the window's title bar.
+        WS_OVERLAPPEDWINDOW,        // Standard window style (title bar, border, min/max buttons).
+        CW_USEDEFAULT, CW_USEDEFAULT, // Default X, Y position.
+        800, 600,                   // Initial width and height of the window.
+        NULL,                       // No parent window.
+        NULL,                       // No menu for this window.
+        hInstance,                  // Handle to the application instance.
+        NULL                        // No additional application data.
+    );
+
+    // If window creation fails, display an error and exit.
+    if (hwnd == NULL)
+    {
+        MessageBox(NULL, _T("Window Creation Failed!"), _T("Error"), MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Step 3: Displaying the Window
+    // Make the window visible and send it a WM_PAINT message to draw its initial content.
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    // Step 4: The Message Loop
+    // This is the heart of the application's event handling. It continuously retrieves
+    // and dispatches messages to the appropriate window procedures.
+    while (GetMessage(&Msg, NULL, 0, 0) > 0) // Loop until WM_QUIT is posted (GetMessage returns 0).
+    {
+        TranslateMessage(&Msg); // Translates virtual-key messages into character messages.
+        DispatchMessage(&Msg);  // Dispatches a message to a window procedure.
+    }
+
+    // The message loop has terminated, return the wParam of the WM_QUIT message.
+    return (int)Msg.wParam;
+}
+
+// WndProc: The Window Procedure (Event Handler)
+// This function is called by the system to process messages sent to the window.
+// It acts as the central event dispatcher for the main application window.
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    // Use a switch statement to handle different types of messages.
+    switch (msg)
+    {
+        case WM_CREATE:
+            // WM_CREATE is sent when the window is first created.
+            // This is an ideal place for initializations specific to the window,
+            // such as creating child controls, loading resources, or setting up
+            // initial UI components. Other modules could hook into this to
+            // initialize their UI elements within this main window.
+            OutputDebugString(_T("WM_CREATE received: Window initialized.\n"));
+            break;
+
+        case WM_PAINT:
+            // WM_PAINT is sent when the window needs to be redrawn.
+            // All custom drawing for the window's client area should occur here.
+            {
+                PAINTSTRUCT ps;
+                HDC hdc = BeginPaint(hwnd, &ps); // Prepare the window for painting.
+
+                // Example: Draw some text in the center of the window.
+                RECT clientRect;
+                GetClientRect(hwnd, &clientRect); // Get the client area dimensions.
+                DrawText(hdc, _T("Hello from WindowsUIFramework!"), -1, &clientRect, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+
+                EndPaint(hwnd, &ps); // End painting.
+            }
+            break;
+
+        case WM_SIZE:
+            // WM_SIZE is sent when the window's size changes.
+            // This is where you would typically reposition or resize child controls
+            // or update layout based on the new window dimensions.
+            {
+                // LOWORD(lParam) is the new width, HIWORD(lParam) is the new height.
+                std::wstringstream ss;
+                ss << _T("WM_SIZE received: New size = ") << LOWORD(lParam) << _T("x") << HIWORD(lParam) << _T("\n");
+                OutputDebugString(ss.str().c_str());
+            }
+            break;
+
+        case WM_COMMAND:
+            // WM_COMMAND is sent when the user interacts with a menu item,
+            // a control (e.g., button click), or an accelerator key.
+            // LOWORD(wParam) usually contains the control ID or menu item ID.
+            // HIWORD(wParam) contains a notification code for controls.
+            // lParam contains the handle to the control (if it's a control message).
+            {
+                std::wstringstream ss;
+                ss << _T("WM_COMMAND received: ID = ") << LOWORD(wParam) << _T(", Notification = ") << HIWORD(wParam) << _T("\n");
+                OutputDebugString(ss.str().c_str());
+            }
+            break;
+
+        case WM_DESTROY:
+            // WM_DESTROY is sent when the window is being destroyed.
+            // This is the last message the window receives before it's removed from memory.
+            // Perform any necessary cleanup here (e.g., freeing allocated memory,
+            // destroying child windows, saving application state).
+            // PostQuitMessage(0) tells the message loop to terminate.
+            OutputDebugString(_T("WM_DESTROY received: Application shutting down.\n"));
+            PostQuitMessage(0);
+            break;
+
+        default:
+            // For any messages not explicitly handled by our WndProc,
+            // pass them to the default window procedure for standard processing.
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0; // Indicate that the message has been processed.
+}
+
+// --- Potential Extension Points for Hosting Other Modules ---
+// This foundational framework provides the main window and message loop.
+// Other modules (e.g., CORE-APP-002, CORE-APP-003) would typically integrate by:
+// 1. Creating child windows within this main window's client area.
+// 2. Registering their own window procedures for those child windows.
+// 3. Subclassing the main window's WndProc to intercept specific messages.
+// 4. Providing functions that this framework can call to initialize/update module UI.
+
+// Example placeholder for a module registration function:
+/*
+struct ModuleConfig {
+    int moduleId;
+    // ... other configuration for the module
+};
+
+// This function could be exposed by the framework for modules to register themselves.
+void RegisterUIModule(HWND parentHwnd, const ModuleConfig& config) {
+    // Example: Create a child window for the module
+    // HWND moduleWindow = CreateWindowEx(
+    //     0, // No extended styles
+    //     _T("ModuleSpecificWindowClass"), // A class registered by the module
+    //     _T("Module UI"),
+    //     WS_CHILD | WS_VISIBLE | WS_BORDER, // Child window, visible, with border
+    //     10, 10, 200, 150, // Position and size
+    //     parentHwnd, // Parent is the main framework window
+    //     (HMENU)config.moduleId, // Use module ID as child window ID
+    //     g_hInst,
+    //     NULL
+    // );
+    // if (moduleWindow) {
+    //     // Store moduleWindow handle, pass config, etc.
+    //     OutputDebugString(_T("Module UI registered.\n"));
+    // }
+}
+*/
+```

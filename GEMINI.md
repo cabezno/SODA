@@ -5,8 +5,21 @@ Este documento centraliza el conocimiento del proyecto SODA para facilitar la as
 ## 🚀 Visión General
 SODA (Software Orchestration & Development Agency) es un sistema multi-agente determinístico diseñado para transformar requerimientos en lenguaje natural en aplicaciones funcionales, auditadas y mantenibles.
 
-### Pipeline Principal
-`CAP (Capabilities)` → `WISDOM` → `REQ (Requirements)` → `ARCH (Architecture)` → `PLAN` → `DEV (Development)` → `EVOLUTION` → `DONE`
+## 🏗️ Arquitectura del Kernel (V4 Hardened)
+
+### Nuevo Pipeline Principal (Zero-Failure Roadmap)
+Para evitar la generación de código "deforme", SODA debe seguir estrictamente este flujo:
+1. **Definición de Objetivo (WISDOM):** Interrogatorio exhaustivo.
+2. **Recursive Planning Council (RPC):** DeepSeek-R1, Gemini y Claude negocian un checklist atómico.
+3. **Desarrollo Soberano (DEV):** Cada paso es auditado físicamente contra el disco.
+4. **Modo Inquisidor (RIGOR):** Si hay mentiras o desalineación, se baja la temperatura a 0.0 y se bloquean paradigmas ajenos.
+5. **Autocuración AST:** Reparación automática de sintaxis antes de la entrega.
+6. **Meta-Análisis Forense:** Informe de Gemini 3.5 sobre el kernel y el proyecto.
+
+### Reglas de Ingeniería Inamovibles:
+- **Physical Truth:** Ninguna tarea se da por terminada sin un `os.path.exists` exitoso y un AST Parse válido.
+- **Contextual Glue:** Siempre inyectar el código de los archivos vecinos antes de una reparación o generación.
+- **Paradigm Isolation:** Prohibido importar `flask/http` en CLI, o `gui` en APIs de backend.
 
 ---
 

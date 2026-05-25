@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +86,27 @@ class ProcessHandle:
 
 
 _PROCESS_REGISTRY: dict[str, ProcessHandle] = {}
+_PROCESS_REGISTRY_LOCK = threading.Lock()
+
+
+def _registry_get(project_id: str) -> Optional[ProcessHandle]:
+    with _PROCESS_REGISTRY_LOCK:
+        return _PROCESS_REGISTRY.get(project_id)
+
+
+def _registry_set(project_id: str, handle: ProcessHandle) -> None:
+    with _PROCESS_REGISTRY_LOCK:
+        _PROCESS_REGISTRY[project_id] = handle
+
+
+def _registry_pop(project_id: str) -> Optional[ProcessHandle]:
+    with _PROCESS_REGISTRY_LOCK:
+        return _PROCESS_REGISTRY.pop(project_id, None)
+
+
+def _registry_items():
+    with _PROCESS_REGISTRY_LOCK:
+        return list(_PROCESS_REGISTRY.items())
 
 
 @dataclass
@@ -151,30 +173,31 @@ class ProjectRunner:
 
     @staticmethod
     def register_process(handle: ProcessHandle) -> None:
-        _PROCESS_REGISTRY[handle.project_id] = handle
+        _registry_set(handle.project_id, handle)
 
     @staticmethod
     def get_process(project_id: str) -> Optional[ProcessHandle]:
-        return _PROCESS_REGISTRY.get(project_id)
+        return _registry_get(project_id)
 
     @staticmethod
     def list_processes() -> list[dict]:
-        return [h.to_dict() for h in _PROCESS_REGISTRY.values()]
+        return [h.to_dict() for _, h in _registry_items()]
 
     @staticmethod
     def kill_process(project_id: str) -> bool:
-        handle = _PROCESS_REGISTRY.get(project_id)
+        handle = _registry_get(project_id)
         if handle:
             handle.kill()
-            _PROCESS_REGISTRY.pop(project_id, None)
+            _registry_pop(project_id)
             return True
         return False
 
     @staticmethod
     def kill_all() -> None:
-        for h in list(_PROCESS_REGISTRY.values()):
+        for _, h in _registry_items():
             h.kill()
-        _PROCESS_REGISTRY.clear()
+        with _PROCESS_REGISTRY_LOCK:
+            _PROCESS_REGISTRY.clear()
 
     # ── Command helpers ──────────────────────────────────────────────────────
 

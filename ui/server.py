@@ -37,11 +37,25 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 
 _SERVER_PORT = int(os.environ.get("SODA_PORT", 8000))
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Telegram bot
+    if _telegram._token:
+        _telegram.start_bot()
+    yield
+    # Shutdown: Kill all processes
+    try:
+        _project_runner.kill_all()
+    except Exception:
+        pass
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000", "http://127.0.0.1:5173", "http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -84,25 +98,22 @@ async def _copilotkit_telegram_bridge(request: Request, call_next):
 
 copilotkit = None
 add_fastapi_endpoint = None
-CopilotKitSDK = None
+CopilotKitRemoteEndpoint = None
 Action = None
 _copilotkit_loaded = False
 
 try:
-    add_fastapi_endpoint = importlib.import_module(
-        "copilotkit.integrations.fastapi"
-    ).add_fastapi_endpoint
-    CopilotKitSDK = importlib.import_module("copilotkit").CopilotKitSDK
-    Action = importlib.import_module("copilotkit").Action
+    from copilotkit.integrations.fastapi import add_fastapi_endpoint
+    from copilotkit import CopilotKitRemoteEndpoint, Action
     _copilotkit_loaded = True
-    print("[OK] CopilotKit Python SDK loaded successfully.")
+    print("[OK] CopilotKit Remote Endpoint loaded successfully.")
 except Exception as e:
-    print(f"[WARN] Failed to load CopilotKit Python SDK: {e}")
+    print(f"[WARN] Failed to load CopilotKit: {e}")
 
 async def action_resume_project(project_id: str):
     from kernel.orchestrator import SodaOrchestrator
     try:
-        orch = SodaOrchestrator()
+        orch = _get_orchestrator()
         asyncio.create_task(orch.resume(project_id))
         return f"Proceso de reanudación iniciado para {project_id}."
     except Exception as e:
@@ -115,19 +126,19 @@ async def action_create_project(
     copilot_temperature: str,
 ):
     """CopilotKit action: create a new project with chosen Copilot temperature."""
-    global _pipeline_running, _active_orchestrator
-    if _pipeline_running:
-        return "El pipeline ya está en ejecución. Esperá a que termine."
+    global _active_orchestrator
     temp = (copilot_temperature or "media").strip().lower()
     if temp not in ("baja", "media", "alta"):
         temp = "media"
 
     async def _run():
         global _pipeline_running, _active_orchestrator
-        _pipeline_running = True
+        if not await _try_acquire_pipeline():
+            await _telegram.send_from_loop("❌ Pipeline ya en ejecución")
+            return
         try:
             from kernel.orchestrator import SodaOrchestrator
-            orch = SodaOrchestrator(copilot_temperature=temp)
+            orch = _get_orchestrator(copilot_temperature=temp)
             _active_orchestrator = orch
             await orch.run(description, project_name=project_name)
             await _telegram.send_from_loop(f"✅ Proyecto '{project_name}' generado. Temperatura: {temp}")
@@ -135,9 +146,7 @@ async def action_create_project(
             await manager.broadcast({"event_type": "FAILED", "message": str(e), "data": {}})
             await _telegram.send_from_loop(f"❌ Pipeline falló: {str(e)[:200]}")
         finally:
-            if 'orchestrator' in locals(): orchestrator.cleanup_context()
-            if 'orch' in locals(): orch.cleanup_context()
-            _pipeline_running = False
+            await _release_pipeline()
 
     asyncio.create_task(_run())
     labels = {"baja": "1 pasada", "media": "3 pasadas", "alta": "ilimitado"}
@@ -148,8 +157,8 @@ async def action_create_project(
     )
 
 
-if _copilotkit_loaded and add_fastapi_endpoint is not None and CopilotKitSDK is not None:
-    copilotkit = CopilotKitSDK(
+if _copilotkit_loaded:
+    sdk = CopilotKitRemoteEndpoint(
         actions=[
             Action(
                 name="resume_project",
@@ -181,7 +190,7 @@ if _copilotkit_loaded and add_fastapi_endpoint is not None and CopilotKitSDK is 
             ),
         ]
     )
-    add_fastapi_endpoint(app, copilotkit, "/api/copilotkit")
+    add_fastapi_endpoint(app, sdk, "/api/copilotkit")
 
 monitor = ResourceMonitor()
 CONFIG_FILE = "soda_config.json"
@@ -203,7 +212,36 @@ def _write_config(cfg: dict) -> None:
     SODA_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
 
 _pipeline_running = False
-_active_orchestrator = None
+_register_lock = asyncio.Lock()
+_active_orchestrator = None  # Caché global — evita recrear 40 componentes en cada request
+
+def _get_orchestrator(copilot_temperature: str = "media") -> 'SodaOrchestrator':
+    """Retorna el orquestador cacheado. Crea uno nuevo solo si no existe.
+    NOTA: copilot_temperature solo se usa en la primera creación.
+    """
+    global _active_orchestrator
+    if _active_orchestrator is None:
+        from kernel.orchestrator import SodaOrchestrator
+        _active_orchestrator = SodaOrchestrator(copilot_temperature=copilot_temperature)
+    return _active_orchestrator
+
+
+async def _try_acquire_pipeline() -> bool:
+    """Intenta adquirir el lock del pipeline. Retorna True si se obtuvo."""
+    global _pipeline_running
+    async with _register_lock:
+        if _pipeline_running:
+            return False
+        _pipeline_running = True
+        return True
+
+
+async def _release_pipeline() -> None:
+    """Libera el lock del pipeline."""
+    global _pipeline_running
+    async with _register_lock:
+        _pipeline_running = False
+
 _project_runner = ProjectRunner()
 _project_manager = ProjectManager(Path(__file__).resolve().parent.parent)
 _project_type_registry = ProjectTypeRegistry()
@@ -219,11 +257,9 @@ _vision_capturer = VisionCapturer()
 _visual_inspector = VisualInspector()
 _intensity_orchestrator = IntensityOrchestrator()
 
-# Start Telegram bot if token is configured
+# Telegram gateway — bot starts on uvicorn startup, not on import
 from kernel.communication.telegram_gateway import TelegramGateway as _TG
 _telegram = _TG()
-if _telegram._token:
-    _telegram.start_bot()
 
 
 from fastapi.staticfiles import StaticFiles
@@ -243,7 +279,11 @@ async def get_copilot_ui():
 
 @app.get("/")
 async def get_index():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
+    response = FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/api/stats")
@@ -284,7 +324,13 @@ async def run_pipeline(request: Request):
         project_obj = None
         try:
             from kernel.orchestrator import SodaOrchestrator
-            orchestrator = SodaOrchestrator(copilot_temperature=copilot_temperature)
+            from kernel.drivers.gemini_driver import GeminiDriver
+            from kernel.drivers.ollama_driver import OllamaDriver
+            import asyncio
+            from kernel.core.models_v2 import SodaContract, ContractInterface, DynamicPersona
+            
+
+            orchestrator = _get_orchestrator(copilot_temperature=copilot_temperature)
             _active_orchestrator = orchestrator
             project_obj = await orchestrator.run(description, project_name=project_name)
             await _telegram.send_from_loop(f"✅ Proyecto '{project_name}' generado exitosamente.")
@@ -292,17 +338,18 @@ async def run_pipeline(request: Request):
             await manager.broadcast({"event_type": "FAILED", "message": str(e), "data": {}})
             await _telegram.send_from_loop(f"❌ Pipeline falló: {str(e)[:200]}")
         finally:
-            if 'orchestrator' in locals(): orchestrator.cleanup_context()
-            if 'orch' in locals(): orch.cleanup_context()
             _pipeline_running = False
 
-        # Auto-launch the generated project and stream output to the console
+        # Auto-launch the generated project and stream output to the console.
+        # Skip for docker-compose stacks — BootAgent already started the containers
+        # in detached mode; re-running docker-compose would double-start them.
         if project_obj is not None:
             try:
                 run_cmd = (project_obj.blueprint or {}).get("comando_ejecucion", "")
                 source_dir = _project_manager.source_dir(project_obj.id)
                 workspace = _project_manager.project_dir(project_obj.id)
-                if run_cmd and source_dir.exists():
+                _is_compose = "docker-compose" in run_cmd or "docker compose" in run_cmd
+                if run_cmd and source_dir.exists() and not _is_compose:
                     asyncio.create_task(
                         _stream_process(project_obj.id, run_cmd, str(source_dir), str(workspace))
                     )
@@ -347,7 +394,7 @@ async def modify_project(request: Request):
         profile=meta.get("profile", ""),
     )
 
-    orchestrator = SodaOrchestrator()
+    orchestrator = _get_orchestrator()
     result = await orchestrator.modify(project, user_request)
     return {"status": "ok", "result": result}
 
@@ -404,13 +451,11 @@ async def refound_project(request: Request):
         global _pipeline_running
         _pipeline_running = True
         try:
-            orch = SodaOrchestrator()
+            orch = _get_orchestrator()
             await orch.refound(project)
         except Exception as e:
             await manager.broadcast({"event_type": "FAILED", "message": str(e), "data": {}})
         finally:
-            if 'orchestrator' in locals(): orchestrator.cleanup_context()
-            if 'orch' in locals(): orch.cleanup_context()
             _pipeline_running = False
 
     asyncio.create_task(_run())
@@ -434,7 +479,7 @@ async def resume_project(request: Request):
         _pipeline_running = True
         try:
             from kernel.orchestrator import SodaOrchestrator
-            orch = SodaOrchestrator()
+            orch = _get_orchestrator()
             _active_orchestrator = orch
             await orch.resume(project_id)
             await _telegram.send_from_loop(f"Proyecto '{project_id}' reanudado y completado.")
@@ -472,8 +517,8 @@ async def analyze_code(request: Request):
     if not code:
         return JSONResponse({"status": "error", "message": "No se proporcionó código"}, status_code=400)
 
-    from kernel.drivers.claude_driver import ClaudeDriver
-    driver = ClaudeDriver()
+    from kernel.drivers.gemini_driver import GeminiDriver
+    driver = GeminiDriver()
 
     system_prompt = (
         "Sos un experto en análisis de código. Analizás código fuente y devolvés EXCLUSIVAMENTE "
@@ -553,7 +598,13 @@ async def run_from_code(request: Request):
         _pipeline_running = True
         try:
             from kernel.orchestrator import SodaOrchestrator
-            orchestrator = SodaOrchestrator(copilot_temperature=copilot_temperature)
+            from kernel.drivers.gemini_driver import GeminiDriver
+            from kernel.drivers.ollama_driver import OllamaDriver
+            import asyncio
+            from kernel.core.models_v2 import SodaContract, ContractInterface, DynamicPersona
+            
+
+            orchestrator = _get_orchestrator(copilot_temperature=copilot_temperature)
             _active_orchestrator = orchestrator
             await orchestrator.import_from_code(code, filename, analysis, intent, project_name)
             await _telegram.send_from_loop(f"✅ Proyecto '{project_name}' generado desde código existente.")
@@ -561,8 +612,6 @@ async def run_from_code(request: Request):
             await manager.broadcast({"event_type": "FAILED", "message": str(e), "data": {}})
             await _telegram.send_from_loop(f"❌ Pipeline desde código falló: {str(e)[:200]}")
         finally:
-            if 'orchestrator' in locals(): orchestrator.cleanup_context()
-            if 'orch' in locals(): orch.cleanup_context()
             _pipeline_running = False
 
     asyncio.create_task(_run())
@@ -838,20 +887,114 @@ async def get_project_metadata(project_id: str):
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
+@app.get("/api/project/{project_id}/status")
+async def get_project_contract_status(project_id: str):
+    """Return contract-level status for a project (pending/completed counts, source files)."""
+    if not _project_manager.exists(project_id):
+        return JSONResponse({"status": "error", "message": "Proyecto no encontrado"}, status_code=404)
+    try:
+        from kernel.orchestrator import SodaOrchestrator
+        orch = _get_orchestrator()
+        result = orch.get_project_status(project_id)
+        if "error" in result:
+            return JSONResponse({"status": "error", "message": result["error"]}, status_code=404)
+        return result
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/projects/{project_id}/retry-boot")
+async def retry_boot_project(project_id: str):
+    """
+    Reintenta el BootAgent en un proyecto con estado BOOT_FAILED o FAILED.
+    Lanza el retry en background y retorna inmediatamente.
+    """
+    if not _project_manager.exists(project_id):
+        return JSONResponse({"status": "error", "message": "Proyecto no encontrado"}, status_code=404)
+    try:
+        from kernel.orchestrator import SodaOrchestrator
+        orch = _get_orchestrator()
+        asyncio.create_task(orch.retry_boot(project_id))
+        return {"status": "ok", "message": f"Retry de boot iniciado para {project_id}."}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/skills/add")
+async def add_community_skill(request: Request):
+    """
+    Convert a skills.sh SKILL.md URL (or raw markdown text) to SODA format.
+
+    Body: {"url": "https://...", "target_lang": "python", "force": false}
+      OR: {"text": "# SKILL: ...", "target_lang": "python"}
+    """
+    body = await request.json()
+    url = (body.get("url") or "").strip()
+    text = (body.get("text") or "").strip()
+    target_lang = (body.get("target_lang") or "python").strip()
+    force = bool(body.get("force", False))
+
+    if not url and not text:
+        return JSONResponse(
+            {"status": "error", "message": "Se requiere 'url' o 'text'"},
+            status_code=400,
+        )
+
+    try:
+        from kernel.capabilities.skill_sh_adapter import SkillShAdapter, validate_community_skill
+        adapter = SkillShAdapter()
+
+        if url:
+            skill_dir = await adapter.convert_from_url(url, target_lang=target_lang, force=force)
+        else:
+            skill_dir = await asyncio.to_thread(
+                adapter.convert_from_text, text, target_lang, "", force
+            )
+
+        if skill_dir is None:
+            return JSONResponse(
+                {"status": "error", "message": "No se pudo parsear el SKILL.md (título vacío o descarga fallida)"},
+                status_code=422,
+            )
+
+        report = validate_community_skill(skill_dir)
+        return {
+            "status": "ok",
+            "skill_name": skill_dir.name,
+            "skill_path": str(skill_dir),
+            "quality": {
+                "has_examples": report.has_examples,
+                "has_keywords": report.has_keywords,
+                "issues": report.issues,
+                "is_acceptable": report.is_acceptable,
+            },
+        }
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.get("/api/projects/{project_id}/runtime_health")
 async def get_project_runtime_health(project_id: str):
     if not _project_manager.exists(project_id):
         return JSONResponse({"status": "error", "message": "project not found"}, status_code=404)
 
-    project_dir = _project_manager.project_dir(project_id)
-    meta = _project_manager.load_metadata(project_id)
-    blueprint = meta.get("blueprint", {}) or {}
-    run_command = (blueprint.get("comando_ejecucion") or "").strip()
-    install_command = (blueprint.get("comando_instalacion") or "").strip()
-
-    health = (await asyncio.to_thread(_project_runner.preflight, project_dir, run_command, install_command)).to_dict()
-    smoke = (await asyncio.to_thread(_project_runner.smoke_check, project_dir, run_command, install_command)).to_dict()
-    return {"status": "ok", "project_id": project_id, "runtime_health": health, "runtime_smoke": smoke}
+    from kernel.orchestrator import SodaOrchestrator
+    orch = _get_orchestrator()
+    project = orch._project_from_disk(project_id)
+    health_data = await orch._get_runtime_health(project)
+    
+    if health_data["status"] == "ok":
+        return {
+            "status": "ok", 
+            "project_id": project_id, 
+            "runtime_health": health_data["health"], 
+            "runtime_smoke": health_data["smoke"]
+        }
+    else:
+        return JSONResponse({
+            "status": "error", 
+            "message": health_data["reason"]
+        }, status_code=500)
 
 
 @app.get("/api/projects/{project_id}/files")
@@ -881,6 +1024,32 @@ async def get_project_goal_tree(project_id: str):
     if not _project_manager.exists(project_id):
         return JSONResponse({"status": "error", "message": "project not found"}, status_code=404)
     project_dir = _project_manager.project_dir(project_id)
+    
+    # Try V2 Tree first
+    v2_path = project_dir / "soda_v2_tree.json"
+    if v2_path.exists():
+        try:
+            import json as _json
+            data = _json.loads(v2_path.read_text(encoding="utf-8"))
+            nodes = []
+            for cid, contract in data.items():
+                status_map = {
+                    "PENDING_DECOMPOSITION": "planned",
+                    "PENDING_EXECUTION": "planned",
+                    "DECOMPOSED": "in_progress",
+                    "COMPLETED": "implemented"
+                }
+                nodes.append({
+                    "id": cid,
+                    "description": contract.get("title", cid) + ": " + contract.get("description", ""),
+                    "status": status_map.get(contract.get("status", "PENDING_EXECUTION"), "planned"),
+                    "type": "atomic" if contract.get("is_atomic") else "module"
+                })
+            return {"root_id": "ROOT-000", "nodes": nodes}
+        except Exception:
+            pass
+
+    # Fallback to V1
     gt_path = project_dir / "goal_tree.json"
     if not gt_path.exists():
         return {"nodes": [], "root_id": None}
@@ -1088,7 +1257,19 @@ async def _stream_process(project_id: str, run_cmd: str, cwd: str, workspace: st
     - APP_OUTPUT  — each line of stdout/stderr
     - APP_RUNNING — when a server URL is detected in the output
     - APP_EXITED  — when the process ends
+
+    Registers the process in ProjectRunner's registry so /api/processes can
+    list it and /api/projects/{id}/kill can stop it. Also kills any previous
+    instance for the same project_id before starting the new one.
     """
+    from kernel.execution.project_runner import ProjectRunner, ProcessHandle
+    from datetime import datetime as _dt
+
+    # Kill any existing process for this project before starting a new one.
+    # This prevents duplicate node/python workers when retry_boot or the
+    # pipeline runs multiple times without an explicit stop.
+    ProjectRunner.kill_process(project_id)
+
     _url_announced = False
     proc = None
 
@@ -1110,18 +1291,42 @@ async def _stream_process(project_id: str, run_cmd: str, cwd: str, workspace: st
             env["PATH"] = str(venv_scripts) + os.pathsep + env.get("PATH", "")
             env["VIRTUAL_ENV"] = str(Path(workspace) / ".soda_venv")
 
-    cmd = run_cmd.strip().split()
+    # Use shell mode on Windows so operators like && and cd work correctly.
+    # On Linux/Mac use shlex.split + exec (avoids an extra shell process).
+    import shlex as _shlex
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        if sys.platform == "win32":
+            proc = await asyncio.create_subprocess_shell(
+                run_cmd.strip(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+                env=env,
+            )
+        else:
+            _cmd = _shlex.split(run_cmd.strip())
+            proc = await asyncio.create_subprocess_exec(
+                *_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+                env=env,
+            )
+        # Register in the global process registry so the UI can list/kill it.
+        _log_path = str(Path(workspace) / "_soda_launch.log") if workspace else ""
+        ProjectRunner.register_process(ProcessHandle(
+            project_id=project_id,
+            pid=proc.pid or 0,
+            command=run_cmd.strip()[:120],
             cwd=cwd,
-            env=env,
-        )
+            started_at=_dt.utcnow().isoformat(),
+            log_path=_log_path,
+            proc=proc,
+        ))
+
         await manager.broadcast({
             "event_type": "APP_OUTPUT",
-            "message": f"[PROCESO] Iniciando: {' '.join(cmd[:4])}",
+            "message": f"[PROCESO] Iniciando: {run_cmd.strip()[:80]}",
             "data": {"project_id": project_id, "stream": "info"},
         })
 
@@ -1156,6 +1361,7 @@ async def _stream_process(project_id: str, run_cmd: str, cwd: str, workspace: st
                     })
 
         await proc.wait()
+        ProjectRunner.kill_process(project_id)   # deregister
         await manager.broadcast({
             "event_type": "APP_EXITED",
             "message": f"[PROCESO] Terminó (código {proc.returncode})",
@@ -1168,6 +1374,8 @@ async def _stream_process(project_id: str, run_cmd: str, cwd: str, workspace: st
             "data": {"project_id": project_id, "stream": "error"},
         })
     finally:
+        # Always deregister + kill on exit so no orphan processes remain.
+        ProjectRunner.kill_process(project_id)
         if proc and proc.returncode is None:
             try:
                 proc.kill()
@@ -1201,6 +1409,22 @@ async def get_project_screenshot(project_id: str):
         return JSONResponse({"error": "Pillow no instalado — pip install Pillow"}, status_code=501)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/projects/{project_id}/n8n_workflow")
+async def download_n8n_workflow(project_id: str):
+    """Download the n8n_workflow.json generated for this project."""
+    if not _project_manager.exists(project_id):
+        return JSONResponse({"error": "project not found"}, status_code=404)
+    workflow_path = _project_manager.project_dir(project_id) / "n8n_workflow.json"
+    if not workflow_path.exists():
+        return JSONResponse({"error": "n8n workflow not generated yet"}, status_code=404)
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        path=str(workflow_path),
+        media_type="application/json",
+        filename="n8n_workflow.json",
+    )
 
 
 @app.get("/api/projects/{project_id}/graph")
@@ -1490,9 +1714,9 @@ Respondé en JSON con este formato exacto:
 Solo respondé con el JSON, sin texto adicional."""
 
     try:
-        from kernel.drivers.claude_driver import ClaudeDriver
-        claude = ClaudeDriver()
-        raw = await claude.prompt(
+        from kernel.drivers.gemini_driver import GeminiDriver
+        driver = GeminiDriver()
+        raw = await driver.prompt(
             "Sos un experto en diagnóstico de errores de ejecución de software en Windows. "
             "Analizás outputs de terminal y das soluciones concretas con comandos ejecutables.",
             prompt,
@@ -1606,6 +1830,7 @@ async def run_open_project(request: Request):
     intent         = (body.get("intent") or "").strip()
     project_name   = (body.get("project_name") or "").strip()
     analysis       = body.get("analysis") or {}
+    answers        = body.get("answers") or {}
     target_lang    = (body.get("target_language") or "").strip()
 
     if not path_str or not project_name:
@@ -1622,20 +1847,19 @@ async def run_open_project(request: Request):
         _pipeline_running = True
         try:
             from kernel.orchestrator import SodaOrchestrator
-            orch = SodaOrchestrator()
+            orch = _get_orchestrator()
             await orch.open_and_process(
                 source_path=path_str,
                 action=action,
                 intent=intent,
                 project_name=project_name,
                 analysis=analysis,
+                answers=answers,
                 target_language=target_lang,
             )
         except Exception as e:
             await manager.broadcast({"event_type": "PIPELINE_ERROR", "message": str(e), "data": {}})
         finally:
-            if 'orchestrator' in locals(): orchestrator.cleanup_context()
-            if 'orch' in locals(): orch.cleanup_context()
             _pipeline_running = False
 
     asyncio.create_task(_run())
@@ -1714,7 +1938,7 @@ async def get_ai_status():
         "claude": _entry("claude", bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
                          os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")),
         "gemini": _entry("gemini", bool(os.getenv("GEMINI_API_KEY", "").strip()),
-                         os.getenv("GEMINI_MODEL", "gemini-2.5-pro")),
+                         os.getenv("GEMINI_MODEL", "gemini-3.1-pro-preview")),
     }
 
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
@@ -1759,7 +1983,7 @@ async def test_ai_provider(provider: str):
         try:
             from google import genai as _genai
             client = _genai.Client(api_key=key)
-            model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
             resp = await asyncio.to_thread(
                 client.models.generate_content,
                 model=model, contents="ping"
@@ -1790,6 +2014,38 @@ async def get_soda_config():
     except Exception:
         pass
     return {}
+
+@app.get("/api/models/gemini")
+async def get_gemini_model():
+    """Returns the current selected FinOps profile and available profiles."""
+    available_profiles = ["auto", "economy", "balanced", "premium"]
+    try:
+        if SODA_CONFIG_PATH.exists():
+            cfg = json.loads(SODA_CONFIG_PATH.read_text(encoding="utf-8"))
+            current = cfg.get("finops_profile", "auto")
+            if current not in available_profiles:
+                current = "auto"
+            return {"current": current, "available": available_profiles}
+    except Exception:
+        pass
+    return {"current": "auto", "available": available_profiles}
+
+@app.post("/api/models/gemini")
+async def set_gemini_model(request: Request):
+    """Sets the preferred FinOps profile."""
+    try:
+        body = await request.json()
+        profile_name = body.get("model", "auto").lower()
+        
+        cfg = {}
+        if SODA_CONFIG_PATH.exists():
+            cfg = json.loads(SODA_CONFIG_PATH.read_text(encoding="utf-8"))
+            
+        cfg["finops_profile"] = profile_name
+        SODA_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+        return {"status": "ok", "current": profile_name}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/api/config")
@@ -1825,6 +2081,18 @@ async def set_soda_config(request: Request):
 async def receive_event(request: Request):
     payload = await request.json()
     await manager.broadcast(payload)
+    
+    # Reenviar a Telegram
+    try:
+        if _telegram.is_configured():
+            await _telegram.send_event(
+                event_type=payload.get("event_type", "LOG"),
+                text=payload.get("message", ""),
+                data=payload.get("data")
+            )
+    except Exception as e:
+        print(f"  [Server] Error al reenviar evento a Telegram: {e}")
+        
     return {"status": "ok"}
 
 
@@ -2025,7 +2293,7 @@ async def apply_resources(project_id: str, request: Request):
         skills=meta.get("skills", []),
         profile=meta.get("profile", ""),
     )
-    orchestrator = SodaOrchestrator()
+    orchestrator = _get_orchestrator()
     result = await orchestrator.modify(project, composite_request)
     return {"status": "ok", "result": result}
 
@@ -2354,7 +2622,7 @@ async def tts_voices():
     try:
         from kernel.tts.kokoro_tts import KokoroTTS, is_available
         if not is_available():
-            return JSONResponse({"error": "F5-TTS not installed"}, status_code=503)
+            return JSONResponse({"error": "Edge TTS not installed"}, status_code=503)
         return KokoroTTS.get().list_voices()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -2370,7 +2638,7 @@ async def tts_set_voice(request: Request):
     try:
         from kernel.tts.kokoro_tts import KokoroTTS, is_available
         if not is_available():
-            return JSONResponse({"error": "F5-TTS not installed"}, status_code=503)
+            return JSONResponse({"error": "Edge TTS not installed"}, status_code=503)
         KokoroTTS.get().set_voice(voice)
         return {"status": "ok", "voice": voice}
     except Exception as e:
@@ -2388,7 +2656,7 @@ async def tts_set_speed(request: Request):
     try:
         from kernel.tts.kokoro_tts import KokoroTTS, is_available
         if not is_available():
-            return JSONResponse({"error": "F5-TTS not installed"}, status_code=503)
+            return JSONResponse({"error": "Edge TTS not installed"}, status_code=503)
         KokoroTTS.get().set_speed(speed)
         return {"status": "ok", "speed": speed}
     except Exception as e:
@@ -2408,7 +2676,7 @@ async def tts_generate(request: Request):
     try:
         from kernel.tts.kokoro_tts import KokoroTTS, is_available, tts_enabled
         if not is_available():
-            return JSONResponse({"error": "F5-TTS not installed"}, status_code=503)
+            return JSONResponse({"error": "Edge TTS not installed"}, status_code=503)
         if not tts_enabled():
             return JSONResponse({"error": "TTS disabled"}, status_code=503)
         wav = await KokoroTTS.get().generate_wav(text, voice_name=voice, speed=speed)
@@ -2438,7 +2706,7 @@ async def tts_clone_voice(request: Request):
         from kernel.tts.kokoro_tts import is_available, VOICES_DIR
         from kernel.tts.voice_cloner import save_reference_voice
         if not is_available():
-            return JSONResponse({"error": "F5-TTS not installed"}, status_code=503)
+            return JSONResponse({"error": "Edge TTS not installed"}, status_code=503)
         suffix = Path(audio_file.filename or "ref.wav").suffix or ".wav"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             shutil.copyfileobj(audio_file.file, tmp)
@@ -2456,7 +2724,7 @@ async def tts_delete_voice(voice_name: str):
     try:
         from kernel.tts.kokoro_tts import KokoroTTS, is_available
         if not is_available():
-            return JSONResponse({"error": "F5-TTS not installed"}, status_code=503)
+            return JSONResponse({"error": "Edge TTS not installed"}, status_code=503)
         ok = KokoroTTS.get().delete_voice(voice_name)
         if not ok:
             return JSONResponse({"error": "Voice not found or is built-in"}, status_code=404)
@@ -2471,11 +2739,25 @@ async def submit_answer(request: Request):
     from kernel.communication.user_interaction import get_gateway
     body = await request.json()
     text = (body.get("answer") or "").strip()
+    project_id = body.get("project_id")
+    
     gw = get_gateway()
-    if not gw.is_waiting:
-        return JSONResponse({"status": "error", "message": "No hay pregunta pendiente"}, status_code=409)
-    gw.answer(text)  # empty string = skip (pipeline continues with no answer)
-    return {"status": "ok"}
+    if gw.is_waiting:
+        gw.answer(text)
+        return {"status": "ok"}
+        
+    # Bridge Check: ¿Hay un proceso externo (script) esperando?
+    if project_id:
+        pdir = _PROJECTS_BASE / project_id
+        q_file = pdir / ".pending_question"
+        if q_file.exists():
+            a_file = pdir / ".pending_answer"
+            a_file.write_text(json.dumps({"answer": text, "timestamp": time.time()}), encoding="utf-8")
+            # Notificar visualmente que se respondió (opcional)
+            await manager.broadcast({"event_type": "QUESTION_ANSWERED", "message": "Respuesta enviada al motor externo.", "data": {}})
+            return {"status": "ok", "bridged": True}
+
+    return JSONResponse({"status": "error", "message": "No hay pregunta pendiente"}, status_code=409)
 
 
 @app.post("/api/answer/extend")
@@ -2550,10 +2832,9 @@ async def chat_project(request: Request):
 
     meta = _project_manager.load_metadata(project_id)
 
-    from kernel.drivers.claude_driver import ClaudeDriver
-    claude = ClaudeDriver()
-
-    response = await _project_chat.answer(claude, meta, source_dir, message)
+    from kernel.drivers.gemini_driver import GeminiDriver
+    driver = GeminiDriver()
+    response = await _project_chat.answer(driver, meta, source_dir, message)
     if _telegram.is_configured():
         asyncio.create_task(
             _telegram.send_from_loop(f"[Chat/{project_id}]\nQ: {message[:300]}\nA: {response[:300]}")
@@ -2755,10 +3036,10 @@ async def selfrepair_run(request: Request):
 
     async def _run():
         from kernel.selfrepair.system_healer import SystemHealer
-        from kernel.drivers.claude_driver import ClaudeDriver
+        from kernel.drivers.gemini_driver import GeminiDriver
         try:
             base = Path(__file__).resolve().parent.parent
-            healer = SystemHealer(base_dir=base, claude_driver=ClaudeDriver(), notify_fn=_notify)
+            healer = SystemHealer(base_dir=base, gemini_driver=GeminiDriver(), notify_fn=_notify)
             report = await healer.run(stages=stages, apply_fixes=apply_fixes, label=label)
             summary = report.to_dict()["summary"]
             _notify(

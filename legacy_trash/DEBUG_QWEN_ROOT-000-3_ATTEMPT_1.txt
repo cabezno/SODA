@@ -1,0 +1,73 @@
+```sql
+-- Define the SQLite database schema
+
+CREATE TABLE users (
+    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    google_sso_id TEXT UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE products (
+    product_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    price REAL NOT NULL,
+    sku TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE one_time_purchase_licenses (
+    license_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    product_id INTEGER,
+    license_key TEXT UNIQUE NOT NULL,
+    purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (product_id) REFERENCES products(product_id)
+);
+
+CREATE TABLE subscription_plans (
+    plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    monthly_price REAL NOT NULL,
+    annual_price REAL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE user_subscriptions (
+    subscription_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    plan_id INTEGER,
+    start_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_date DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (plan_id) REFERENCES subscription_plans(plan_id)
+);
+
+CREATE TABLE token_balances (
+    balance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    token_amount REAL NOT NULL,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+```
+
+```sql
+-- Script to populate the database with initial product data
+
+INSERT INTO products (name, description, price, sku) VALUES
+('Product A', 'Description for Product A', 19.99, 'PROD-A'),
+('Product B', 'Description for Product B', 29.99, 'PROD-B');
+```
+
+```sql
+-- Script to populate the database with initial subscription plan data
+
+INSERT INTO subscription_plans (name, description, monthly_price) VALUES
+('Basic Plan', 'Basic subscription plan for Product A', 4.99),
+('Premium Plan', 'Premium subscription plan for Product B', 14.99);
+```

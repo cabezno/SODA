@@ -1,0 +1,23 @@
+```javascript
+// dependencies.js
+
+/**
+ * Represents an email address.
+ * @typedef {string} EmailAddress
+ */
+
+/**
+ * Represents SMTP server credentials and configuration.
+ * @typedef {Object} Credentials
+ * @property {string} host - The hostname of the SMTP server.
+ * @property {number} port - The port number on which the SMTP server is listening.
+ * @property {boolean} secure - Indicates whether a secure connection (TLS/SSL) is required.
+ * @property {string} user - The username for authentication with the SMTP server.
+ * @property {string} pass - The password for authentication with the SMTP server.
+ */
+
+module.exports = {
+  EmailAddress,
+  Credentials
+};
+```

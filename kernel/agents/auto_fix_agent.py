@@ -66,8 +66,8 @@ def _extract_module_contract(filepath: str, master_contract: Optional[dict]) -> 
 class AutoFixAgent:
     """Applies targeted, contract-aware fixes to a single file that crashed at runtime."""
 
-    def __init__(self, claude_driver, gemini_driver=None, context_builder=None, notify_fn=None):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver=None, context_builder=None, notify_fn=None):
+        self.gemini = gemini_driver
         self.gemini = gemini_driver
         self.builder = context_builder
         self._notify = notify_fn or (lambda *a, **kw: None)
@@ -120,19 +120,19 @@ class AutoFixAgent:
         )
 
         response: Optional[str] = None
-        for driver, provider in [(self.claude, "claude"), (self.gemini, "gemini")]:
+        for driver, provider in [(self.gemini, "gemini"), (self.gemini, "gemini")]:
             if driver is None:
                 continue
             try:
                 if self.builder:
                     payload = self.builder.build_payload(provider, "auto_fixer", task)
-                    if provider == "claude":
+                    if provider == "gemini":
                         raw = await driver.prompt(payload["system"], payload["user"])
                     else:
                         result = await driver.call(payload["system"], payload["user"])
                         raw = result.content if hasattr(result, "content") else str(result)
                 else:
-                    raw = await driver.prompt("", task) if provider == "claude" else (await driver.call("", task)).content
+                    raw = await driver.prompt("", task) if provider == "gemini" else (await driver.call("", task)).content
                 if hasattr(raw, "content"):
                     raw = raw.content
                 fixed = _strip_fence(str(raw or ""))

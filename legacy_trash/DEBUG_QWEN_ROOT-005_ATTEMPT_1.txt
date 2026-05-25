@@ -1,0 +1,57 @@
+```typescript
+import NextAuth, { NextAuthOptions } from 'next-auth';
+import Providers from 'next-auth/providers';
+import jwt from 'jsonwebtoken';
+
+export const authApiEndpoints = {
+  register: { path: '/api/auth/register', method: 'POST' },
+  loginEmail: { path: '/api/auth/login/email', method: 'POST' },
+  loginGoogle: { path: '/api/auth/login/google', method: 'POST' },
+  logout: { path: '/api/auth/logout', method: 'POST' },
+  profile: { path: '/api/auth/profile', method: 'GET' }
+};
+
+const authOptions: NextAuthOptions = {
+  providers: [
+    Providers.Google({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+    Providers.Email({
+      server: process.env.EMAIL_SERVER,
+      from: process.env.EMAIL_FROM,
+    })
+  ],
+  callbacks: {
+    async jwt(token, user) {
+      if (user) {
+        token.id = user.id;
+        token.email = user.email;
+        token.role = user.role;
+      }
+      return token;
+    },
+    async session(session, token) {
+      session.user.id = token.id!;
+      session.user.email = token.email!;
+      session.user.role = token.role!;
+      return session;
+    },
+    async signIn(user, account, profile) {
+      if (account.provider === 'google') {
+        user.email = profile.email!;
+      }
+      return true;
+    }
+  },
+  pages: {
+    signIn: '/auth/signin',
+    signOut: '/auth/signout',
+    error: '/auth/error'
+  }
+};
+
+const authApiHandler = NextAuth(authOptions);
+
+export default authApiHandler;
+```

@@ -4,7 +4,7 @@ Flow:
   1. BackupManager.create()          — full snapshot before any change
   2. For each stage (kernel subdir):
        a. Read files (bounded context, max MAX_FILE_LINES per file)
-       b. Send to Claude: analyze errors + improvements + corrected code
+       b. Send to Gemini: analyze errors + improvements + corrected code
        c. Build FileReport / StageReport
   3. UnifiedReport: aggregate all stages, generate assessment
   4. Apply fixes: write corrected files to disk
@@ -52,11 +52,11 @@ class SystemHealer:
     def __init__(
         self,
         base_dir: Path,
-        claude_driver=None,
+        gemini_driver=None,
         notify_fn: Optional[Callable] = None,
     ):
         self.base_dir = base_dir
-        self.driver = claude_driver
+        self.driver = gemini_driver
         self._notify = notify_fn or (lambda msg, ev, data: None)
         self.backup_mgr = BackupManager(base_dir)
 
@@ -171,7 +171,7 @@ class SystemHealer:
             response = await self.driver.call(
                 system_prompt=_SYSTEM_PROMPT,
                 user_message=prompt,
-                model="claude-sonnet-4-6",
+                model="gemini-3.1-pro-preview",
                 max_tokens=4096,
                 temperature=0.2,
                 metadata={"phase": "selfrepair", "stage": stage},
@@ -299,7 +299,7 @@ Ordená las acciones por prioridad (críticas primero). Máximo 8 acciones.
             response = await self.driver.call(
                 system_prompt="Sos un experto en análisis de sistemas Python. Respondé solo con JSON válido.",
                 user_message=prompt,
-                model="claude-sonnet-4-6",
+                model="gemini-3.1-pro-preview",
                 max_tokens=1024,
                 temperature=0.3,
                 metadata={"phase": "selfrepair", "stage": "unified_assessment"},

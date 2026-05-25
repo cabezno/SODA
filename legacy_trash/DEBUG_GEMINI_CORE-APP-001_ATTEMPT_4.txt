@@ -1,0 +1,134 @@
+```cpp
+#include <windows.h>
+#include <tchar.h>
+
+// Global constants
+const TCHAR szWindowClass[] = _T("win32app");
+const TCHAR szTitle[] = _T("Windows Desktop Application Framework");
+
+// Forward declaration of the window procedure
+LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+
+// The main entry point for the application
+int WINAPI WinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPSTR lpCmdLine,
+    _In_ int nCmdShow)
+{
+    // 1. Register the window class.
+    WNDCLASSEX wcex;
+
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.style = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc = WndProc;
+    wcex.cbClsExtra = 0;
+    wcex.cbWndExtra = 0;
+    wcex.hInstance = hInstance;
+    wcex.hIcon = LoadIcon(hInstance, IDI_APPLICATION);
+    wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcex.lpszMenuName = NULL;
+    wcex.lpszClassName = szWindowClass;
+    wcex.hIconSm = LoadIcon(wcex.hInstance, IDI_APPLICATION);
+
+    if (!RegisterClassEx(&wcex))
+    {
+        MessageBox(NULL,
+            _T("Call to RegisterClassEx failed!"),
+            _T("Windows Desktop App"),
+            NULL);
+
+        return 1;
+    }
+
+    // 2. Create the window.
+    // The parameters to CreateWindowEx explained:
+    // WS_EX_OVERLAPPEDWINDOW : An optional extended window style.
+    // szWindowClass: the name of the application
+    // szTitle: the text that appears in the title bar
+    // WS_OVERLAPPEDWINDOW: the type of window to create
+    // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
+    // 800, 600: initial size (width, length)
+    // NULL: the parent of this window
+    // NULL: this application does not have a menu bar
+    // hInstance: the first parameter from WinMain
+    // NULL: not used in this application
+    HWND hWnd = CreateWindowEx(
+        WS_EX_OVERLAPPEDWINDOW,
+        szWindowClass,
+        szTitle,
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        800, 600,
+        NULL,
+        NULL,
+        hInstance,
+        NULL
+    );
+
+    if (!hWnd)
+    {
+        MessageBox(NULL,
+            _T("Call to CreateWindow failed!"),
+            _T("Windows Desktop App"),
+            NULL);
+
+        return 1;
+    }
+
+    // 3. Show and update the window.
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
+
+    // 4. Main message loop.
+    MSG msg;
+    // This loop retrieves messages from the application's message queue and dispatches them
+    // to the appropriate window procedure.
+    while (GetMessage(&msg, NULL, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    return (int)msg.wParam;
+}
+
+//  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
+//
+//  PURPOSE:  Processes messages for the main window.
+//
+//  WM_PAINT    - Paint the main window
+//  WM_DESTROY  - post a quit message and return
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    PAINTSTRUCT ps;
+    HDC hdc;
+    TCHAR greeting[] = _T("Welcome to the Core Windows Desktop Application Framework!");
+
+    switch (message)
+    {
+    case WM_PAINT:
+        hdc = BeginPaint(hWnd, &ps);
+
+        // Here, application-specific drawing code would go.
+        // For this basic framework, we just display a text message.
+        TextOut(hdc,
+            5, 5,
+            greeting, _tcslen(greeting));
+
+        EndPaint(hWnd, &ps);
+        break;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+        break;
+    }
+
+    return 0;
+}
+```

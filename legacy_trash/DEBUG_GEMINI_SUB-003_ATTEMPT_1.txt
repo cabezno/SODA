@@ -1,0 +1,122 @@
+```javascript
+// Layer 4: Coder - Pure JavaScript implementation for SUB-003
+
+// This service requires the 'nodemailer' package.
+// To install: npm install nodemailer
+const nodemailer = require('nodemailer');
+
+/**
+ * @typedef {string} EmailAddress - A string representing an email address.
+ */
+
+/**
+ * @typedef {object} Credentials - SMTP server configuration and authentication credentials.
+ * @property {string} host - The SMTP server host.
+ * @property {number} port - The SMTP server port.
+ * @property {boolean} secure - True if using SSL/TLS (usually port 465), false otherwise (usually port 587 with STARTTLS).
+ * @property {string} user - The username for SMTP authentication.
+ * @property {string} pass - The password for SMTP authentication.
+ */
+
+/**
+ * @typedef {object} EmailContentPayload - Structured content for the email.
+ * @property {string} subject - The subject line of the email.
+ * @property {string} body - The HTML or plain text body of the email.
+ */
+
+/**
+ * Sends an email notification using the provided details and SMTP credentials.
+ *
+ * @param {EmailAddress} recipient_email - The email address of the user to whom the notification should be sent.
+ * @param {string} email_content_json - A JSON string containing the subject and body content of the email.
+ *                                      Expected format: `JSON.stringify({ subject: "Your Subject", body: "<html><body>Your email body</body></html>" })`
+ * @param {Credentials} smtp_credentials - SMTP server configuration and authentication credentials.
+ * @returns {Promise<boolean>} - Confirmation status indicating whether the email was successfully sent.
+ */
+async function sendEmailNotification(recipient_email, email_content_json, smtp_credentials) {
+    let email_content;
+    try {
+        email_content = JSON.parse(email_content_json);
+        if (typeof email_content.subject !== 'string' || typeof email_content.body !== 'string') {
+            console.error('Invalid email_content_json format: subject and body must be strings.');
+            return false;
+        }
+    } catch (error) {
+        console.error('Failed to parse email_content_json:', error);
+        return false;
+    }
+
+    // 1. Create a Nodemailer transporter using the provided SMTP credentials.
+    const transporter = nodemailer.createTransport({
+        host: smtp_credentials.host,
+        port: smtp_credentials.port,
+        secure: smtp_credentials.secure, // true for 465, false for other ports (e.g., 587 with STARTTLS)
+        auth: {
+            user: smtp_credentials.user,
+            pass: smtp_credentials.pass,
+        },
+        // Optional: Add a timeout to prevent hanging indefinitely
+        // timeout: 10000 // 10 seconds
+    });
+
+    // 2. Define email options.
+    // Assuming the sender's email is the same as the SMTP user for simplicity.
+    // In a real application, this might be a configurable 'from' address.
+    const mailOptions = {
+        from: `"${smtp_credentials.user}" <${smtp_credentials.user}>`, // Sender address
+        to: recipient_email, // List of recipients
+        subject: email_content.subject, // Subject line
+        html: email_content.body, // HTML body content
+        // text: "Plain text version of the email body if HTML is not supported." // Optional: plain text body
+    };
+
+    // 3. Send the email.
+    try {
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Email sent: %s', info.messageId);
+        // console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info)); // Only available with ethereal.email
+        return true; // Email successfully sent
+    } catch (error) {
+        console.error('Error sending email:', error);
+        return false; // Email sending failed
+    }
+}
+
+// --- Contract Interface Implementation ---
+// This section maps the contract's abstract interface to the concrete function.
+
+/**
+ * Contract ID: SUB-003
+ * Title: Develop Email Notification Service
+ * Description: Develop a dedicated Node.js service responsible for sending email notifications to users upon successful lead capture.
+ *
+ * Inputs:
+ * - recipient_email: EmailAddress (string)
+ * - email_content: String (JSON string: { subject: string, body: string })
+ * - smtp_credentials: Credentials (object: { host: string, port: number, secure: boolean, user: string, pass: string })
+ *
+ * Outputs:
+ * - email_sent_confirmation: Boolean
+ */
+module.exports = {
+    /**
+     * The main function implementing the Email Notification Service.
+     * @param {object} inputs - An object containing all required inputs.
+     * @param {EmailAddress} inputs.recipient_email - The email address of the user to whom the notification should be sent.
+     * @param {string} inputs.email_content - A JSON string containing the subject and body content of the email.
+     * @param {Credentials} inputs.smtp_credentials - SMTP server configuration and authentication credentials.
+     * @returns {Promise<{email_sent_confirmation: boolean}>} - An object containing the output.
+     */
+    execute: async function(inputs) {
+        const { recipient_email, email_content, smtp_credentials } = inputs;
+
+        const email_sent_confirmation = await sendEmailNotification(
+            recipient_email,
+            email_content,
+            smtp_credentials
+        );
+
+        return { email_sent_confirmation };
+    }
+};
+```

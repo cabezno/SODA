@@ -1,0 +1,427 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive React Landing Page</title>
+    <style>
+        /* General Reset & Body */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            color: #343a40;
+            line-height: 1.6;
+        }
+
+        *, *::before, *::after {
+            box-sizing: inherit;
+        }
+
+        /* Main Container */
+        .landing-page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        /* Hero Section */
+        .hero-section {
+            background-color: #007bff;
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+            border-radius: 10px;
+            margin-bottom: 2.5rem;
+            box-shadow: 0 8px 16px rgba(0, 123, 255, 0.2);
+        }
+
+        .hero-content h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+
+        .hero-content p {
+            font-size: 1.3rem;
+            line-height: 1.8;
+            max-width: 800px;
+            margin: 0 auto 2.5rem auto;
+        }
+
+        .product-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+            margin-top: 2rem;
+        }
+
+        /* Features Section */
+        .features-section {
+            padding: 2.5rem 0;
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .features-section h2 {
+            font-size: 2.8rem;
+            margin-bottom: 2.5rem;
+            color: #007bff;
+            font-weight: 600;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            padding: 0 1rem;
+        }
+
+        .feature-item {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            text-align: left;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .feature-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+        }
+
+        .feature-item p {
+            font-size: 1.1rem;
+            line-height: 1.7;
+            color: #555;
+        }
+
+        /* CTA Section */
+        .cta-section {
+            background-color: #e9f5ff;
+            padding: 3.5rem 2rem;
+            text-align: center;
+            border-radius: 10px;
+            margin-bottom: 2.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .cta-section h2 {
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
+            color: #007bff;
+            font-weight: 700;
+        }
+
+        .cta-section p {
+            font-size: 1.2rem;
+            margin-bottom: 2.5rem;
+            color: #6c757d;
+        }
+
+        .email-form {
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .email-form input[type="email"] {
+            padding: 1rem 1.5rem;
+            border: 1px solid #ced4da;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            flex-grow: 1;
+            max-width: 450px;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .email-form input[type="email"]:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+            outline: none;
+        }
+
+        .email-form button {
+            padding: 1rem 2rem;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            font-weight: 600;
+        }
+
+        .email-form button:hover:not(:disabled) {
+            background-color: #218838;
+            transform: translateY(-2px);
+        }
+
+        .email-form button:disabled {
+            background-color: #95d3a8;
+            cursor: not-allowed;
+        }
+
+        .form-message {
+            margin-top: 1.5rem;
+            font-size: 1rem;
+            color: #dc3545; /* Error color */
+            font-weight: 500;
+        }
+
+        /* Footer */
+        .footer-section {
+            text-align: center;
+            padding: 2.5rem;
+            color: #6c757d;
+            font-size: 0.95rem;
+            border-top: 1px solid #e9ecef;
+            margin-top: 2.5rem;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 992px) {
+            .hero-content h1 {
+                font-size: 3rem;
+            }
+            .hero-content p {
+                font-size: 1.2rem;
+            }
+            .features-section h2,
+            .cta-section h2 {
+                font-size: 2.5rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .hero-section {
+                padding: 3rem 1.5rem;
+            }
+            .hero-content h1 {
+                font-size: 2.5rem;
+            }
+            .hero-content p {
+                font-size: 1.1rem;
+            }
+            .features-section h2,
+            .cta-section h2 {
+                font-size: 2.2rem;
+            }
+            .features-grid {
+                grid-template-columns: 1fr; /* Stack features vertically */
+            }
+            .email-form {
+                flex-direction: column; /* Stack input and button */
+                align-items: center;
+            }
+            .email-form input[type="email"] {
+                width: 100%;
+                max-width: 350px; /* Limit width even when stacked */
+            }
+            .email-form button {
+                width: 100%;
+                max-width: 350px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .hero-section {
+                padding: 2.5rem 1rem;
+            }
+            .hero-content h1 {
+                font-size: 2rem;
+            }
+            .hero-content p {
+                font-size: 1rem;
+            }
+            .features-section h2,
+            .cta-section h2 {
+                font-size: 1.8rem;
+            }
+            .cta-section p {
+                font-size: 1rem;
+            }
+            .email-form input[type="email"],
+            .email-form button {
+                padding: 0.8rem 1rem;
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"
+         data-product-info='{
+             "title": "Awesome Product",
+             "headline": "Unlock Your Potential with Our Revolutionary Product!",
+             "description": "Experience unparalleled efficiency and innovation. Our product is designed to streamline your workflow and elevate your results.",
+             "imageUrl": "https://via.placeholder.com/800x450/007bff/ffffff?text=Product+Showcase",
+             "imageAlt": "Product Showcase Image",
+             "features": [
+                 "Seamless Integration with Existing Tools",
+                 "Intuitive User Interface for Easy Adoption",
+                 "Robust Security Features to Protect Your Data",
+                 "24/7 Customer Support for Uninterrupted Service",
+                 "Scalable Solutions for Growing Businesses"
+             ]
+         }'
+         data-api-endpoint="https://api.example.com/lead-capture">
+    </div>
+
+    <!-- React and Babel for JSX/TSX Transpilation -->
+    <script src="https://unpkg.com/react/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel" data-presets="es2015,react,typescript">
+        // IMPORTANT: This script block uses 'text/babel' and 'data-presets="typescript"'
+        // to simulate TypeScript compilation directly in the browser.
+        // For production, a proper build setup (e.g., Webpack/Vite with ts-loader)
+        // would compile TypeScript to JavaScript beforehand.
+
+        const { useState } = React;
+
+        // Define interfaces for props and content data
+        interface ProductInfoContent {
+            title: string;
+            headline: string;
+            description: string;
+            imageUrl: string;
+            imageAlt: string;
+            features: string[];
+        }
+
+        interface LandingPageProps {
+            product_info_content: ProductInfoContent;
+            backend_api_endpoint: string;
+        }
+
+        const LandingPage: React.FC<LandingPageProps> = ({ product_info_content, backend_api_endpoint }) => {
+            const [email, setEmail] = useState<string>('');
+            const [message, setMessage] = useState<string>('');
+            const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+            const handleSubmit = async (event: React.FormEvent) => {
+                event.preventDefault();
+                setMessage('');
+                setIsSubmitting(true);
+
+                try {
+                    // Simulate API call
+                    // In a real application, this would send data to backend_api_endpoint
+                    const response = await fetch(backend_api_endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ email }),
+                    });
+
+                    if (response.ok) {
+                        setMessage('Thank you for subscribing!');
+                        setEmail('');
+                    } else {
+                        // Attempt to parse error message from response
+                        const errorData = await response.json().catch(() => ({ message: 'Server error' }));
+                        setMessage(`Submission failed: ${errorData.message || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    setMessage(`An error occurred: ${(error as Error).message}`);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            return (
+                <div className="landing-page">
+                    <header className="hero-section">
+                        <div className="hero-content">
+                            <h1>{product_info_content.headline}</h1>
+                            <p>{product_info_content.description}</p>
+                            <img src={product_info_content.imageUrl} alt={product_info_content.imageAlt} className="product-image" />
+                        </div>
+                    </header>
+
+                    <section className="features-section">
+                        <h2>Key Features</h2>
+                        <div className="features-grid">
+                            {product_info_content.features.map((feature, index) => (
+                                <div key={index} className="feature-item">
+                                    <p>{feature}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className="cta-section">
+                        <h2>Stay Updated!</h2>
+                        <p>Enter your email to receive exclusive updates and offers.</p>
+                        <form onSubmit={handleSubmit} className="email-form">
+                            <input
+                                type="email"
+                                placeholder="Your email address"
+                                value={email}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+                                required
+                                disabled={isSubmitting}
+                            />
+                            <button type="submit" disabled={isSubmitting}>
+                                {isSubmitting ? 'Submitting...' : 'Subscribe'}
+                            </button>
+                        </form>
+                        {message && <p className="form-message">{message}</p>}
+                    </section>
+
+                    <footer className="footer-section">
+                        <p>&copy; {new Date().getFullYear()} {product_info_content.title}. All rights reserved.</p>
+                    </footer>
+                </div>
+            );
+        };
+
+        // --- Dynamic Input Handling for ReactDOM.render ---
+        const rootElement = document.getElementById('root');
+
+        if (rootElement) {
+            // Retrieve inputs dynamically from data attributes on the root element
+            const productInfoString = rootElement.dataset.productInfo;
+            const apiEndpoint = rootElement.dataset.apiEndpoint;
+
+            let productInfo: ProductInfoContent = {
+                title: "Default Product",
+                headline: "Welcome to Our Product!",
+                description: "A simple landing page for your amazing product.",
+                imageUrl: "https://via.placeholder.com/800x450/cccccc/000000?text=Placeholder+Image",
+                imageAlt: "Placeholder Product Image",
+                features: ["Feature 1", "Feature 2", "Feature 3"]
+            };
+
+            if (productInfoString) {
+                try {
+                    productInfo = JSON.parse(productInfoString);
+                } catch (e) {
+                    console.error("Failed to parse product_info_content from data attribute:", e);
+                }
+            }
+
+            const backendApiEndpoint = apiEndpoint || 'https://api.example.com/default-lead-capture';
+
+            ReactDOM.render(
+                <LandingPage
+                    product_info_content={productInfo}
+                    backend_api_endpoint={backendApiEndpoint}
+                />,
+                rootElement
+            );
+        }
+    </script>
+</body>
+</html>
+```

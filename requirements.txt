@@ -30,6 +30,10 @@ copilotkit>=0.1.0
 # Native UI window (optional — falls back to browser if unavailable)
 pywebview>=4.4.1
 
+# AutoGen & Graph Execution
+pyautogen>=0.2.27
+networkx>=3.2.1
+
 # Utilities
 ruff>=0.7.0
 python-dotenv>=1.0.0

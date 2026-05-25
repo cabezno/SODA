@@ -14,7 +14,7 @@ class ModificationPlan:
     requires_regeneration: bool
     regeneration_scope: str
     impact_summary: str
-    # Set when Claude detected ambiguity and the user resolved it
+    # Set when Gemini detected ambiguity and the user resolved it
     clarification_used: str = ""
 
     def to_dict(self) -> dict:
@@ -47,20 +47,20 @@ If the request is clear and unambiguous, set is_ambiguous to false and leave the
 
 
 class GoalInterpreter:
-    def __init__(self, claude_driver, context_builder):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver, context_builder):
         self.builder = context_builder
+        self.gemini = gemini_driver
         # Optional: inject ask_fn to interactively resolve ambiguity.
         # Signature: async ask_fn(question: str, options: list[str]) -> str
         self.ask_fn: Optional[Callable] = None
 
     async def _check_ambiguity(self, user_request: str, arch_summary: str) -> dict:
-        """Ask Claude whether the request is ambiguous. Returns parsed dict."""
+        """Ask Gemini whether the request is ambiguous. Returns parsed dict."""
         msg = (
             f"USER REQUEST:\n{user_request}\n\n"
             f"PROJECT MODULES SUMMARY:\n{arch_summary[:800]}"
         )
-        raw = await self.claude.prompt(_AMBIGUITY_PROMPT, msg)
+        raw = await self.gemini.prompt(_AMBIGUITY_PROMPT, msg)
         try:
             data = json.loads(raw)
         except Exception:
@@ -104,8 +104,8 @@ class GoalInterpreter:
             f"CURRENT ARCHITECTURE:\n{arch_summary}\n\n"
             f"CURRENT BLUEPRINT:\n{blueprint_summary}"
         )
-        payload = self.builder.build_payload("claude", "goal_interpreter", task)
-        raw = await self.claude.prompt(payload["system"], payload["user"])
+        payload = self.builder.build_payload("gemini", "goal_interpreter", task)
+        raw = await self.gemini.prompt(payload["system"], payload["user"])
         plan = self._parse(raw)
         plan.clarification_used = clarification_used
         return plan

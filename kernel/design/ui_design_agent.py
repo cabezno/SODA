@@ -33,6 +33,8 @@ class DesignSpec:
     component_inventory: list[str]         # ["navbar", "sidebar", "data_table", "card_grid", ...]
     css_variables: str                     # complete :root CSS block
     rationale: str                         # why these choices were made
+    mock_data: dict = field(default_factory=dict)           # domain-specific seed data for UI realism
+    component_specs: list = field(default_factory=list)     # [{name, description, visual, tailwind_classes, interactions}]
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -48,6 +50,8 @@ class DesignSpec:
             "component_inventory": self.component_inventory,
             "css_variables": self.css_variables,
             "rationale": self.rationale,
+            "mock_data": self.mock_data,
+            "component_specs": self.component_specs,
             **self.extra,
         }
 
@@ -72,50 +76,50 @@ _FRONTEND_KEYWORDS = {
 
 _DESIGN_SYSTEM_PREFERENCE: dict[str, str] = {
     "dashboard":     "shadcn",
-    "landing":       "tailwind",
+    "landing":       "shadcn", # Upgrade: Shadcn for landing sections too
     "social":        "tailwind",
     "ecommerce":     "shadcn",
-    "blog":          "tailwind",
+    "blog":          "shadcn", # Upgrade: Professional typography
     "developer_tool": "shadcn",
-    "healthcare":    "mui",
+    "healthcare":    "shadcn",
     "fintech":       "shadcn",
-    "generic":       "tailwind",
+    "generic":       "shadcn", # Upgrade: Move away from vanilla
 }
 
 _PALETTES: dict[str, dict] = {
     "dashboard": {
-        "primary": "#6366f1", "primary_dark": "#4f46e5", "primary_light": "#a5b4fc",
-        "secondary": "#64748b", "secondary_dark": "#475569",
-        "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
+        "primary": "#4f46e5", "primary_dark": "#3730a3", "primary_light": "#818cf8",
+        "secondary": "#1e293b", "secondary_dark": "#0f172a",
+        "success": "#10b981", "warning": "#f59e0b", "danger": "#ef4444", "info": "#3b82f6",
     },
     "landing": {
-        "primary": "#3b82f6", "primary_dark": "#2563eb", "primary_light": "#93c5fd",
-        "secondary": "#8b5cf6", "secondary_dark": "#7c3aed",
-        "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
+        "primary": "#000000", "primary_dark": "#171717", "primary_light": "#404040", # Modern tech black
+        "secondary": "#ffffff", "secondary_dark": "#e5e5e5",
+        "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#0ea5e9",
     },
     "social": {
-        "primary": "#f43f5e", "primary_dark": "#e11d48", "primary_light": "#fda4af",
-        "secondary": "#f97316", "secondary_dark": "#ea580c",
+        "primary": "#ec4899", "primary_dark": "#be185d", "primary_light": "#f472b6",
+        "secondary": "#1e293b", "secondary_dark": "#0f172a",
         "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
     },
     "ecommerce": {
-        "primary": "#16a34a", "primary_dark": "#15803d", "primary_light": "#86efac",
+        "primary": "#111827", "primary_dark": "#030712", "primary_light": "#374151",
         "secondary": "#3b82f6", "secondary_dark": "#2563eb",
         "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
     },
     "developer_tool": {
-        "primary": "#14b8a6", "primary_dark": "#0d9488", "primary_light": "#99f6e4",
-        "secondary": "#6366f1", "secondary_dark": "#4f46e5",
-        "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
+        "primary": "#0f172a", "primary_dark": "#020617", "primary_light": "#1e293b",
+        "secondary": "#10b981", "secondary_dark": "#059669",
+        "success": "#10b981", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
     },
     "healthcare": {
-        "primary": "#0ea5e9", "primary_dark": "#0284c7", "primary_light": "#7dd3fc",
-        "secondary": "#10b981", "secondary_dark": "#059669",
+        "primary": "#2563eb", "primary_dark": "#1e40af", "primary_light": "#60a5fa",
+        "secondary": "#f8fafc", "secondary_dark": "#f1f5f9",
         "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
     },
     "fintech": {
-        "primary": "#1d4ed8", "primary_dark": "#1e40af", "primary_light": "#93c5fd",
-        "secondary": "#0891b2", "secondary_dark": "#0e7490",
+        "primary": "#059669", "primary_dark": "#065f46", "primary_light": "#34d399",
+        "secondary": "#111827", "secondary_dark": "#030712",
         "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444", "info": "#06b6d4",
     },
 }
@@ -265,6 +269,8 @@ class UIDesignAgent:
 
     def generate_spec(self, blueprint: dict, architecture: dict) -> DesignSpec:
         """Synchronous heuristic-based spec generation."""
+        from kernel.design.mock_data_generator import MockDataGenerator
+
         project_type = self._detect_project_type(blueprint, architecture)
         layout = self._detect_layout(project_type, architecture)
         dark_mode = self._detect_dark_mode(blueprint, project_type)
@@ -272,6 +278,7 @@ class UIDesignAgent:
         palette = _PALETTES.get(project_type, _PALETTES["generic"])
         component_inventory = self._build_component_inventory(architecture, project_type, layout)
         css_variables = _build_css_variables(palette, dark_mode)
+        mock_data = MockDataGenerator.generate(project_type, blueprint, architecture)
 
         rationale = (
             f"Project type detected as '{project_type}'. "
@@ -302,6 +309,7 @@ class UIDesignAgent:
             component_inventory=component_inventory,
             css_variables=css_variables,
             rationale=rationale,
+            mock_data=mock_data,
         )
 
     async def generate_spec_with_ai(self, blueprint: dict, architecture: dict) -> DesignSpec:
@@ -311,38 +319,77 @@ class UIDesignAgent:
         if not self.ai_caller:
             return base_spec
 
+        _PALETTE_KEYS = {"primary", "primary_dark", "primary_light", "secondary", "secondary_dark",
+                         "success", "warning", "danger", "info"}
+
         system = (
-            "You are a senior UI/UX designer. Given a software project description and "
-            "architecture, output ONLY a valid JSON object with these exact keys: "
-            "\"component_inventory\" (list of strings), \"rationale\" (string), "
-            "\"dark_mode\" (boolean). Do not add markdown, code blocks, or explanation."
+            "You are a senior UI/UX designer. Given a software project, output ONLY a valid JSON object "
+            "(no markdown fences, no explanation, no trailing text) with these exact keys:\n"
+            "\n"
+            "- \"component_inventory\": list[str] — specific UI component names for this exact project\n"
+            "- \"dark_mode\": boolean\n"
+            "- \"rationale\": string — 2-3 sentence design rationale specific to this domain and user base\n"
+            "- \"custom_palette\": object or null — if this domain warrants custom brand colors, provide "
+            "an object with keys: primary, primary_dark, primary_light, secondary, secondary_dark, "
+            "success, warning, danger, info (all hex values). Return null to keep the base palette.\n"
+            "- \"mock_data\": object — realistic domain-specific seed data. 4-6 records per entity. "
+            "Use real-looking names and values — NO 'Test User', NO 'test@test.com', NO 'Item 1'. "
+            "Tailor to the actual domain (e-commerce: real product names+prices; analytics: real metric "
+            "names+values; social: real user profiles+posts; fintech: real transaction descriptions).\n"
+            "- \"component_specs\": list of objects, one per key component. Each object has: "
+            "\"name\" (string), \"description\" (string), \"visual\" (string — describe colors, spacing, "
+            "typography hierarchy, and visual effects like shadows/hover states), "
+            "\"tailwind_classes\" (string — key Tailwind utility classes for the root element), "
+            "\"interactions\" (string — hover, click, transition behaviors).\n"
+            "\n"
+            "Return ONLY the JSON object. No markdown, no code blocks, no explanation before or after."
         )
+
+        modules_summary = [
+            f"{m.get('nombre', '')}: {m.get('descripcion', '')}"
+            for m in architecture.get("modulos", [])[:8]
+        ]
+
         prompt = (
-            f"Project: {blueprint.get('nombre', 'Unknown')}\n"
+            f"Project name: {blueprint.get('nombre', 'Unknown')}\n"
             f"Description: {blueprint.get('descripcion', '')}\n"
             f"Features: {', '.join(blueprint.get('caracteristicas', []))}\n"
-            f"Modules: {', '.join(m.get('nombre', '') for m in architecture.get('modulos', []))}\n\n"
+            f"Architecture modules:\n" + "\n".join(f"  - {m}" for m in modules_summary) + "\n\n"
             f"Base heuristic spec:\n"
-            f"- project_type signals: {blueprint.get('descripcion', '')[:200]}\n"
-            f"- layout: {base_spec.layout_pattern}\n"
-            f"- design_system: {base_spec.design_system}\n\n"
-            "Refine: suggest specific component_inventory items for this exact project, "
-            "correct dark_mode if needed, and write a concise rationale."
+            f"  layout: {base_spec.layout_pattern}\n"
+            f"  design_system: {base_spec.design_system}\n"
+            f"  dark_mode: {base_spec.dark_mode}\n\n"
+            "Generate the full JSON. Prioritize domain specificity and visual quality over generic patterns."
         )
 
         try:
             raw = await self.ai_caller(prompt, system)
-            # Strip markdown fences if present
-            raw = re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()
+            # Strip any markdown fences
+            raw = re.sub(r"```(?:json)?\s*", "", raw).strip().strip("`").strip()
+            # Trim any trailing content after the closing brace
+            last_brace = raw.rfind("}")
+            if last_brace != -1:
+                raw = raw[:last_brace + 1]
             ai_data = json.loads(raw)
 
             if "component_inventory" in ai_data and isinstance(ai_data["component_inventory"], list):
                 base_spec.component_inventory = ai_data["component_inventory"]
-            if "rationale" in ai_data:
+            if "rationale" in ai_data and isinstance(ai_data["rationale"], str):
                 base_spec.rationale = ai_data["rationale"]
             if "dark_mode" in ai_data and isinstance(ai_data["dark_mode"], bool):
                 base_spec.dark_mode = ai_data["dark_mode"]
-                base_spec.css_variables = _build_css_variables(base_spec.color_palette, base_spec.dark_mode)
+            if "custom_palette" in ai_data and isinstance(ai_data.get("custom_palette"), dict):
+                palette = ai_data["custom_palette"]
+                if _PALETTE_KEYS.issubset(palette.keys()):
+                    base_spec.color_palette = palette
+            if "mock_data" in ai_data and isinstance(ai_data["mock_data"], dict):
+                base_spec.mock_data = ai_data["mock_data"]
+            if "component_specs" in ai_data and isinstance(ai_data["component_specs"], list):
+                base_spec.component_specs = ai_data["component_specs"]
+
+            # Always rebuild CSS variables (palette may have been updated)
+            base_spec.css_variables = _build_css_variables(base_spec.color_palette, base_spec.dark_mode)
+
         except Exception as exc:
             logger.warning("UIDesignAgent AI enhancement failed, using heuristic spec: %s", exc)
 
@@ -362,6 +409,7 @@ class UIDesignAgent:
             return None
         try:
             data = json.loads(spec_path.read_text(encoding="utf-8"))
+            known = set(DesignSpec.__dataclass_fields__.keys())
             return DesignSpec(
                 design_system=data.get("design_system", "tailwind"),
                 color_palette=data.get("color_palette", {}),
@@ -374,8 +422,11 @@ class UIDesignAgent:
                 component_inventory=data.get("component_inventory", []),
                 css_variables=data.get("css_variables", ""),
                 rationale=data.get("rationale", ""),
-                extra={k: v for k, v in data.items() if k not in DesignSpec.__dataclass_fields__},
+                mock_data=data.get("mock_data", {}),
+                component_specs=data.get("component_specs", []),
+                extra={k: v for k, v in data.items() if k not in known},
             )
         except Exception as exc:
             logger.warning("UIDesignAgent: failed to load design_spec.json: %s", exc)
             return None
+

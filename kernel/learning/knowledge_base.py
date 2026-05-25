@@ -30,7 +30,7 @@ Pattern record schema (in JSON files):
   "example_input": "...",   # optional: task summary or input context
   "example_output": "...",  # code snippet or architecture snippet
   "quality": 0.9,           # 0-1, manually set or inferred from validation
-  "provider": "claude",     # who generated this (for escalation cases)
+  "provider": "gemini",     # who generated this (for escalation cases)
   "hits": 0,                # how many times this pattern was surfaced
   "_ts": "2026-01-01T..."
 }
@@ -267,7 +267,7 @@ class KnowledgeBase:
                     "description": f"Caso real — {r.get('filepath', '')}",
                     "failure_pattern": r.get("qwen_last_error", ""),
                     "solution_snippet": r.get("cloud_response_snippet", ""),
-                    "provider": r.get("cloud_provider", "claude"),
+                    "provider": r.get("cloud_provider", "gemini"),
                 }
                 for r in raw
                 if _normalize_lang(r.get("language", "")) == lang
@@ -319,7 +319,7 @@ class KnowledgeBase:
                 description=f"Auto-sintetizado de {r.get('filepath', 'unknown')} — proyecto {r.get('project_id', '')}",
                 context_hint=r.get("task_summary", "")[:200],
                 example_output=r.get("response_snippet", ""),
-                quality=0.8 if r.get("provider") in ("claude", "gemini") else 0.65,
+                quality=0.8 if r.get("provider") in ("gemini", "gemini") else 0.65,
                 provider=r.get("provider", "unknown"),
             )
             added += 1

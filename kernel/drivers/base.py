@@ -19,6 +19,7 @@ class DriverResponse:
     model_used: str
     cost_usd: float
     error_code: Optional[str] = None
+    reasoning_content: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -67,6 +68,7 @@ class BaseDriver(ABC):
         model_used: Optional[str] = None,
         tokens_input: Optional[int] = None,
         tokens_output: Optional[int] = None,
+        reasoning_content: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> DriverResponse:
         in_tokens = tokens_input if tokens_input is not None else self._estimate_tokens(system_prompt + "\n" + user_message)
@@ -95,5 +97,6 @@ class BaseDriver(ABC):
             model_used=model,
             cost_usd=cost_usd,
             error_code=error_code,
+            reasoning_content=reasoning_content,
             metadata=metadata or {},
         )

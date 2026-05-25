@@ -172,8 +172,8 @@
             _cyMode = mode;
             document.getElementById('btn-mode-modules').classList.toggle('active', mode === 'modules');
             document.getElementById('btn-mode-files').classList.toggle('active', mode === 'files');
-            if (mode === 'modules' && _cyLevels) {
-                _cyRenderModules(_cyLevels, currentProjectId);
+            if (mode === 'modules' && (_cyLevels || currentProjectId)) {
+                _cyRenderModules(_cyLevels || [], currentProjectId);
             } else if (mode === 'files') {
                 _cyRenderFiles(currentProjectId);
             }
@@ -1010,8 +1010,8 @@
 
             // Event types that are handled visually — no plain log line needed
             const _SILENT_LOG = new Set(['AI_WORKING','AI_ERROR','FILE_GENERATED','MODULE_START',
-                'MODULE_DONE','PHASE_START','START','WISDOM','ENV_CHECK','COPILOT_SUGGESTION',
-                'COPILOT_APPLIED','COPILOT_REJECTED','USER_QUESTION','OPEN_FILE']);
+                'MODULE_DONE','WISDOM','ENV_CHECK','COPILOT_SUGGESTION',
+                'COPILOT_APPLIED','COPILOT_REJECTED','USER_QUESTION','QUESTION_ANSWERED','OPEN_FILE']);
 
             ws.onmessage = (event) => {
                 const payload = JSON.parse(event.data);
@@ -1055,6 +1055,10 @@
                             window._sodaTTS.speak(data.question || msg);
                         }
                         log(`[?] ${data.question || msg}`, 'CHECKPOINT');
+                        break;
+
+                    case 'QUESTION_ANSWERED':
+                        hideQuestion();
                         break;
 
                     case 'PHASE_START': {
@@ -1336,8 +1340,11 @@
         // --- User question ---
         function showQuestion(text) {
             document.getElementById('question-text').textContent = text;
-            document.getElementById('question-box').classList.add('visible');
-            document.getElementById('answer-input').value = '';
+            const qBox = document.getElementById('question-box');
+            if (!qBox.classList.contains('visible')) {
+                document.getElementById('answer-input').value = '';
+            }
+            qBox.classList.add('visible');
             document.getElementById('answer-btn').disabled = false;
             setTimeout(() => document.getElementById('answer-input').focus(), 50);
         }
@@ -1359,7 +1366,7 @@
                 const res = await fetch('/api/answer', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({answer: text}),
+                    body: JSON.stringify({answer: text, project_id: currentProjectId}),
                 });
                 if (res.ok) {
                     log(`Tu respuesta: ${text}`, 'LOG');
@@ -1654,23 +1661,26 @@
         setInterval(updateTokens, 3000);
 
         // --- AI Status pills ---
-        const _AI_PILL_MAP = { qwen: 'pill-qwen', claude: 'pill-claude', gemini: 'pill-gemini' };
+        const _AI_PILL_MAP = { qwen: 'pill-qwen', claude: 'pill-claude', gemini: 'pill-gemini', deepseek: 'pill-deepseek' };
         async function updateAiStatus() {
             try {
                 const data = await fetch('/api/ai/status').then(r => r.json());
-                for (const [key, status] of Object.entries(data)) {
+                for (const [key, obj] of Object.entries(data)) {
                     const el = document.getElementById(_AI_PILL_MAP[key]);
                     if (!el) continue;
                     const ai = el.dataset.ai;
+                    const statusStr = obj.ok ? 'ok' : (key === 'qwen' ? 'offline' : 'unconfigured');
+                    
                     // Don't overwrite 'working' or 'error' states set by live events
                     if (el.classList.contains('working')) continue;
-                    if (el.classList.contains('error') && status === 'ok') {
-                        // recovery confirmed by poll — restore
+                    if (el.classList.contains('error') && statusStr === 'ok') {
+                        // recovery confirmed by poll
                     } else if (el.classList.contains('error')) continue;
-                    el.className = `ai-pill ${status} ${ai}`;
+                    
+                    el.className = `ai-pill ${statusStr} ${ai}`;
                     const tips = { ok: 'Disponible', unconfigured: 'Sin clave API', offline: 'Offline / No responde', error: 'Error' };
-                    el.title = `${ai}: ${tips[status] || status}`;
-                    if (key === 'qwen') _setOllamaBtn(status === 'offline' || status === 'error');
+                    el.title = `${ai}: ${tips[statusStr] || statusStr}`;
+                    if (key === 'qwen') _setOllamaBtn(statusStr === 'offline' || statusStr === 'error');
                 }
             } catch(e) {}
         }
@@ -1787,6 +1797,7 @@
                 loadProjectFiles(last.project_id);
                 loadGoalTree(last.project_id);
                 recursosInit();
+                _cyRenderModules([], last.project_id); // pre-load module graph
             }
         }).catch(() => {});
 
@@ -2357,6 +2368,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 let _openAnalysis = null;
+let _openAnswers  = {};
 let _openSelectedAction = null;
 const _OPEN_NAME_RE = /^[a-zA-Z0-9_\-]{1,60}$/;
 
@@ -2409,6 +2421,7 @@ async function openAnalyze() {
     panel.classList.remove('visible');
     analyzeBtn.disabled = true;
     _openAnalysis = null;
+    _openAnswers  = {};
     _openSelectedAction = null;
 
     try {
@@ -2497,6 +2510,40 @@ function _openRenderAnalysis(a) {
     if (nameInput && !nameInput.value) nameInput.value = suggested.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 60);
 
     document.getElementById('open-intent-section').style.display = 'flex';
+
+    // Render AI-generated questions if present
+    _openRenderQuestions(a.questions || []);
+}
+
+function _openRenderQuestions(questions) {
+    const panel = document.getElementById('open-questions-panel');
+    const list  = document.getElementById('open-questions-list');
+    if (!panel || !list) return;
+
+    if (!questions || questions.length === 0) {
+        panel.classList.remove('visible');
+        list.innerHTML = '';
+        return;
+    }
+
+    list.innerHTML = questions.map((q, i) => {
+        const opts = (q.options || []).map(opt =>
+            `<button class="open-question-opt" onclick="openSelectAnswer('${escapeHtml(q.id || 'q'+i)}', this, '${escapeHtml(opt)}')">${escapeHtml(opt)}</button>`
+        ).join('');
+        return `<div class="open-question-item" data-qid="${escapeHtml(q.id || 'q'+i)}">
+            <div class="open-question-text">${escapeHtml(q.question)}</div>
+            <div class="open-question-opts">${opts}</div>
+        </div>`;
+    }).join('');
+    panel.classList.add('visible');
+}
+
+function openSelectAnswer(qid, btn, answer) {
+    _openAnswers[qid] = answer;
+    // Toggle selected state within this question
+    const item = btn.closest('.open-question-item');
+    if (item) item.querySelectorAll('.open-question-opt').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
 }
 
 function openSelectAction(actionId) {
@@ -2533,6 +2580,7 @@ async function openLaunch() {
             body: JSON.stringify({
                 path, action, intent, project_name: name,
                 analysis: _openAnalysis || {},
+                answers: _openAnswers || {},
                 target_language: targetLang,
             }),
         });
@@ -2763,3 +2811,18 @@ async function recursosApplyAll() {
         btn.innerHTML = '<i class="fa fa-magic"></i> Aplicar al proyecto';
     }
 }
+
+async function setGeminiModel(model) {
+  try {
+    await fetch("/api/models/gemini", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({model})});
+  } catch(e) { console.error(e); }
+}
+async function loadGeminiModel() {
+  try {
+    const r = await fetch("/api/models/gemini");
+    const d = await r.json();
+    const s = document.getElementById("gemini-model-select");
+    if(s) s.value = d.current;
+  } catch(e) { console.error(e); }
+}
+document.addEventListener("DOMContentLoaded", loadGeminiModel);

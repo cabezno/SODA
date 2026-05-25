@@ -98,7 +98,7 @@ class ResourceMonitor:
             return "qwen2.5-coder:7b", "GPU_LOW"
         if stats["ram_free_gb"] > 16:
             return "qwen2.5-coder:7b", "CPU_OFFLOAD"
-        return "claude-sonnet", "CLOUD_ESCALATION"
+        return "gemini-sonnet", "CLOUD_ESCALATION"
 
 if __name__ == "__main__":
     # Test

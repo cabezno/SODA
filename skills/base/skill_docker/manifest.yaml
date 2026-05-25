@@ -1,0 +1,16 @@
+name: skill_docker
+category: infrastructure
+description: Docker Compose patterns for local development — used by the Integration Layer (Layer 6) to generate docker-compose.yml
+applies_to_roles:
+  code_generator:
+    load_level: summary
+  global_architect:
+    load_level: summary
+activation_keywords:
+  - docker
+  - container
+  - compose
+  - deployment
+  - containerize
+  - microservice
+version: "1.0"

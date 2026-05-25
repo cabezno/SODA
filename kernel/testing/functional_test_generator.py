@@ -23,12 +23,10 @@ class FunctionalTestGenerator:
 
     def __init__(
         self,
-        claude_driver,
         gemini_driver=None,
         context_builder=None,
         notify_fn: Optional[Callable] = None,
     ):
-        self.claude = claude_driver
         self.gemini = gemini_driver
         self.builder = context_builder
         self._notify = notify_fn or (lambda *a, **kw: None)
@@ -61,20 +59,20 @@ class FunctionalTestGenerator:
 
         content: str | None = None
 
-        # Try Gemini first (better at following HTTP patterns), then Claude
-        for driver, provider in [(self.gemini, "gemini"), (self.claude, "claude")]:
+        # Try Gemini first (better at following HTTP patterns), then Gemini
+        for driver, provider in [(self.gemini, "gemini"), (self.ollama, "ollama")]:
             if driver is None:
                 continue
             try:
                 if self.builder:
                     payload = self.builder.build_payload(provider, "functional_test_engineer", task)
-                    if provider == "claude":
+                    if provider == "gemini":
                         raw = await driver.prompt(payload.get("system", ""), payload["user"])
                     else:
                         result = await driver.call(payload.get("system", ""), payload["user"])
                         raw = result.content if hasattr(result, "content") else str(result)
                 else:
-                    if provider == "claude":
+                    if provider == "gemini":
                         raw = await driver.prompt("", task)
                     else:
                         result = await driver.call("", task)

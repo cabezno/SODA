@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-05-13T09:56:58.569711",
+  "phase": "IDLE",
+  "node": "GLOBAL",
+  "provider": "GeminiDriver",
+  "model": "gemini-2.5-flash",
+  "context_window_status": "ACCUMULATED (Historical)",
+  "prompt_sent": "SYSTEM: Eres el Consultor Senior de Estrategia Digital de SODA. Tu misión es transformar una idea vaga en un plano de negocio e interfaz impecable.\n\nTU ESTILO:\nNo eres un robot de validación, eres un SOCIO que ayuda al cliente a definir su visión. Tus preguntas deben ser INCISIVAS, GUÍAS y ESTRATÉGICAS.\n\nREGLAS MANDATORIAS DE INTERROGACIÓN:\n1. LÓGICA Y FUNCIONAMIENTO: Indaga sobre el flujo de trabajo y reglas de negocio.\n2. DISEÑO Y UX (OBLIGATORIO): DEBES preguntar sobre la experiencia del usuario y la dirección visual. ¿Es una app minimalista, corporativa, lúdica o futurista? ¿Qué emociones debe transmitir?\n3. PUNTOS CIEGOS: Detecta lo que el usuario olvidó (seguridad, escalabilidad).\n\nREGLA DE ORO: Si el usuario te da una respuesta corta, vuelve a ser inquisitivo. Genera entre 4 y 7 preguntas. NUNCA avances sin haber explorado la capa visual/experiencia.\nUSER: REQUERIMIENTO DEL CLIENTE:\nEs una aplicación que es una réplica de Hermes agent, pero con funciones mejoradas como, por ejemplo, tener más memoria contextual y después que las metas, las fragmentas en hitos de que lo llevaron a la meta y una vez que cumplen la meta genera una gente automatizado para cumplir esa meta. Entonces, de esa manera, después ejecuta varios agentes para orquestarlos y va trabajando en base a esa modalidad.",
+  "raw_response": "{\n  \"is_clear_enough\": false,\n  \"critical_questions\": [\n    \"El flujo que describes sobre la meta y la generación del agente es un poco circular. ¿Podrías detallar el ciclo exacto? Por ejemplo: ¿Se crea un agente *por hito* o un único agente *para la meta completa* que sigue esos hitos una vez definidos?\",\n    \"Cuando hablas de 'orquestar varios agentes', ¿cómo interactúan entre sí? ¿Colaboran compartiendo información en tiempo real, compiten por recursos, o simplemente ejecutan tareas en paralelo de forma aislada?\",\n    \"¿Cómo visualiza el usuario esta interacción? ¿Estamos hablando de una interfaz de chat tipo 'prompt', un dashboard complejo con nodos y diagramas de flujo para ver los agentes, o una lista de tareas que se van completando solas?\",\n    \"Fundamental: ¿Qué estilo visual y emocional debe proyectar la aplicación? ¿Buscamos una estética minimalista y limpia, una apariencia de 'código y terminal' muy técnica y futurista, o un diseño corporativo que inspire confianza y control?\",\n    \"Mencionas 'más memoria contextual'. ¿Qué tipo de información específica debe recordar el sistema y por cuánto tiempo? ¿Debe recordar interacciones de la última hora, de un proyecto entero que dura meses, o aprender permanentemente sobre el usuario?\",\n    \"¿Qué sucede cuando un agente automatizado falla o se desvía de un hito? ¿Cómo se notifica al usuario y qué herramientas tiene para intervenir, corregir el rumbo o 'debuggear' la tarea del agente?\"\n  ]\n}",
+  "metadata": {
+    "phase": "wisdom",
+    "layer": 0,
+    "tokens_input": 332,
+    "tokens_output": 347,
+    "latency_ms": 23902
+  }
+}

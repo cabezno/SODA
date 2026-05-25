@@ -1,0 +1,64 @@
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+
+class DataSource {
+public:
+    std::string id;
+    std::string type; // "web_link" or "local_file"
+    std::string path_or_url;
+
+    DataSource(const std::string& id, const std::string& type, const std::string& path_or_url)
+        : id(id), type(type), path_or_url(path_or_url) {}
+};
+
+class RAGDataSourceManager {
+public:
+    void addDataSource(const std::string& id, const std::string& type, const std::string& path_or_url) {
+        dataSources.emplace_back(id, type, path_or_url);
+    }
+
+    void editDataSource(const std::string& id, const std::string& new_path_or_url) {
+        for (auto& dataSource : dataSources) {
+            if (dataSource.id == id) {
+                dataSource.path_or_url = new_path_or_url;
+                break;
+            }
+        }
+    }
+
+    void removeDataSource(const std::string& id) {
+        auto it = std::remove_if(dataSources.begin(), dataSources.end(),
+                                [id](const DataSource& dataSource) { return dataSource.id == id; });
+        if (it != dataSources.end()) {
+            dataSources.erase(it);
+        }
+    }
+
+    const std::vector<DataSource>& getUserConfiguredRAGSources() const {
+        return dataSources;
+    }
+
+private:
+    std::vector<DataSource> dataSources;
+};
+
+int main() {
+    RAGDataSourceManager manager;
+
+    // Example usage
+    manager.addDataSource("1", "web_link", "https://example.com");
+    manager.addDataSource("2", "local_file", "/path/to/file.txt");
+
+    manager.editDataSource("1", "https://new-example.com");
+    manager.removeDataSource("2");
+
+    const auto& ragSources = manager.getUserConfiguredRAGSources();
+    for (const auto& source : ragSources) {
+        std::cout << "ID: " << source.id << ", Type: " << source.type << ", Path/URL: " << source.path_or_url << std::endl;
+    }
+
+    return 0;
+}
+```

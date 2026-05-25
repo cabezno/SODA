@@ -1,0 +1,47 @@
+```javascript
+const { google } = require('googleapis');
+const crypto = require('crypto');
+
+// Define Google OAuth client credentials (replace these with actual values)
+const CLIENT_ID = 'YOUR_CLIENT_ID';
+const CLIENT_SECRET = 'YOUR_CLIENT_SECRET';
+const REDIRECT_URI = 'YOUR_REDIRECT_URI';
+const AUDIENCE = 'YOUR_AUDIENCE';
+
+async function authenticateWithGoogle(googleAuthToken) {
+  // Step 1: Verify the Google OAuth token
+  try {
+    const ticket = await google.oauth2Client.verifyIdToken({
+      idToken: googleAuthToken,
+      audience: CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+    if (!payload || !payload.sub) {
+      throw new Error('Invalid Google Auth Token');
+    }
+
+    // Step 2: Generate an internal authentication token
+    const internal_auth_token = crypto.randomBytes(32).toString('hex');
+
+    // Step 3: Generate a user profile ID
+    const user_profile_id = payload.sub;
+
+    return {
+      internal_auth_token,
+      user_profile_id
+    };
+  } catch (error) {
+    console.error('Error authenticating with Google:', error);
+    throw new Error('Failed to authenticate with Google');
+  }
+}
+
+// Example usage:
+authenticateWithGoogle('example_google_auth_token')
+  .then(result => {
+    console.log('Authentication successful:', result);
+  })
+  .catch(error => {
+    console.error('Authentication failed:', error);
+  });
+```

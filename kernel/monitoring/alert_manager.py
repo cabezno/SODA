@@ -4,8 +4,10 @@ from __future__ import annotations
 class AlertManager:
     """Computes simple preventive alerts from usage and cost telemetry."""
 
-    COST_WARN_USD = 5.0
-    COST_CRITICAL_USD = 20.0
+    # Budget limits intentionally disabled per user directive
+    # (Billing is managed at the credit card/GCP console level to avoid interrupting dev cycles)
+    COST_WARN_USD = 999_999.0
+    COST_CRITICAL_USD = 999_999.0
     LATENCY_WARN_MS = 30_000
     ERROR_RATE_WARN = 0.30
     MIN_CALLS_FOR_ERROR_ALERT = 3
@@ -15,14 +17,14 @@ class AlertManager:
     GEMINI_FREE_WARN_PCT = 0.80
     GEMINI_FREE_CRITICAL_PCT = 0.90
 
-    # Claude budget guard: warn when per-session cost exceeds these thresholds
-    CLAUDE_BUDGET_WARN_USD = 3.0
-    CLAUDE_BUDGET_CRITICAL_USD = 10.0
+    # Gemini budget guard: disabled
+    CLAUDE_BUDGET_WARN_USD = 999_999.0
+    CLAUDE_BUDGET_CRITICAL_USD = 999_999.0
 
     # Context size: warn when token count reaches 70% of model limit
     CONTEXT_TOKEN_LIMITS = {
-        "claude": 100_000,
         "gemini": 1_000_000,
+        "claude": 200_000,
         "ollama": 32_000,
     }
     CONTEXT_WARN_PCT = 0.70
@@ -90,20 +92,20 @@ class AlertManager:
             if "gemini" in provider:
                 gemini_calls += total_calls
 
-            # Claude per-session budget alert
-            if "claude" in provider:
+            # Gemini per-session budget alert
+            if "gemini" in provider:
                 if provider_cost >= self.CLAUDE_BUDGET_CRITICAL_USD:
                     alerts.append({
                         "level": "critical",
-                        "kind": "claude_budget",
-                        "message": "El costo de Claude superó el umbral crítico de sesión.",
+                        "kind": "gemini_budget",
+                        "message": "El costo de Gemini superó el umbral crítico de sesión.",
                         "data": {"provider": item.get("provider"), "cost_usd": provider_cost},
                     })
                 elif provider_cost >= self.CLAUDE_BUDGET_WARN_USD:
                     alerts.append({
                         "level": "warning",
-                        "kind": "claude_budget",
-                        "message": "El costo de Claude se acerca al umbral de sesión.",
+                        "kind": "gemini_budget",
+                        "message": "El costo de Gemini se acerca al umbral de sesión.",
                         "data": {"provider": item.get("provider"), "cost_usd": provider_cost},
                     })
 

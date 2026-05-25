@@ -8,6 +8,20 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet" />
     <title>BlackMagicBox Soda</title>
+    <script>
+      window.onerror = function(msg, url, lineNo, columnNo, error) {
+        var errObj = document.createElement('div');
+        errObj.style.color = 'red';
+        errObj.style.background = 'white';
+        errObj.style.padding = '10px';
+        errObj.style.position = 'absolute';
+        errObj.style.zIndex = 9999;
+        errObj.style.top = '0';
+        errObj.innerHTML = 'JS Error: ' + msg + '<br>Line: ' + lineNo + '<br>Col: ' + columnNo + '<br>Error: ' + (error ? error.stack : '');
+        document.body.appendChild(errObj);
+        return false;
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>

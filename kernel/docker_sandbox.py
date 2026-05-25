@@ -36,10 +36,131 @@ class DockerSandbox:
     @property
     def available(self) -> bool:
         """Alias para compatibilidad con el resto de SODA."""
+        return self._ensure_connected(autostart=False)
+
+    def run_project(
+        self,
+        source_dir: Path,
+        install_cmd: Optional[list[str]] = None,
+        run_cmd: Optional[list[str]] = None,
+        timeout: int = 60,
+    ) -> SandboxResult:
+        """
+        Ejecuta un proyecto completo dentro del sandbox.
+        Copia todo el directorio source_dir al contenedor.
+        """
+        if not self._ensure_connected(autostart=True):
+            return SandboxResult(
+                success=False,
+                stdout="",
+                stderr="DOCKER_UNAVAILABLE: Docker is required for SODA Zero-Host Policy but could not be started.",
+                exit_code=-1,
+                duration_ms=0
+            )
+
+        container = None
+        start = time.time()
         try:
-            return self._ensure_connected(autostart=False)
-        except:
-            return False
+            # 1. Preparar comandos
+            full_cmd = []
+            if install_cmd:
+                full_cmd.append(" ".join(map(str, install_cmd)))
+            if run_cmd:
+                full_cmd.append(" ".join(map(str, run_cmd)))
+            
+            shell_script = " && ".join(full_cmd) if full_cmd else "ls -R"
+
+            # 2. Crear contenedor (aislado: network_mode=none)
+            container = self.client.containers.create(
+                image=self.IMAGE,
+                command=["sh", "-c", shell_script],
+                working_dir="/app",
+                mem_limit=self.MEMORY_LIMIT,
+                cpu_quota=self.CPU_QUOTA,
+                network_mode="none",
+                detach=True,
+            )
+
+            # 3. Empaquetar y copiar archivos
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+                for root, _, files in os.walk(source_dir):
+                    for file in files:
+                        full_path = Path(root) / file
+                        rel_path = full_path.relative_to(source_dir)
+                        tar.add(full_path, arcname=str(rel_path).replace("\\", "/"))
+            
+            tar_stream.seek(0)
+            container.put_archive("/app", tar_stream.read())
+
+            # 4. Iniciar y esperar
+            container.start()
+            
+            # Si hay un run_cmd, esperamos un poco para ver si se mantiene vivo
+            # o si falla inmediatamente.
+            status = container.wait(timeout=timeout)
+            duration_ms = int((time.time() - start) * 1000)
+            
+            logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
+            exit_code = status.get("StatusCode", -1)
+
+            # [NUEVO] PASO 4 del Plan Meta-Evolutivo: Sincronización Docker-to-Host
+            # Extraer archivos modificados del contenedor de vuelta al host antes de destruir
+            if exit_code == 0:
+                self._extract_container_dir(container, "/app", source_dir)
+
+            return SandboxResult(
+                success=exit_code == 0,
+                stdout=logs,
+                stderr="",
+                exit_code=exit_code,
+                duration_ms=duration_ms,
+            )
+
+        except Exception as e:
+            duration_ms = int((time.time() - start) * 1000)
+            return SandboxResult(
+                success=False,
+                stdout="",
+                stderr=str(e),
+                exit_code=-1,
+                duration_ms=duration_ms,
+            )
+        finally:
+            if container:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+
+    def _extract_container_dir(self, container, container_path: str, host_path: Path):
+        """Extrae un directorio del contenedor en formato tar y lo descomprime en el host."""
+        import shutil
+        try:
+            st_model, _ = container.get_archive(container_path)
+            tar_data = io.BytesIO()
+            for chunk in st_model:
+                tar_data.write(chunk)
+            tar_data.seek(0)
+
+            # Usamos un directorio temporal para la extracción intermedia
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with tarfile.open(fileobj=tar_data, mode="r") as tar:
+                    tar.extractall(path=tmp_dir)
+                
+                # Mover el contenido de 'tmp_dir/app' a host_path
+                temp_app_path = Path(tmp_dir) / "app"
+                if temp_app_path.exists():
+                    for item in temp_app_path.iterdir():
+                        dest_item = host_path / item.name
+                        if dest_item.exists():
+                            if dest_item.is_dir():
+                                shutil.rmtree(dest_item)
+                            else:
+                                dest_item.unlink()
+                        shutil.move(str(item), str(host_path))
+        except Exception as e:
+            print(f"  [DockerSandbox] Error al sincronizar datos del contenedor: {e}")
 
     @staticmethod
     def project_needs_docker(workspace: str) -> bool:
@@ -90,7 +211,7 @@ class DockerSandbox:
             print(f"  [DockerSandbox] No se pudo invocar Docker Desktop: {e}")
             return False
 
-        for _ in range(15):
+        for _ in range(40):
             time.sleep(3)
             try:
                 self.client = self._connect()
@@ -100,7 +221,7 @@ class DockerSandbox:
             except Exception:
                 pass
 
-        print("  [DockerSandbox] Timeout esperando a Docker.")
+        print("  [DockerSandbox] Timeout esperando a Docker (120s).")
         return False
 
 

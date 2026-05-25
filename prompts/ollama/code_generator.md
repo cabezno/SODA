@@ -27,6 +27,7 @@ Generás el archivo tal como debe quedar en disco.
 
 Guía por extensión:
 - `.js` → JavaScript (CommonJS o ESModules según contexto)
+- `.mjs` → ESModules (OBLIGATORIO usar `export default` y `import`, NUNCA `module.exports`)
 - `.ts` → TypeScript estricto
 - `.jsx` / `.tsx` → React/JSX o TSX puro
 - `.vue` → Componente Vue 3 Single File Component
@@ -50,6 +51,18 @@ Guía por extensión:
 - `*.csproj` → .NET project file XML
 - `go.mod` → Go module file
 - `package.json` → JSON con nombre, version, scripts, dependencies reales de npm. NUNCA incluir aliases de TypeScript (`@/algo`) ni sub-paths como dependencias (`next/link`, `next-auth/jwt`, etc.) — son imports internos, no paquetes npm.
+
+## Next.js y ESModules
+
+Si el archivo es `next.config.mjs`, DEBES usar sintaxis ESM:
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  /* config options here */
+};
+export default nextConfig;
+```
+NUNCA uses `module.exports` en archivos `.mjs`.
 
 ## Contratos e interfaces tipadas
 
@@ -77,7 +90,7 @@ Si el JSON contiene el campo `especificacion_diseno`, seguí esas instrucciones 
 - Construí los componentes del inventario listado.
 - Si dice `dark_mode: true`, implementá soporte completo de modo oscuro.
 - Aplicá el design system indicado (tailwind, shadcn, mui, vanilla) con sus convenciones.
-Este campo define el visual del proyecto — no lo ignorés ni lo substituyás con tus propias preferencias.
+Este campo define el visual del proyecto — no lo ignorés ni lo substituyás con tus propias preferencias.    
 
 ## Reglas generales
 
@@ -87,4 +100,4 @@ Este campo define el visual del proyecto — no lo ignorés ni lo substituyás c
 - Código limpio, funcional y completo — debe poder compilarse/ejecutarse directamente.
 - Incluí todos los imports/requires necesarios.
 - Si el stack usa un framework específico, seguí sus convenciones.
-- Si el JSON contiene el campo `requisitos_usuario`, seguilo AL PIE DE LA LETRA. No agregues ni omitas funcionalidades respecto a lo que el usuario describió originalmente.
+- Si el JSON contiene el campo `requisitos_usuario`, seguilo AL PIE DE LA LETRA. No agregués ni omitás funcionalidades respecto a lo que el usuario describió originalmente.

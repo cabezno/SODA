@@ -1,0 +1,11 @@
+<CODE>
+class FibonacciPresenter:
+    def __init__(self, fibonacci_sequence):
+        self.fibonacci_sequence = fibonacci_sequence
+
+    def present(self):
+        formatted_result = "Serie de Fibonacci:\n"
+        for number in self.fibonacci_sequence:
+            formatted_result += f"- {number}\n"
+        return formatted_result
+</CODE>

@@ -1,0 +1,25 @@
+Para implementar el contrato proporcionado, necesitamos una función que tome una secuencia de números de Fibonacci y la formatee en un formato legible. Vamos a crear una función `format_fibonacci_sequence` que reciba una lista de enteros (la secuencia de Fibonacci) y devuelva una cadena de texto con los números separados por comas y un espacio.
+
+Aquí está el código:
+
+```python
+def format_fibonacci_sequence(fibonacci_sequence):
+    """
+    Formatea la secuencia de Fibonacci en un formato legible.
+
+    Args:
+        fibonacci_sequence (List of Integers): Secuencia de n\u00fameros de Fibonacci resultante
+
+    Returns:
+        String: Serie de Fibonacci presentada en un formato legible
+    """
+    # Convertimos cada número de la secuencia a una cadena
+    sequence_str = [str(num) for num in fibonacci_sequence]
+    
+    # Unimos los números con comas y un espacio
+    formatted_result = ", ".join(sequence_str)
+    
+    return formatted_result
+```
+
+Este código toma una lista de enteros como entrada, la convierte en una lista de cadenas, y luego une estas cadenas con comas y espacios para producir el resultado final legible.

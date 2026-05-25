@@ -18,7 +18,6 @@ class ExecutionPlan:
     order: List[str]          # flat topological order
     parallelizable: bool      # True if any level has >1 module
     broken_edges: List[Tuple[str, str]] = field(default_factory=list)  # removed cycles
-    injected_edges: List[Tuple[str, str]] = field(default_factory=list)  # synthetic layer deps
 
 
 class DependencyGraph:
@@ -27,18 +26,15 @@ class DependencyGraph:
     Accepts two initialization modes:
       - Legacy (architecture.json): list of dicts with 'nombre'/'dependencias'
       - V2 (master_contract.json modules): list of dicts with 'id'/'depends_on'
-        and optional 'layer' field for hierarchy enforcement
 
-    Cycles are broken automatically. Frontend→backend synthetic edges are
-    injected when the architect forgets to declare the dependency.
+    Cycles are broken automatically. 
+    Rely strictly on explicit dependencies (master_contract.json).
     Python-only — no AI.
     """
 
     def __init__(self, modulos: List[dict]):
         self.graph: Dict[str, List[str]] = {}
         self.reverse: Dict[str, Set[str]] = {}
-        # Store layer metadata for hierarchy enforcement
-        self._layers: Dict[str, str] = {}
 
         # Detect schema version: v2 uses 'id'/'depends_on', legacy uses 'nombre'/'dependencias'
         uses_v2 = any("id" in m and "depends_on" in m for m in modulos if isinstance(m, dict))
@@ -57,7 +53,6 @@ class DependencyGraph:
             mod_id = m["id"]
             deps = [d for d in m.get("depends_on", []) if d in valid_ids and d != mod_id]
             self.graph[mod_id] = deps
-            self._layers[mod_id] = m.get("layer", "")
             if mod_id not in self.reverse:
                 self.reverse[mod_id] = set()
             for dep in deps:
@@ -74,7 +69,6 @@ class DependencyGraph:
             nombre = m["nombre"]
             deps = [d for d in m.get("dependencias", []) if d in valid_names and d != nombre]
             self.graph[nombre] = deps
-            self._layers[nombre] = m.get("layer", "")
             if nombre not in self.reverse:
                 self.reverse[nombre] = set()
             for dep in deps:
@@ -122,47 +116,6 @@ class DependencyGraph:
         return removed
 
     # ------------------------------------------------------------------
-    # Layer hierarchy enforcement
-    # ------------------------------------------------------------------
-
-    def _enforce_layer_hierarchy(self) -> List[Tuple[str, str]]:
-        """Force presentation modules to depend on application/domain modules.
-
-        This is a deterministic safety net for when the architect forgets to
-        declare the frontend → backend dependency. Without it, frontend and
-        backend land on the same DAG level and are generated simultaneously —
-        the frontend cannot see the backend's typed interfaces.
-
-        Returns the list of synthetic edges injected.
-        """
-        injected: List[Tuple[str, str]] = []
-
-        frontend_ids = [
-            node for node in self.graph
-            if self._layers.get(node) in _FRONTEND_LAYERS
-            or any(kw in node.lower() for kw in _FRONTEND_ID_KEYWORDS)
-        ]
-        backend_ids = [
-            node for node in self.graph
-            if self._layers.get(node) in _BACKEND_LAYERS
-            or any(kw in node.lower() for kw in _BACKEND_ID_KEYWORDS)
-        ]
-
-        for front_id in frontend_ids:
-            for back_id in backend_ids:
-                if back_id in self.graph.get(front_id, []):
-                    continue  # already declared
-                if front_id in self.graph.get(back_id, []):
-                    continue  # would create a cycle — skip
-                # Inject synthetic dependency
-                self.graph[front_id].append(back_id)
-                if front_id not in self.reverse.get(back_id, set()):
-                    self.reverse.setdefault(back_id, set()).add(front_id)
-                injected.append((front_id, back_id))
-
-        return injected
-
-    # ------------------------------------------------------------------
     # Execution plan
     # ------------------------------------------------------------------
 
@@ -171,11 +124,9 @@ class DependencyGraph:
 
         Order of operations:
           1. Break cycles (graph stays acyclic)
-          2. Enforce layer hierarchy (frontend always after backend)
-          3. Kahn topological sort with level grouping
+          2. Kahn topological sort with level grouping
         """
         broken = self.break_cycles()
-        injected = self._enforce_layer_hierarchy()
 
         in_degree: Dict[str, int] = {node: len(deps) for node, deps in self.graph.items()}
         queue = deque(sorted(n for n, d in in_degree.items() if d == 0))
@@ -204,7 +155,6 @@ class DependencyGraph:
             order=order,
             parallelizable=any(len(lvl) > 1 for lvl in levels),
             broken_edges=broken,
-            injected_edges=injected,
         )
 
     def summary(self) -> str:
@@ -212,8 +162,6 @@ class DependencyGraph:
         lines = ["Plan de ejecución:"]
         if plan.broken_edges:
             lines.append(f"  [WARN] Ciclos rotos automáticamente: {plan.broken_edges}")
-        if plan.injected_edges:
-            lines.append(f"  [INFO] Dependencias sintéticas inyectadas: {plan.injected_edges}")
         for i, level in enumerate(plan.levels):
             tag = f"[paralelo x{len(level)}]" if len(level) > 1 else "[secuencial]"
             lines.append(f"  Nivel {i}: {tag} {' | '.join(level)}")

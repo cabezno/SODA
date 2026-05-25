@@ -1,0 +1,61 @@
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+
+// Define the DataSource structure
+struct DataSource {
+    std::string type; // "web_link" or "local_file"
+    std::string path_or_url;
+};
+
+class RAGDataSourceManager {
+public:
+    void addDataSource(const std::string& type, const std::string& path_or_url) {
+        DataSource ds = {type, path_or_url};
+        dataSources.push_back(ds);
+    }
+
+    void editDataSource(int index, const std::string& type, const std::string& path_or_url) {
+        if (index >= 0 && index < dataSources.size()) {
+            dataSources[index] = {type, path_or_url};
+        }
+    }
+
+    void removeDataSource(int index) {
+        if (index >= 0 && index < dataSources.size()) {
+            dataSources.erase(dataSources.begin() + index);
+        }
+    }
+
+    std::vector<DataSource> getUserConfiguredRAGSources() const {
+        return dataSources;
+    }
+
+private:
+    std::vector<DataSource> dataSources;
+};
+
+// Example usage
+int main() {
+    RAGDataSourceManager manager;
+
+    // Adding data sources
+    manager.addDataSource("web_link", "https://example.com");
+    manager.addDataSource("local_file", "/path/to/file.txt");
+
+    // Editing a data source
+    manager.editDataSource(0, "web_link", "https://updated-example.com");
+
+    // Removing a data source
+    manager.removeDataSource(1);
+
+    // Retrieving user-configured RAG sources
+    std::vector<DataSource> sources = manager.getUserConfiguredRAGSources();
+    for (const auto& ds : sources) {
+        std::cout << "Type: " << ds.type << ", Path/URL: " << ds.path_or_url << std::endl;
+    }
+
+    return 0;
+}
+```

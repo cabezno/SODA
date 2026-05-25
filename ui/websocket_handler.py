@@ -8,6 +8,14 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
+        # Single-user desktop app: close stale connections before adding new one
+        stale = list(self.active_connections)
+        self.active_connections.clear()
+        for conn in stale:
+            try:
+                await conn.close(code=1001)
+            except Exception:
+                pass
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):

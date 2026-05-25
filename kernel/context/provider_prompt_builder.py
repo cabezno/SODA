@@ -7,6 +7,7 @@ Why this matters:
     formatting, clear role definition, and explicit output format instructions.
   - Gemini (Google): Works best with markdown-structured instructions, explicit
     JSON schemas, step-by-step directives, and clear persona assignment.
+  - DeepSeek: Similar to Gemini — markdown structure, explicit JSON schemas.
   - Qwen/Ollama: Benefits from simple direct instructions, few-shot examples,
     strong format enforcement ("ONLY output code"), and shorter system prompts.
 
@@ -17,6 +18,7 @@ system string ready for the provider's API.
 Reference docs:
   - Claude: https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering
   - Gemini: https://ai.google.dev/gemini-api/docs/system-instructions
+  - DeepSeek: https://api-docs.deepseek.com
   - Ollama/Qwen: General instruction-following LLM best practices
 """
 from __future__ import annotations
@@ -65,7 +67,7 @@ def build_claude_system(
     profile_context: Optional[str] = None,
     learning_context: Optional[str] = None,
 ) -> str:
-    """Build Claude-optimized system prompt using XML structured tags."""
+    """Build Claude-optimized system prompt using XML structured tags (Constitutional AI style)."""
     skills_block = _CLAUDE_SKILLS_BLOCK.format(skills=skills_context) if skills_context else ""
     profile_block = _CLAUDE_PROFILE_BLOCK.format(profile=profile_context) if profile_context else ""
     learning_block = _CLAUDE_LEARNING_BLOCK.format(learning=learning_context) if learning_context else ""
@@ -194,8 +196,15 @@ def build_provider_system(
     learning_context: Optional[str] = None,
     few_shot_examples: Optional[str] = None,
 ) -> str:
-    """Route to the correct provider-specific builder."""
-    if provider in ("claude", "claude_haiku"):
+    """Route to the correct provider-specific builder.
+
+    Claude  → XML tags (<role>, <behavior>, <active_skills>)
+    Gemini  → Markdown structure (# headers, ## sections)
+    DeepSeek → Markdown structure (same as Gemini — responds best to it)
+    Ollama  → Minimal + direct + few-shot examples
+    """
+    if provider in ("claude", "claude-3-5-sonnet-latest", "claude-sonnet-4-6",
+                    "claude-opus-4-6", "claude-haiku-4-5-20251001"):
         return build_claude_system(
             role=role,
             base_instruction=base_instruction,
@@ -203,7 +212,7 @@ def build_provider_system(
             profile_context=profile_context,
             learning_context=learning_context,
         )
-    elif provider == "gemini":
+    elif provider in ("gemini", "gemini_haiku", "deepseek", "deepseek-chat"):
         return build_gemini_system(
             role=role,
             base_instruction=base_instruction,

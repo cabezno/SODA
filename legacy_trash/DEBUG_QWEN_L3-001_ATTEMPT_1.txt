@@ -1,0 +1,51 @@
+```python
+# models.py
+
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy.orm import relationship, backref
+from sqlalchemy.ext.declarative import declarative_base
+import datetime
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String(50), unique=True, nullable=False)
+    email = Column(String(120), unique=True, nullable=False)
+
+class SoftwareProduct(Base):
+    __tablename__ = 'software_products'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(255))
+    creator_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    creator = relationship("User", backref=backref('created_products', lazy=True))
+
+class LicenseModel(Base):
+    __tablename__ = 'license_models'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(255))
+    product_id = Column(Integer, ForeignKey('software_products.id'), nullable=False)
+    software_product = relationship("SoftwareProduct", backref=backref('license_models', lazy=True))
+
+class Order(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    product_id = Column(Integer, ForeignKey('software_products.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    user = relationship("User", backref=backref('orders', lazy=True))
+    software_product = relationship("SoftwareProduct", backref=backref('orders', lazy=True))
+
+class LicenseKey(Base):
+    __tablename__ = 'license_keys'
+    id = Column(Integer, primary_key=True)
+    key = Column(String(255), unique=True, nullable=False)
+    model_id = Column(Integer, ForeignKey('license_models.id'), nullable=False)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
+    used_at = Column(DateTime)
+    license_model = relationship("LicenseModel", backref=backref('license_keys', lazy=True))
+    order = relationship("Order", backref=backref('license_keys', lazy=True))
+```

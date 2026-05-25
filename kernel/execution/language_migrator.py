@@ -72,8 +72,8 @@ Reglas:
 Código en {target_lang}:"""
 
     try:
-        from kernel.drivers.claude_driver import ClaudeDriver
-        return await ClaudeDriver().prompt(
+        from kernel.drivers.gemini_driver import GeminiDriver
+        return await GeminiDriver().prompt(
             f"Sos un experto en migración de código de {source_lang} a {target_lang}. "
             "Respondés SOLO con código, sin explicaciones.",
             prompt,
@@ -114,8 +114,8 @@ Respondé SOLO con JSON:
 }}"""
 
     try:
-        from kernel.drivers.claude_driver import ClaudeDriver
-        raw = await ClaudeDriver().prompt(
+        from kernel.drivers.gemini_driver import GeminiDriver
+        raw = await GeminiDriver().prompt(
             "Sos un experto en migraciones de proyectos entre lenguajes de programación. "
             "Respondés SOLO con JSON válido.",
             prompt,
@@ -247,8 +247,8 @@ class LanguageMigrator:
                     f"propósito: {project_purpose}. Descripción: {nf_desc}. "
                     f"Respondé SOLO con el código completo."
                 )
-                from kernel.drivers.claude_driver import ClaudeDriver
-                code = await ClaudeDriver().prompt("Generás código limpio y completo.", gen_prompt)
+                from kernel.drivers.gemini_driver import GeminiDriver
+                code = await GeminiDriver().prompt("Generás código limpio y completo.", gen_prompt)
                 out = target_dir / nf_path
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text(code, encoding="utf-8")

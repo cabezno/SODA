@@ -3,12 +3,12 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import subprocess
 
-class ClaudeAuditorHandler(FileSystemEventHandler):
+class GeminiAuditorHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if event.is_directory:
             return
         
-        print(f"🔍 SODA Auditor: Detectado cambio de Claude en {event.src_path}")
+        print(f"🔍 SODA Auditor: Detectado cambio de Gemini en {event.src_path}")
         self.audit_code(event.src_path)
 
     def audit_code(self, file_path):
@@ -21,7 +21,7 @@ class ClaudeAuditorHandler(FileSystemEventHandler):
             return
 
         if res.returncode != 0:
-            print(f"❌ ERROR DE AUDITORÍA: Claude ha introducido un error de sintaxis en {file_path}")
+            print(f"❌ ERROR DE AUDITORÍA: Gemini ha introducido un error de sintaxis en {file_path}")
             print(f"Detalle: {res.stderr.decode()}")
         else:
             print(f"✅ AUDITORÍA PASADA: {file_path} es estructuralmente correcto.")
@@ -33,12 +33,12 @@ class ClaudeAuditorHandler(FileSystemEventHandler):
         # Lógica para enviar el contenido del archivo a la API de Ollama/Qwen
 
 if __name__ == "__main__":
-    path = "./workspace" # La carpeta donde Claude está editando
-    event_handler = ClaudeAuditorHandler()
+    path = "./workspace" # La carpeta donde Gemini está editando
+    event_handler = GeminiAuditorHandler()
     observer = Observer()
     observer.schedule(event_handler, path, recursive=True)
     observer.start()
-    print(f"🛡️ Vigía SODA activo. Auditando el trabajo de Claude en {path}...")
+    print(f"🛡️ Vigía SODA activo. Auditando el trabajo de Gemini en {path}...")
     try:
         while True:
             time.sleep(1)

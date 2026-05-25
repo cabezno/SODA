@@ -14,7 +14,7 @@ activation_keywords:
 - nestjs
 - nest
 - nest.js
-- @nestjs
+- "@nestjs"
 - nestjs api
 - nestjs backend
 - nestjs module

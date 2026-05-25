@@ -35,9 +35,13 @@ class GoalIntegrityValidator:
         issues: List[str] = []
         declared: dict[str, str] = {}  # goal_id -> relative path
 
+        _SKIP_DIRS = {"tests", "test", "__pycache__", ".venv", "node_modules"}
         source_dir = workspace / "source"
         if source_dir.exists():
             for py_file in sorted(source_dir.rglob("*.py")):
+                # Skip test directories and auto-generated test files
+                if any(part in _SKIP_DIRS for part in py_file.parts):
+                    continue
                 rel = py_file.relative_to(workspace).as_posix()
                 try:
                     content = py_file.read_text(encoding="utf-8", errors="replace")

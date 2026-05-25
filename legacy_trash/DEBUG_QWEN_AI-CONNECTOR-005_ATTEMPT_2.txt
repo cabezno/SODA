@@ -1,0 +1,87 @@
+```cpp
+#include <iostream>
+#include <string>
+#include <curl/curl.h>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+struct AiApiCredentials {
+    std::string api_key;
+    std::string endpoint;
+};
+
+struct PromptPayload {
+    std::string prompt;
+    int max_tokens;
+};
+
+class AiModelConnector {
+public:
+    AiModelConnector(const AiApiCredentials& credentials) : credentials_(credentials) {}
+
+    json callAiModel(const PromptPayload& payload, std::string& error) {
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            error = "Failed to initialize libcurl";
+            return nullptr;
+        }
+
+        // Construct JSON payload
+        json request_json = {{"prompt", payload.prompt}, {"max_tokens", payload.max_tokens}};
+        std::string request_body = request_json.dump();
+
+        // Set up the HTTP POST request
+        curl_easy_setopt(curl, CURLOPT_URL, credentials_.endpoint.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_body.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers_);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_);
+
+        // Perform the HTTP POST request
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            error = "HTTP Request failed: " + std::string(curl_easy_strerror(res));
+            return nullptr;
+        }
+
+        // Clean up libcurl
+        curl_easy_cleanup(curl);
+
+        // Parse the JSON response
+        try {
+            return json::parse(response_);
+        } catch (const json::parse_error& e) {
+            error = "Failed to parse API response: " + std::string(e.what());
+            return nullptr;
+        }
+    }
+
+private:
+    AiApiCredentials credentials_;
+    json headers_ = {{"Content-Type", "application/json"}, {"Authorization", "Bearer " + credentials_.api_key}};
+    std::string response_;
+
+    static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+        ((std::string*)userp)->append((char*)contents, size * nmemb);
+        return size * nmemb;
+    }
+};
+
+int main() {
+    AiApiCredentials credentials = {"your_api_key", "https://api.openai.com/v1/engines/davinci-codex/completions"};
+    PromptPayload payload = {"Translate the following English text to French: 'Hello, how are you?'", 50};
+
+    AiModelConnector connector(credentials);
+    std::string error;
+    json response = connector.callAiModel(payload, error);
+
+    if (response.is_null()) {
+        std::cerr << "API call failed: " << error << std::endl;
+    } else {
+        std::cout << "API response:" << std::endl << response.dump(4) << std::endl;
+    }
+
+    return 0;
+}
+```

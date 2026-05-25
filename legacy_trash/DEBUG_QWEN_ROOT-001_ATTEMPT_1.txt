@@ -1,0 +1,77 @@
+```cpp
+#include <windows.h>
+#include <queue>
+#include <string>
+
+struct TimerDisplayData {
+    std::wstring time;
+    std::wstring state;
+};
+
+class CountdownTimerUI {
+public:
+    CountdownTimerUI() : hWnd(nullptr), timerThreadID(0) {}
+
+    void Initialize(HINSTANCE hInstance, const std::wstring& windowTitle) {
+        WNDCLASSEX wcex = { sizeof(WNDCLASSEX),
+                             CS_HREDRAW | CS_VREDRAW,
+                             WndProc,
+                             0,
+                             0,
+                             hInstance,
+                             nullptr,
+                             LoadCursor(nullptr, IDC_ARROW),
+                             (HBRUSH)(COLOR_WINDOW + 1),
+                             nullptr,
+                             L"CountdownTimer",
+                             nullptr };
+        RegisterClassEx(&wcex);
+
+        hWnd = CreateWindow(L"CountdownTimer", windowTitle.c_str(), WS_OVERLAPPEDWINDOW,
+                            CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+        ShowWindow(hWnd, SW_SHOWNORMAL);
+        UpdateWindow(hWnd);
+
+        timerThreadID = (DWORD)_beginthreadex(nullptr, 0, TimerThreadFunction, this, 0, nullptr);
+    }
+
+    void SetTimerDisplay(const TimerDisplayData& data) {
+        PostMessage(hWnd, WM_SET_TIMER_DATA, 0, reinterpret_cast<LPARAM>(&data));
+    }
+
+    std::queue<std::wstring>& GetControlEvents() {
+        return userControlEventsQueue;
+    }
+
+private:
+    static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+        switch (message) {
+            case WM_SET_TIMER_DATA: {
+                TimerDisplayData* data = reinterpret_cast<TimerDisplayData*>(lParam);
+                // Update UI elements with new timer data
+                break;
+            }
+            case WM_DESTROY:
+                PostQuitMessage(0);
+                break;
+            default:
+                return DefWindowProc(hWnd, message, wParam, lParam);
+        }
+        return 0;
+    }
+
+    static unsigned __stdcall TimerThreadFunction(void* param) {
+        CountdownTimerUI* ui = reinterpret_cast<CountdownTimerUI*>(param);
+        MSG msg;
+        while (GetMessage(&msg, nullptr, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        return 0;
+    }
+
+    HWND hWnd;
+    DWORD timerThreadID;
+    std::queue<std::wstring> userControlEventsQueue;
+};
+```

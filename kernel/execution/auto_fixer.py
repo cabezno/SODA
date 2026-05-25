@@ -5,7 +5,7 @@ Ladder:
   Attempt 1 — normal run (deps already installed)
   Attempt 2 — re-install deps + alternative runtime detection
   Attempt 3 — stack-aware fallback commands (venv activation, npm ci, etc.)
-  If all fail → invoke Claude CLI (claude) as autonomous subprocess to diagnose
+  If all fail → invoke Gemini CLI (gemini) as autonomous subprocess to diagnose
                and fix, then generate _soda_execution_notes.md as a precedent.
 """
 from __future__ import annotations
@@ -106,9 +106,9 @@ def _build_attempt3_commands(
     return install_command, run_command
 
 
-# ── Claude CLI fallback ────────────────────────────────────────────────────────
+# ── Gemini CLI fallback ────────────────────────────────────────────────────────
 
-def _invoke_claude_cli(
+def _invoke_gemini_cli(
     project_id: str,
     project_workspace: Path,
     run_command: str,
@@ -117,13 +117,13 @@ def _invoke_claude_cli(
     notify: NotifyFn,
 ) -> Optional[str]:
     """
-    Spawn Claude CLI as an autonomous subprocess to diagnose and fix execution.
+    Spawn Gemini CLI as an autonomous subprocess to diagnose and fix execution.
     Grants full tool access (dangerouslySkipPermissions).
-    Returns the notes text if Claude produced them, else None.
+    Returns the notes text if Gemini produced them, else None.
     """
-    claude_exe = shutil.which("claude")
-    if not claude_exe:
-        notify("Claude CLI no encontrado en PATH. Instalar con: npm i -g @anthropic-ai/claude-code", "LOG", {})
+    gemini_exe = shutil.which("gemini")
+    if not gemini_exe:
+        notify("Gemini CLI no encontrado en PATH. Instalar con: npm i -g @anthropic-ai/gemini-code", "LOG", {})
         return None
 
     source_dir = project_workspace / "source"
@@ -157,11 +157,11 @@ def _invoke_claude_cli(
            escribir, ejecutar y corregir archivos en este proyecto.
     """).strip()
 
-    notify("Llamando a Claude CLI para diagnóstico autónomo...", "LOG", {"project_id": project_id})
+    notify("Llamando a Gemini CLI para diagnóstico autónomo...", "LOG", {"project_id": project_id})
 
     try:
         result = subprocess.run(
-            [claude_exe, "--dangerouslySkipPermissions", "-p", prompt],
+            [gemini_exe, "--dangerouslySkipPermissions", "-p", prompt],
             cwd=root,
             capture_output=True,
             text=True,
@@ -171,21 +171,21 @@ def _invoke_claude_cli(
             env=os.environ.copy(),
         )
         notify(
-            f"Claude CLI terminó (rc={result.returncode}). "
+            f"Gemini CLI terminó (rc={result.returncode}). "
             f"stdout={result.stdout[:200]}",
             "LOG",
             {"project_id": project_id},
         )
-        # Read notes file if Claude created it
+        # Read notes file if Gemini created it
         notes_path = Path(root) / "_soda_execution_notes.md"
         if notes_path.exists():
             return notes_path.read_text(encoding="utf-8", errors="replace")
         return result.stdout[:500] if result.stdout else None
     except subprocess.TimeoutExpired:
-        notify("Claude CLI timeout (10 min). Operación cancelada.", "LOG", {})
+        notify("Gemini CLI timeout (10 min). Operación cancelada.", "LOG", {})
         return None
     except Exception as e:
-        notify(f"Error al invocar Claude CLI: {e}", "LOG", {})
+        notify(f"Error al invocar Gemini CLI: {e}", "LOG", {})
         return None
 
 
@@ -203,7 +203,7 @@ def _save_notes(project_workspace: Path, notes: str) -> Path:
 class AutoFixer:
     """
     Tries 3 increasingly aggressive execution strategies before falling back
-    to Claude CLI for fully autonomous repair.
+    to Gemini CLI for fully autonomous repair.
     """
 
     def __init__(self, notify_fn: Optional[NotifyFn] = None):
@@ -218,7 +218,7 @@ class AutoFixer:
         install_command: str = "",
     ) -> dict:
         """
-        Execute the 3-attempt ladder + Claude CLI fallback.
+        Execute the 3-attempt ladder + Gemini CLI fallback.
         Returns {success, attempt, pid, url, notes_path, error}.
         """
         source_dir = project_workspace / "source"
@@ -292,14 +292,14 @@ class AutoFixer:
                 )
                 self._notify(f"[AutoFix] Lanzamiento falló en intento {idx}: {result.error[:120]}", "LOG", {})
 
-        # All 3 failed → Claude CLI
+        # All 3 failed → Gemini CLI
         self._notify(
-            "[AutoFix] 3 intentos fallidos. Invocando Claude CLI para reparación autónoma...",
+            "[AutoFix] 3 intentos fallidos. Invocando Gemini CLI para reparación autónoma...",
             "HEALTH_WARN",
             {"project_id": project_id},
         )
         error_summary = ExecutionErrorLog.error_summary_for_ai(project_id, max_errors=5)
-        notes_text = _invoke_claude_cli(
+        notes_text = _invoke_gemini_cli(
             project_id, project_workspace, run_command, install_command,
             error_summary or last_error, self._notify,
         )
@@ -309,7 +309,7 @@ class AutoFixer:
             # Try to parse notes and record as precedent
             self._parse_and_record_notes(project_id, stack, notes_text)
             self._notify(
-                f"[AutoFix] Claude CLI generó notas de ejecución: {notes_path}",
+                f"[AutoFix] Gemini CLI generó notas de ejecución: {notes_path}",
                 "LOG",
                 {"project_id": project_id, "notes_path": str(notes_path)},
             )
@@ -365,7 +365,7 @@ class AutoFixer:
             pass
 
     def _parse_and_record_notes(self, project_id: str, stack: str, notes_text: str) -> None:
-        """Parse _soda_execution_notes.md produced by Claude CLI and save as precedent."""
+        """Parse _soda_execution_notes.md produced by Gemini CLI and save as precedent."""
         run_cmd = install_cmd = notes_str = ""
         for line in notes_text.splitlines():
             line = line.strip()
@@ -383,5 +383,5 @@ class AutoFixer:
                 stack=stack,
                 run_command=run_cmd,
                 install_command=install_cmd,
-                notes=notes_str or "Resuelto por Claude CLI",
+                notes=notes_str or "Resuelto por Gemini CLI",
             )

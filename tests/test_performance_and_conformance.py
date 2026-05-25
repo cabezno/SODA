@@ -249,7 +249,7 @@ class TestConformanceVerifier:
 
         assert f.read_text() == original
 
-    def test_haiku_model_used(self, tmp_path):
+    def test_conformance_model_used(self, tmp_path):
         source = tmp_path / "source"
         source.mkdir()
         (source / "mod.py").write_text("pass")
@@ -261,7 +261,7 @@ class TestConformanceVerifier:
         run(verifier.verify_project(arch, source))
 
         call_kwargs = driver.call.call_args.kwargs
-        assert call_kwargs.get("model") == "claude-haiku-4-5-20251001"
+        assert call_kwargs.get("model") == "gemini-3-flash-preview"
 
     def test_strips_markdown_fences_from_correction(self, tmp_path):
         source = tmp_path / "source"

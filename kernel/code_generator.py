@@ -140,20 +140,93 @@ class CodeGenerator:
 
     @staticmethod
     def _extract_python_interface(code: str) -> str:
-        """Extrae solo la estructura pública (clases y firmas) de un archivo Python."""
+        """Extrae la estructura pública (clases y firmas) usando AST de forma recursiva."""
         import ast
         try:
             tree = ast.parse(code)
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    doc = ast.get_docstring(node)
-                    if doc:
-                        node.body = [ast.Expr(value=ast.Constant(value=doc))]
-                    else:
-                        node.body = [ast.Pass()]
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        doc = ast.get_docstring(node)
+                        node.body = [ast.Expr(value=ast.Constant(value=doc))] if doc else [ast.Pass()]
+                    elif isinstance(node, ast.ClassDef):
+                        # Limpiar métodos internos pero mantener la firma de la clase
+                        for item in node.body:
+                            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                                d = ast.get_docstring(item)
+                                item.body = [ast.Expr(value=ast.Constant(value=d))] if d else [ast.Pass()]
             return ast.unparse(tree)
         except Exception:
-            return code[:1500] + "\n# ... (parse failed, truncated)"
+            return code[:1000] + "\n# ... (AST parse failed)"
+
+    @staticmethod
+    def _extract_js_ts_interface(code: str) -> str:
+        """Heurística para extraer interfaces/clases en JS/TS mediante Regex."""
+        lines = []
+        patterns = [
+            r"export\s+(class|interface|type|const|function|async\s+function)\s+\w+",
+            r"class\s+\w+",
+            r"interface\s+\w+",
+            r"function\s+\w+\s*\(.*?\)"
+        ]
+        for line in code.splitlines():
+            if any(re.search(p, line) for p in patterns):
+                lines.append(line.strip())
+        return "\n".join(lines) if lines else code[:800]
+
+    def verify_relay_to_disk_integrity(self, source_dir: Path, relay_note: str) -> tuple[bool, list[str]]:
+        """
+        [IMP-021] Analiza las notas de relevo en busca de rutas de archivos mencionadas,
+        asegura que existan físicamente en el disco, no estén vacías y sean sintácticamente válidas.
+        """
+        if not relay_note:
+            return True, []
+
+        # Regex corregida por Gemini 3.5: detecta tanto 'archivo.py' como 'carpeta/sub/archivo.py'
+        file_pattern = r'\b([\w\-]+(?:/[\w\-\.]+)*\.[\w]+)\b'
+        mentioned_files = set(re.findall(file_pattern, relay_note))
+
+        missing_or_corrupt = []
+        critical_exts = {".py", ".js", ".ts", ".html", ".css", ".json", ".sql", ".sh"}
+
+        for file_rel_path in mentioned_files:
+            suffix = Path(file_rel_path).suffix.lower()
+            if suffix not in critical_exts:
+                continue
+
+            full_path = source_dir / file_rel_path
+
+            # 1. Validación de Existencia y Tamaño Mínimo
+            if not full_path.exists():
+                missing_or_corrupt.append(f"{file_rel_path} (No encontrado en disco)")
+                continue
+
+            if full_path.stat().st_size < 10:
+                missing_or_corrupt.append(f"{file_rel_path} (Archivo vacío o truncado)")
+                continue
+
+            # 2. Validación de Sintaxis AST para Python (Sugerencia Gemini 3.5)
+            if suffix == ".py":
+                try:
+                    code_content = full_path.read_text(encoding="utf-8", errors="replace")
+                    import ast
+                    ast.parse(code_content)
+                except SyntaxError as se:
+                    missing_or_corrupt.append(f"{file_rel_path} (Error de Sintaxis AST: {se.msg} en línea {se.lineno})")   
+                except Exception as e:
+                    missing_or_corrupt.append(f"{file_rel_path} (Fallo de lectura: {str(e)})")
+
+        if missing_or_corrupt:
+            return False, missing_or_corrupt
+        return True, []
+
+    def _get_compressed_context(self, code: str, filepath: str) -> str:
+        ext = Path(filepath).suffix.lower()
+        if ext in PYTHON_EXTENSIONS:
+            return self._extract_python_interface(code)
+        if ext in {".js", ".jsx", ".ts", ".tsx"}:
+            return self._extract_js_ts_interface(code)
+        return code[:800]
 
     @staticmethod
     def _build_escalation_context(failed_code: str, error_reason: str) -> str:
@@ -657,7 +730,7 @@ class CodeGenerator:
                         {"filepath": filepath, "source": "template"})
             return GeneratedFile(filepath=filepath, content="", goal_id=goal_id, validated=True, attempts=0)
 
-        # PASO 1: compute goal_id/hash directly — they are no longer in the task JSON sent to LLMs
+        # compute goal_id/hash directly
         goal_id = build_file_goal_id(module["nombre"], filepath)
         _gn = build_file_goal_node(module, filepath)
         goal_hash = _gn.hash or _gn.sync_hash()
@@ -668,222 +741,81 @@ class CodeGenerator:
             design_context=design_context, source_dir=source_dir,
             runtime_errors=runtime_errors, master_contract=master_contract,
         )
-        task = self._build_task(**_base_task_kwargs, qwen_attempt=1)
 
         # C — incremental rebuild: skip Python files whose goal_hash matches what's on disk.
-        # Avoids regenerating files that haven't changed between runs (partial failures, modify()).
         if source_dir is not None and ext in PYTHON_EXTENSIONS:
             _existing = source_dir / filepath
             if _existing.exists():
                 try:
                     _cached = _existing.read_text(encoding="utf-8", errors="ignore")
                     if f"# goal_hash: {goal_hash}" in _cached:
-                        print(f"    [SKIP] {filepath} — sin cambios (goal_hash match)")
                         self.notify(f"Saltando {filepath} — sin cambios", "FILE_SKIPPED",
                                     {"filepath": filepath, "goal_hash": goal_hash})
                         return GeneratedFile(filepath, _cached, goal_id, validated=True, attempts=0)
                 except Exception:
-                    pass  # fall through to full generation
-        last_error: Optional[str] = None
-        last_failed_code: str = ""   # PASO 5: code from previous failed attempt
-        last_error_reason: str = ""  # PASO 5: reason it failed
-        response = ""
-        _fail_reason: list[str] = []  # single-element list; populated by _is_good on failure
+                    pass
 
-        def _is_good(resp: str) -> bool:
-            _fail_reason.clear()
-            if not resp or resp.lstrip().startswith("Error") or self._is_driver_error(resp):
-                _fail_reason.append("respuesta vacía o error de driver")
-                return False
-            ok, msg = self._validate_syntax(resp, filepath)
-            if not ok:
-                _fail_reason.append(msg or "error de sintaxis")
-                return False
-            # C: metadata is always post-processed by _prepare_generated_code before _is_good
-            # is called — never reject valid code because of missing metadata.
-            return True
-
+        # 9-level escalation ladder:
+        last_error = ""
+        last_failed_code = ""
+        last_error_reason = ""
+        qwen_errors = []
         qwen_attempt = 0
         gemini_attempt = 0
         claude_attempt = 0
-        qwen_errors: list[str] = []
-        first_cloud_level: Optional[str] = None  # track when we leave Qwen
-        _log_context_injected = False             # inject logs only once per escalation
+        response = ""
+        _log_context_injected = False
 
-        # Resolve stack name for log collection
-        _stack_name = (
-            blueprint.get("stack_sugerido", {}).get("backend", "")
-            or blueprint.get("stack_sugerido", {}).get("frontend", "")
-            or ""
-        ).lower()
+        for attempt_num in range(1, 10):
+            # Decisión de enrutamiento
+            if attempt_num > 1 and last_error:
+                decision = await self._analyze_error_and_decide(filepath, last_error, attempt_num)
+                if decision == "escalate" and attempt_num <= self.MAX_LOCAL_RETRIES:
+                    self.notify(f"Escalado inteligente activado para {filepath} (Error de diseño).", "LOG")
+                    attempt_num = 4 
 
-        # C: Dynamic Model Router — classify before the loop to skip Qwen for complex files
-        _complexity = self._router.classify(filepath, module)
-        _effective_levels = self._router.effective_levels(_complexity, self.ESCALATION_LEVELS)
-        if _complexity != "simple":
-            self.notify(
-                f"Router: {filepath} → {_complexity.upper()}, "
-                f"saltando a {_effective_levels[0].capitalize()} directamente",
-                "LOG",
-                {"filepath": filepath, "complexity": _complexity},
-            )
+            level = self.ESCALATION_LEVELS[attempt_num-1]
+            is_cloud = level in ("gemini", "claude")
 
-        for level_idx, level in enumerate(_effective_levels):
-            attempt_num = level_idx + 1
-            is_cloud = level in ("claude", "gemini")
-
-            # On first cloud escalation, append system logs to error context
+            # On first cloud escalation, append system logs
             if is_cloud and not _log_context_injected:
                 _log_context_injected = True
                 try:
-                    log_snippet = self._log_collector.collect(
-                        stack=_stack_name or "node",
-                        workspace=source_dir,
-                    )
-                    if log_snippet and last_error:
-                        last_error = f"{last_error}\n{log_snippet}"
-                    elif log_snippet:
-                        last_error = log_snippet
-                except Exception as _lc_exc:
-                    print(f"    [log_collector] collect() falló (ignorado): {_lc_exc}")
+                    log_snippet = self._log_collector.collect(stack=blueprint.get("stack_sugerido", {}).get("backend", "python"), workspace=source_dir)
+                    if log_snippet: last_error = f"{last_error}\n{log_snippet}"
+                except: pass
 
             if level == "qwen":
                 qwen_attempt += 1
-                temp = self.QWEN_TEMPERATURES[min(qwen_attempt - 1, len(self.QWEN_TEMPERATURES) - 1)]
-                
-                # Skeletoning solo para archivos Python en el primer intento local
-                if ext in PYTHON_EXTENSIONS and qwen_attempt == 1:
-                    print(f"    [L{attempt_num}/Qwen] {filepath} — intento {qwen_attempt}/3 (Fase 1: Skeleton)")
-                    task_skel = self._build_task(**_base_task_kwargs, qwen_attempt=qwen_attempt, mode="skeleton")
-                    raw_skel = await self._call_ollama(task_skel, filepath, qwen_attempt, last_error, skills_context, profile_context)
-                    
-                    skel_code = self._prepare_generated_code(raw_skel, goal_id, goal_hash, filepath)
-                    ok_skel, msg_skel = self._validate_syntax(skel_code, filepath)
-                    if ok_skel:
-                        print(f"    [L{attempt_num}/Qwen] {filepath} — intento {qwen_attempt}/3 (Fase 2: Logic)")
-                        task_logic = self._build_task(**_base_task_kwargs, qwen_attempt=qwen_attempt, mode="logic", skeleton_code=skel_code)
-                        raw = await self._call_ollama(task_logic, filepath, qwen_attempt, None, skills_context, profile_context)
-                    else:
-                        print(f"    [L{attempt_num}/Qwen] {filepath} — Fase 1 falló sintaxis, abortando Fase 2.")
-                        raw = raw_skel
-                else:
-                    task = self._build_task(**_base_task_kwargs, qwen_attempt=qwen_attempt, mode="full")
-                    print(f"    [L{attempt_num}/Qwen] {filepath} — intento {qwen_attempt}/3 (temp={temp}, mode=full)")
-                    raw = await self._call_ollama(task, filepath, qwen_attempt, last_error, skills_context, profile_context)
-
+                task = self._build_task(**_base_task_kwargs, qwen_attempt=qwen_attempt)
+                raw = await self._call_ollama(task, filepath, qwen_attempt, last_error, skills_context, profile_context)
             elif level == "gemini":
-                if not self.gemini:
-                    last_error = f"L{attempt_num} Gemini no disponible"
-                    continue
-                if first_cloud_level is None:
-                    first_cloud_level = "gemini"
                 gemini_attempt += 1
-                _sc = skills_context if gemini_attempt == 1 else None
-                _pc = profile_context if gemini_attempt == 1 else None
-                # PASO 5: first cloud attempt gets XML escalation context with failed code
-                _ec = (
-                    self._build_escalation_context(last_failed_code, last_error_reason)
-                    if gemini_attempt == 1 and last_failed_code
-                    else last_error
-                )
-                print(f"    [L{attempt_num}/Gemini] {filepath} — intento {gemini_attempt}/3")
-                raw = await self._call_gemini(task, filepath, _ec, _sc, _pc)
-
-            elif level == "claude":
-                if first_cloud_level is None:
-                    first_cloud_level = "claude"
-                claude_attempt += 1
-                _sc = skills_context if claude_attempt == 1 else None
-                _pc = profile_context if claude_attempt == 1 else None
-                # PASO 5: first cloud attempt gets XML escalation context with failed code
-                _ec = (
-                    self._build_escalation_context(last_failed_code, last_error_reason)
-                    if claude_attempt == 1 and last_failed_code
-                    else last_error
-                )
-                print(f"    [L{attempt_num}/Claude] {filepath} — intento {claude_attempt}/3")
-                raw = await self._call_claude(task, filepath, _ec, _sc, _pc)
-
+                task = self._build_task(**_base_task_kwargs, qwen_attempt=1)
+                _ec = self._build_escalation_context(last_failed_code, last_error_reason) if gemini_attempt == 1 and last_failed_code else last_error
+                raw = await self._call_gemini(task, filepath, _ec, skills_context, profile_context)
             else:
-                continue
+                claude_attempt += 1
+                task = self._build_task(**_base_task_kwargs, qwen_attempt=1)
+                _ec = self._build_escalation_context(last_failed_code, last_error_reason) if claude_attempt == 1 and last_failed_code else last_error
+                raw = await self._call_claude(task, filepath, _ec, skills_context, profile_context)
 
             response = self._prepare_generated_code(raw, goal_id, goal_hash, filepath)
-
-            if _is_good(response):
-                print(f"    [OK] {filepath} — OK vía {level} (L{attempt_num})")
-                module_name = module.get("nombre", "")
-                project_id = blueprint.get("project_id", "") or blueprint.get("id", "")
-                framework = " ".join(str(v) for v in blueprint.get("stack_sugerido", {}).values())[:60]
-
-                # Record successful generation for all providers
-                if self.observer is not None:
-                    try:
-                        self.observer.record_code_generation(
-                            provider=level,
-                            filepath=filepath,
-                            task_summary=task[:400],
-                            response_snippet=response[:600],
-                            validated=True,
-                            attempt=attempt_num,
-                            project_id=project_id,
-                            module_name=module_name,
-                            framework=framework,
-                        )
-                        # If this was a cloud escalation, record the escalation case
-                        if is_cloud and qwen_errors:
-                            self.observer.record_escalation(
-                                filepath=filepath,
-                                qwen_attempts=qwen_errors,
-                                cloud_provider=level,
-                                cloud_response_snippet=response[:800],
-                                cloud_validated=True,
-                                failure_reason=qwen_errors[-1][:200] if qwen_errors else "",
-                                project_id=project_id,
-                                module_name=module_name,
-                            )
-                    except Exception as _obs_exc:
-                        print(f"    [observer] record_code_generation error (ignorado): {_obs_exc}")
-
-                if self.tracker is not None:
-                    self.tracker.record_file_generated(
-                        provider=level, level=attempt_num, validated=True
-                    )
+            
+            # Validación
+            is_valid, validation_msg = self._validate_syntax(response, filepath)
+            if is_valid and response and not self._is_driver_error(response):
+                self.notify(f"Archivo {filepath} generado con éxito usando {level} (L{attempt_num})", "SUCCESS")
                 return GeneratedFile(filepath, response, goal_id, validated=True, attempts=attempt_num)
 
-            # A: include rejection reason so the next model knows WHY it failed
-            _reason = _fail_reason[0] if _fail_reason else ""
-            _snippet = response[:800] if response else ""
-            last_failed_code = response  # PASO 5: save full failed code for escalation context
-            last_error_reason = _reason  # PASO 5: save error reason separately
-            last_error = f"{_reason}\n\n{_snippet}" if (_reason and _snippet) else (_reason or _snippet or f"L{attempt_num} vacío")
-            if level == "qwen":
-                qwen_errors.append(last_error[:500])
+            last_error_reason = validation_msg or "respuesta inválida"
+            last_failed_code = response
+            last_error = f"{last_error_reason}\n\n{response[:800]}"
+            if level == "qwen": qwen_errors.append(last_error[:500])
 
-        # All 9 levels failed — notify with full context
-        _all_errors_summary = {
-            "qwen_errors": [e[:300] for e in qwen_errors],
-            "last_response_snippet": (response or "")[:800],
-            "file": filepath,
-            "module": module.get("nombre", ""),
-        }
-        print(f"    [!] {filepath} — 9 niveles fallaron (Qwen×3 → Gemini×3 → Claude×3). Guardando sin validar.")
-        if self._notify_fn:
-            self._notify_fn(
-                f"CRÍTICO: {filepath} — todos los 9 niveles de escalación fallaron. Guardando sin validar.",
-                "HEALTH_WARN",
-                {"phase": "development", **_all_errors_summary},
-            )
-        if self.tracker is not None:
-            self.tracker.record_file_generated(
-                provider="none", level=len(self.ESCALATION_LEVELS), validated=False
-            )
-        return GeneratedFile(
-            filepath,
-            self._prepare_generated_code(response or "", goal_id, goal_hash, filepath),
-            goal_id,
-            validated=False,
-            attempts=len(self.ESCALATION_LEVELS),
-        )
+        # Final failure
+        self.notify(f"CRÍTICO: Fallaron los 9 niveles para {filepath}.", "HEALTH_WARN")
+        return GeneratedFile(filepath, response, goal_id, validated=False, attempts=9)
 
     async def generate_module(
         self, module: dict, blueprint: dict, architecture: dict,

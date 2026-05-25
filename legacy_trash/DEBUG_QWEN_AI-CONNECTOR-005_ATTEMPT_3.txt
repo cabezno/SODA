@@ -1,0 +1,95 @@
+```cpp
+#include <iostream>
+#include <string>
+#include <nlohmann/json.hpp>
+#include <curl/curl.h>
+
+using json = nlohmann::json;
+
+class AiModelConnector {
+public:
+    struct Credentials {
+        std::string api_key;
+        std::string endpoint;
+    };
+
+    AiModelConnector(Credentials credentials)
+        : credentials_(credentials) {
+        // Initialize libcurl
+        curl_global_init(CURL_GLOBAL_ALL);
+    }
+
+    ~AiModelConnector() {
+        // Cleanup libcurl
+        curl_global_cleanup();
+    }
+
+    bool callAiModel(const json& ai_prompt_payload, json& ai_model_response, std::string& api_call_error) {
+        CURL* curl;
+        CURLcode res;
+        struct curl_slist *headers = nullptr;
+
+        curl = curl_easy_init();
+        if(curl) {
+            // Construct the Authorization header
+            headers = curl_slist_append(headers, ("Authorization: Bearer " + credentials_.api_key).c_str());
+
+            // Set the request body
+            std::string post_fields = ai_prompt_payload.dump();
+
+            // Set the options for the curl request
+            curl_easy_setopt(curl, CURLOPT_URL, credentials_.endpoint.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_fields.c_str());
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ai_model_response);
+
+            // Perform the request
+            res = curl_easy_perform(curl);
+
+            // Check for errors
+            if(res != CURLE_OK) {
+                api_call_error = "Curl error: " + std::string(curl_easy_strerror(res));
+            }
+
+            // Cleanup
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
+        } else {
+            api_call_error = "Failed to initialize libcurl";
+            return false;
+        }
+
+        return true;
+    }
+
+private:
+    static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+        ((json*)userp)->append(json::parse((char*)contents));
+        return size * nmemb;
+    }
+
+    Credentials credentials_;
+};
+
+int main() {
+    AiModelConnector::Credentials creds = {"your_api_key", "https://api.openai.com/v1/engines/davinci-codex/completions"};
+    AiModelConnector ai_connector(creds);
+
+    json prompt_payload = {
+        {"prompt", "Translate the following text to French:\nHello, how are you?"},
+        {"max_tokens", 60}
+    };
+
+    json response;
+    std::string error;
+
+    if (ai_connector.callAiModel(prompt_payload, response, error)) {
+        std::cout << "AI Model Response: " << response.dump(4) << std::endl;
+    } else {
+        std::cerr << "API Call Error: " << error << std::endl;
+    }
+
+    return 0;
+}
+```

@@ -1,0 +1,16 @@
+```python
+from typing import Dict
+
+class UserAuthenticationModule:
+    def __init__(self):
+        self.auth_api_endpoints = {
+            'register': {'path': '/api/auth/register', 'method': 'POST'},
+            'login_email': {'path': '/api/auth/login-email', 'method': 'POST'},
+            'login_google': {'path': '/api/auth/login-google', 'method': 'POST'},
+            'logout': {'path': '/api/auth/logout', 'method': 'POST'},
+            'profile': {'path': '/api/auth/profile', 'method': 'GET'}
+        }
+
+    def get_auth_api_endpoints(self) -> Dict[str, Dict[str, str]]:
+        return self.auth_api_endpoints
+```

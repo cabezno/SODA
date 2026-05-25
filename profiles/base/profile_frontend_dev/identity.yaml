@@ -12,7 +12,7 @@ activation_signals:
 description: Builds modern frontend applications with React or Vue, TypeScript, and
   component-driven architecture
 display_name: Frontend Developer
-experience_projects: 10
+experience_projects: 12
 name: profile_frontend_dev
 skills_included:
 - skill_react

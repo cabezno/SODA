@@ -1,0 +1,73 @@
+```cpp
+#include <iostream>
+#include <string>
+#include <vector>
+
+// Define the Correction and Event structures
+struct Correction {
+    std::string suggestion;
+    size_t start;
+    size_t end;
+};
+
+struct Event {
+    std::string type;
+    std::map<std::string, std::string> data;
+};
+
+class RichTextEditor {
+public:
+    // Constructor to initialize the editor with initial text content
+    RichTextEditor(const std::string& initial_text_content) : current_editor_text(initial_text_content) {}
+
+    // Method to apply correction suggestions to the text
+    void applyCorrections(const std::vector<Correction>& corrections) {
+        for (const auto& correction : corrections) {
+            if (correction.start < current_editor_text.length() && correction.end <= current_editor_text.length()) {
+                current_editor_text.replace(correction.start, correction.end - correction.start, correction.suggestion);
+            }
+        }
+    }
+
+    // Method to get the current text content from the editor
+    std::string getCurrentText() const {
+        return current_editor_text;
+    }
+
+    // Method to handle user editing events
+    void handleEvent(const Event& event) {
+        user_editing_events.push_back(event);
+    }
+
+    // Method to get the collection of user editing events
+    std::vector<Event> getUserEditingEvents() const {
+        return user_editing_events;
+    }
+
+private:
+    std::string current_editor_text;
+    std::vector<Event> user_editing_events;
+};
+
+int main() {
+    // Example usage of the RichTextEditor class
+    RichTextEditor editor("Hello, World!");
+    editor.applyCorrections({{"World", 7, 12}});
+    std::cout << "Current Text: " << editor.getCurrentText() << std::endl;
+
+    Event selectionEvent = {"text_selection", {{"start", "7"}, {"end", "12"}}};
+    editor.handleEvent(selectionEvent);
+    auto events = editor.getUserEditingEvents();
+    for (const auto& event : events) {
+        std::cout << "Event Type: " << event.type << ", Data: ";
+        for (const auto& pair : event.data) {
+            std::cout << pair.first << "=" << pair.second << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    return 0;
+}
+```
+
+This C++ code implements the `RichTextEditor` class with methods to handle initial text content, apply correction suggestions, get current text content, handle user editing events, and retrieve the collection of user editing events. The `handleEvent` method is used to consume user editing events, while the `getUserEditingEvents` method provides them as an output.

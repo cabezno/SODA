@@ -7,8 +7,8 @@ from typing import Optional
 
 @dataclass
 class _FileResult:
-    provider: str  # "qwen" | "claude" | "gemini" | "claude_haiku" | "none"
-    level: int     # 1-9 (escalation level: 1-3 Qwen, 4-6 Gemini, 7-9 Claude)
+    provider: str  # "qwen" | "gemini" | "gemini_pro" | "none"
+    level: int     # 1-12 (escalation level: 1-6 Qwen, 7-9 Gemini Flash, 10-12 Gemini Pro)
     validated: bool
 
 
@@ -37,7 +37,7 @@ class PerformanceTracker:
         self,
         status: str,
         attempts: int,
-        model: str = "claude-sonnet-4-6",
+        model: str = "gemini-3.1-pro-preview",
     ) -> None:
         self._architect_status = status
         self._architect_attempts = attempts
@@ -130,40 +130,43 @@ class PerformanceTracker:
             print(_row("  Resuelto en 3er intento [L6]",    f"{g3:>3}  {_pct(g3, n)}"))
             failed_g = n - ok
             if failed_g:
-                print(_row("  Escaló a Claude         [L7+]",f"{failed_g:>3}  {_pct(failed_g, n)}"))
+                print(_row("  Escaló a Gemini         [L7+]",f"{failed_g:>3}  {_pct(failed_g, n)}"))
 
-        # ── Claude escalation (L7-L9, up to 3 attempts per file) ────────────────
-        claude_files = [f for f in self._files if f.provider == "claude"]
-        if claude_files:
-            ok = sum(1 for f in claude_files if f.validated)
-            n  = len(claude_files)
-            c1 = sum(1 for f in claude_files if f.level == 7 and f.validated)
-            c2 = sum(1 for f in claude_files if f.level == 8 and f.validated)
-            c3 = sum(1 for f in claude_files if f.level == 9 and f.validated)
+        # ── Gemini Pro escalation (L10-L12, up to 3 attempts per file) ───────────────
+        gemini_pro_files = [f for f in self._files if f.provider == "gemini_pro"]
+        if gemini_pro_files:
+            ok = sum(1 for f in gemini_pro_files if f.validated)
+            n  = len(gemini_pro_files)
+            c1 = sum(1 for f in gemini_pro_files if f.level == 10 and f.validated)
+            c2 = sum(1 for f in gemini_pro_files if f.level == 11 and f.validated)
+            c3 = sum(1 for f in gemini_pro_files if f.level == 12 and f.validated)
             print(_sep())
-            print(_hdr("Claude Sonnet — Escalación (L7-L9, máx 3 intentos)"))
-            print(_row("Archivos recibidos de Gemini",       str(n)))
-            print(_row("  Resuelto en 1er intento [L7]",    f"{c1:>3}  {_pct(c1, n)}"))
-            print(_row("  Resuelto en 2do intento [L8]",    f"{c2:>3}  {_pct(c2, n)}"))
-            print(_row("  Resuelto en 3er intento [L9]",    f"{c3:>3}  {_pct(c3, n)}"))
+            print(_hdr("Gemini Pro — Escalación (L10-L12, máx 3 intentos)"))
+            print(_row("Archivos recibidos de Gemini Flash",       str(n)))
+            print(_row("  Resuelto en 1er intento [L10]",    f"{c1:>3}  {_pct(c1, n)}"))
+            print(_row("  Resuelto en 2do intento [L11]",    f"{c2:>3}  {_pct(c2, n)}"))
+            print(_row("  Resuelto en 3er intento [L12]",    f"{c3:>3}  {_pct(c3, n)}"))
             failed_c = n - ok
             if failed_c:
-                print(_row("  Sin validar (9 niveles)", f"{failed_c:>3}  {_pct(failed_c, n)}"))
+                print(_row("  Sin validar (12 niveles)", f"{failed_c:>3}  {_pct(failed_c, n)}"))
 
         # ── Architect v2 ──────────────────────────────────────────────────────
         if self._architect_status is not None:
             model_tag = {
-                "claude-haiku-4-5-20251001": "Haiku",
-                "claude-sonnet-4-6":         "Sonnet",
-                "claude-opus-4-7":           "Opus",
-            }.get(self._architect_model or "", "Sonnet")
+                "gemini-3-flash-preview": "Flash",
+                "gemini-3.1-pro-preview": "Pro",
+                "gemini-3.1-flash-lite-preview": "Lite",
+                "gemini-2.5-flash": "Flash",
+                "gemini-2.5-pro": "Pro",
+                "gemini-opus-4-7": "Opus",
+            }.get(self._architect_model or "", "Pro")
             status_display = {
                 "approved":                    "aprobado ✓",
                 "approved_with_warnings":      "aprobado con alertas ⚠",
                 "requires_user_intervention":  "requiere intervención ✗",
             }.get(self._architect_status, self._architect_status)
             print(_sep())
-            print(_hdr(f"Claude {model_tag} — Arquitecto v2"))
+            print(_hdr(f"Gemini {model_tag} — Arquitecto v2"))
             print(_row("Estado del contrato",          status_display))
             print(_row("Intentos hasta aprobación",    str(self._architect_attempts)))
 
@@ -172,7 +175,7 @@ class PerformanceTracker:
         cv_total   = cv_checked + self._conformance_skipped
         if cv_total > 0:
             print(_sep())
-            print(_hdr("Claude Haiku — Verificador de Conformidad"))
+            print(_hdr("Gemini Haiku — Verificador de Conformidad"))
             print(_row("Módulos procesados", str(cv_total)))
             if cv_checked > 0:
                 print(_row(

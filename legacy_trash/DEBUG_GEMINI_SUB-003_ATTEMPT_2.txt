@@ -1,0 +1,108 @@
+```python
+import re
+
+class SUB_003_Contract:
+    def execute(self, raw_html_file: str, style_guide: dict) -> tuple[str, dict]:
+        """
+        Applies CSS styling to an HTML landing page based on a style guide.
+
+        Args:
+            raw_html_file (str): The unstyled HTML content of the landing page.
+            style_guide (dict): Styling guidelines including color palette, typography, spacing,
+                                and basic responsive adjustments.
+
+        Returns:
+            tuple[str, dict]: A tuple containing:
+                - styled_css_file (str): The generated CSS content.
+                - landing_page_files (dict): A dictionary where keys are filenames (e.g., "index.html", "style.css")
+                                             and values are their respective string contents.
+        """
+        # 1. Generate CSS rules from the style guide
+        styled_css_content = self._generate_css_from_style_guide(style_guide)
+
+        # 2. Define the filename for the generated CSS
+        css_filename = "style.css"
+        
+        # 3. Inject a <link> tag for the CSS file into the HTML content
+        modified_html_content = self._inject_css_link(raw_html_file, css_filename)
+
+        # 4. Assemble the complete set of static website files
+        landing_page_files = {
+            "index.html": modified_html_content,
+            css_filename: styled_css_content
+        }
+
+        return styled_css_content, landing_page_files
+
+    def _generate_css_from_style_guide(self, style_guide: dict) -> str:
+        """
+        Generates CSS content as a string based on the provided style guide dictionary.
+        This method translates structured style guide data into CSS rules.
+        """
+        css_rules = []
+
+        # --- Global Variables (e.g., Colors, Spacing Units) ---
+        if "colors" in style_guide and isinstance(style_guide["colors"], dict):
+            css_rules.append(":root {")
+            for name, hex_value in style_guide["colors"].items():
+                css_rules.append(f"  --color-{name}: {hex_value};")
+            css_rules.append("}")
+
+        if "spacing" in style_guide and isinstance(style_guide["spacing"], dict):
+            if "base_unit" in style_guide["spacing"]:
+                base_unit = style_guide["spacing"]["base_unit"]
+                css_rules.append(f":root {{ --spacing-base: {base_unit}; }}")
+            # Add more specific spacing variables if the style guide provides them
+            if "units" in style_guide["spacing"] and isinstance(style_guide["spacing"]["units"], dict):
+                for name, value in style_guide["spacing"]["units"].items():
+                    css_rules.append(f"  --spacing-{name}: {value};")
+
+        # --- Typography ---
+        if "typography" in style_guide and isinstance(style_guide["typography"], dict):
+            # Body styles
+            if "body" in style_guide["typography"] and isinstance(style_guide["typography"]["body"], dict):
+                body_styles = style_guide["typography"]["body"]
+                css_rules.append("body {")
+                if "font_family" in body_styles:
+                    css_rules.append(f"  font-family: {body_styles['font_family']};")
+                if "font_size" in body_styles:
+                    css_rules.append(f"  font-size: {body_styles['font_size']};")
+                if "line_height" in body_styles:
+                    css_rules.append(f"  line-height: {body_styles['line_height']};")
+                if "color" in body_styles:
+                    css_rules.append(f"  color: {body_styles['color']};")
+                css_rules.append("}")
+
+            # Headings styles (h1, h2, etc.)
+            if "headings" in style_guide["typography"] and isinstance(style_guide["typography"]["headings"], dict):
+                for tag, styles in style_guide["typography"]["headings"].items():
+                    if isinstance(styles, dict):
+                        css_rules.append(f"{tag} {{")
+                        if "font_family" in styles:
+                            css_rules.append(f"  font-family: {styles['font_family']};")
+                        if "font_size" in styles:
+                            css_rules.append(f"  font-size: {styles['font_size']};")
+                        if "font_weight" in styles:
+                            css_rules.append(f"  font-weight: {styles['font_weight']};")
+                        if "color" in styles:
+                            css_rules.append(f"  color: {styles['color']};")
+                        if "margin_bottom" in styles:
+                            css_rules.append(f"  margin-bottom: {styles['margin_bottom']};")
+                        css_rules.append("}")
+            
+            # Other text elements (p, a, etc.)
+            if "text_elements" in style_guide["typography"] and isinstance(style_guide["typography"]["text_elements"], dict):
+                for tag, styles in style_guide["typography"]["text_elements"].items():
+                    if isinstance(styles, dict):
+                        css_rules.append(f"{tag} {{")
+                        if "font_size" in styles:
+                            css_rules.append(f"  font-size: {styles['font_size']};")
+                        if "color" in styles:
+                            css_rules.append(f"  color: {styles['color']};")
+                        if "margin_bottom" in styles:
+                            css_rules.append(f"  margin-bottom: {styles['margin_bottom']};")
+                        css_rules.append("}")
+
+        # --- Basic Responsive Adjustments (Media Queries) ---
+        if "responsive" in style_guide and isinstance(style_guide["responsive"], dict):
+            if "breakpoints" in style_guide["responsive"] and isinstance(style_guide

@@ -194,6 +194,7 @@
     .ai-pill.ok.Qwen{background:rgba(0,229,255,.1);color:#00e5ff;border-color:rgba(0,229,255,.22);}
     .ai-pill.ok.Claude{background:rgba(224,64,251,.1);color:#e040fb;border-color:rgba(224,64,251,.22);}
     .ai-pill.ok.Gemini{background:rgba(52,211,153,.1);color:#6ee7b7;border-color:rgba(52,211,153,.22);}
+    .ai-pill.ok.DeepSeek{background:rgba(59,130,246,.1);color:#60a5fa;border-color:rgba(59,130,246,.22);}
     .ai-pill.ok::before{color:var(--green);opacity:1;}
     .ai-pill.error{background:rgba(248,113,113,.1);color:var(--red);border-color:rgba(248,113,113,.22);}
     .ai-pill.error::before{color:var(--red);opacity:1;}
@@ -585,6 +586,19 @@
     #open-migrate-sel{background:rgba(0,0,0,.45);border:1px solid rgba(224,64,251,.25);border-radius:var(--r1);color:var(--t1);font-size:12px;padding:5px 12px;outline:none;cursor:pointer;font-family:var(--mono);}
     #open-migrate-sel:focus{border-color:var(--violet);}
 
+    /* Questions panel */
+    #open-questions-panel{display:none;margin-bottom:20px;}
+    #open-questions-panel.visible{display:block;}
+    .open-questions-label{font-size:10px;font-weight:700;color:var(--cyan);letter-spacing:1.2px;text-transform:uppercase;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+    .open-questions-label::before{content:'';width:3px;height:12px;background:linear-gradient(180deg,var(--cyan),var(--violet));border-radius:2px;display:inline-block;}
+    .open-question-item{background:rgba(0,229,255,.04);border:1px solid rgba(0,229,255,.1);border-radius:var(--r2);padding:14px 16px;margin-bottom:10px;}
+    .open-question-item:hover{border-color:rgba(0,229,255,.2);}
+    .open-question-text{font-size:12px;color:var(--t1);margin-bottom:10px;line-height:1.5;}
+    .open-question-opts{display:flex;flex-wrap:wrap;gap:6px;}
+    .open-question-opt{font-size:11px;padding:5px 14px;border-radius:20px;border:1px solid var(--b-sub);background:transparent;color:var(--t2);cursor:pointer;transition:all var(--ease);font-family:var(--font);}
+    .open-question-opt:hover{border-color:var(--cyan);color:var(--cyan);}
+    .open-question-opt.selected{border-color:var(--cyan);background:rgba(0,229,255,.1);color:var(--cyan);font-weight:600;}
+
     /* Intent + launch */
     .open-intent-section{display:flex;flex-direction:column;gap:12px;}
     .open-intent-area{background:rgba(0,0,0,.35);border:1px solid var(--b-sub);border-radius:var(--r2);color:var(--t1);font-size:12px;font-family:var(--font);padding:10px 14px;resize:vertical;min-height:72px;outline:none;line-height:1.5;transition:border-color var(--ease),box-shadow var(--ease);}
@@ -798,14 +812,24 @@
         <button class="tab" data-tab="sistema"><i class="fa fa-cogs"></i>Sistema</button>
         <button class="tab" data-tab="conectividad"><i class="fa fa-qrcode"></i>Conectividad</button>
         <button class="tab" data-tab="testui"><i class="fa fa-desktop"></i>Test UI</button>
-        <div id="tts-tab-toggle" style="display:flex;align-items:center;gap:7px;margin-left:auto;padding:0 14px;border-left:1px solid rgba(255,255,255,.07);">
+        <div style="display:flex;align-items:center;margin-left:auto;height:100%;">
+        <div id="model-selector-container" style="display:flex;align-items:center;gap:7px;padding:0 14px;border-left:1px solid rgba(255,255,255,.07);">
+            <i class="fa fa-microchip" style="font-size:13px;color:#3b82f6;"></i>
+            <select id="gemini-model-select" onchange="setGeminiModel(this.value)" style="background:#1a1a2e;color:#fff;border:1px solid #3b82f6;border-radius:4px;padding:2px 5px;font-size:11px;outline:none;">
+                <option value="auto">Smart FinOps (Auto)</option>
+                <option value="economy">Economy</option>
+                <option value="balanced">Balanced</option>
+                <option value="premium">Premium</option>
+            </select>
+        </div>        <div id="tts-tab-toggle" style="display:flex;align-items:center;gap:7px;padding:0 14px;border-left:1px solid rgba(255,255,255,.07);">
             <i class="fa fa-microphone" style="font-size:13px;color:#888;"></i>
             <label class="tts-switch" title="Activar/desactivar voz TTS">
                 <input type="checkbox" id="tts-toggle-switch" onchange="window._sodaTTS && window._sodaTTS.toggle(this.checked)">
                 <span class="tts-slider"></span>
             </label>
-            <span id="tts-toggle-label" style="font-size:11px;color:#666;min-width:48px;">Voz OFF</span>
+            <span id="tts-toggle-label" style="font-size:11px;color:#8a2be2;font-weight:bold;min-width:48px;">Talk OFF</span>  
         </div>
+    </div>
     </div>
     <div id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
     <!-- ════════ CREAR TAB (Nuevo + Desde Código + Abrir) ════════ -->
@@ -870,6 +894,12 @@
                 <select id="open-migrate-sel">
                     <option value="">Elegí el lenguaje destino…</option>
                 </select>
+            </div>
+
+            <!-- Questions panel (generated by AI after analysis) -->
+            <div id="open-questions-panel">
+                <div class="open-questions-label">Preguntas sobre tu proyecto</div>
+                <div id="open-questions-list"></div>
             </div>
 
             <!-- Intent + project name + launch -->
@@ -1290,8 +1320,8 @@
             <button id="ollama-start-btn" onclick="startOllama()" title="Iniciar Ollama">▶ Iniciar</button>
             <span class="ai-pill unconfigured" id="pill-claude"  data-ai="Claude" title="Claude">Claude</span>
             <span class="ai-pill unconfigured" id="pill-gemini"  data-ai="Gemini" title="Gemini">Gemini</span>
+            <span class="ai-pill unconfigured" id="pill-deepseek" data-ai="DeepSeek" title="DeepSeek">DeepSeek</span>
         </div>
-        <button id="auto-confirm-btn" onclick="toggleAutoConfirm()" title="Responder 'sí' automáticamente a todas las preguntas de instalación y ejecución">Auto-sí</button>
         <div id="phase-track">
             <span class="phase-step" id="ph-capabilities">CAP</span>
             <span class="phase-sep">›</span>
@@ -1847,7 +1877,7 @@ function _syncTTSSwitches(state) {
         if (el) el.checked = state;
     });
     const lbl = document.getElementById('tts-toggle-label');
-    if (lbl) lbl.textContent = state ? 'Voz ON' : 'Voz OFF';
+    if (lbl) lbl.textContent = state ? 'Talk ON' : 'Talk OFF';
     const lbl2 = document.getElementById('tts-card-label');
     if (lbl2) lbl2.textContent = state ? 'ON' : 'OFF';
 }

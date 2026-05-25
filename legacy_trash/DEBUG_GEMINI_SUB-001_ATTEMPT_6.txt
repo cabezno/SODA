@@ -1,0 +1,1 @@
+ERROR:SAFETY_BLOCK: Gemini bloqueó la respuesta — finishReason=RECITATION

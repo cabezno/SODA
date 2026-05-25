@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package soda.bus.v1;
+
+// Servicio de Orquestación de Cómputo
+service ComputeOrchestrator {
+  // Despacha una tarea al Data Plane
+  rpc DispatchTask (TaskRequest) returns (TaskStatus);
+  
+  // Stream de telemetría en tiempo real desde los nodos de ejecución
+  rpc StreamTelemetry (TelemetryRequest) returns (stream NodeTelemetry);
+}
+
+message TaskRequest {
+  string task_id = 1;
+  TaskType type = 2;
+  
+  // Zero-Copy Bridge: Identificador de memoria compartida mapeada.
+  string shm_descriptor_name = 3; 
+  uint64 memory_offset = 4;
+  uint64 payload_size_bytes = 5;
+  
+  bytes metadata_json = 6; // Parámetros adicionales de la tarea
+}
+
+enum TaskType {
+  TASK_UNKNOWN = 0;
+  TASK_VULKAN_COMPUTE = 1;
+  TASK_GO_CONCURRENT_IO = 2;
+  TASK_PYTHON_LOGIC = 3;
+}
+
+message TaskStatus {
+  string task_id = 1;
+  bool is_success = 2;
+  string error_context = 3;
+  uint64 processing_time_ms = 4;
+}
+
+message TelemetryRequest {
+  string node_id = 1;
+}
+
+message NodeTelemetry {
+  float cpu_usage = 1;
+  float gpu_usage = 2;
+  float memory_usage_bytes = 3;
+  uint32 active_workers = 4;
+}

@@ -1,0 +1,164 @@
+```python
+import collections.abc
+from typing import Dict, Any, List, Optional
+
+# --- Mock Dependencies (Representing SUB-001, SUB-002, SUB-003) ---
+# These classes simulate the behavior of the backend and authentication services
+# that the Android application would interact with.
+
+class MockAuthService:
+    """
+    A mock implementation of an authentication service (dependency SUB-002).
+    """
+    def validate_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Validates a given token and returns user information if valid.
+        """
+        if token and token.startswith("valid_google_token_"):
+            user_id = token.split("_")[-1]
+            return {"user_id": user_id, "email": f"user_{user_id}@example.com"}
+        return None
+
+class MockBackendAPI:
+    """
+    A mock implementation of the backend API (dependency SUB-001).
+    This simulates a database of events.
+    """
+    def __init__(self):
+        self._events_db: Dict[str, List[Dict[str, Any]]] = {
+            "user123": [
+                {"event_id": "evt_a", "title": "Team Sync", "start": "2024-08-15T09:00:00Z"},
+                {"event_id": "evt_b", "title": "Project Deadline", "start": "2024-08-15T17:00:00Z"},
+            ]
+        }
+
+    def get_events(self, user_id: str) -> List[Dict[str, Any]]:
+        return self._events_db.get(user_id, [])
+
+    def create_event(self, user_id: str, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        if user_id not in self._events_db:
+            self._events_db[user_id] = []
+        new_event = {**event_data, "event_id": f"evt_{len(self._events_db[user_id]) + 1}"}
+        self._events_db[user_id].append(new_event)
+        return new_event
+
+    def update_event(self, user_id: str, event_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        user_events = self._events_db.get(user_id, [])
+        for event in user_events:
+            if event.get("event_id") == event_id:
+                event.update(update_data)
+                return event
+        return None
+
+    def delete_event(self, user_id: str, event_id: str) -> bool:
+        user_events = self._events_db.get(user_id, [])
+        original_count = len(user_events)
+        self._events_db[user_id] = [e for e in user_events if e.get("event_id") != event_id]
+        return len(self._events_db[user_id]) < original_count
+
+
+# --- Contract Implementation ---
+
+class AndroidCalendarApp:
+    """
+    Contract: SUB-005
+    Title: Aplicación Móvil Android de Calendario
+    Description: Desarrollo de la aplicación móvil nativa para Android (Kotlin) que permite a los usuarios gestionar eventos, ver el calendario y recibir notificaciones. Se comunica con el Backend API y el servicio de autenticación.
+    """
+    _contract_id: str = "SUB-005"
+    _dependencies: List[str] = ["SUB-001", "SUB-002", "SUB-003"]
+
+    def __init__(self, backend_api: MockBackendAPI, auth_service: MockAuthService):
+        """
+        Initializes the Android App interface layer with its dependencies.
+        """
+        self.backend_api = backend_api
+        self.auth_service = auth_service
+        self.current_user_id: Optional[str] = None
+
+    def process_authentication(self, google_auth_token: str) -> bool:
+        """
+        Handles the 'google_auth_token' input.
+        Authenticates the user and establishes a session.
+
+        Args:
+            google_auth_token (String): Token de autenticación de Google proporcionado por el usuario para iniciar sesión en la aplicación móvil.
+
+        Returns:
+            bool: True if authentication was successful, False otherwise.
+        """
+        user_info = self.auth_service.validate_token(google_auth_token)
+        if user_info and "user_id" in user_info:
+            self.current_user_id = user_info["user_id"]
+            return True
+        self.current_user_id = None
+        return False
+
+    def process_user_event_actions(self, user_input_events: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handles the 'user_input_events' input.
+        Processes user interactions to create, edit, or delete events.
+
+        Args:
+            user_input_events (Object): Interacciones del usuario para crear, editar o eliminar eventos desde la aplicación móvil.
+                                        Expected format: {'action': 'create'|'update'|'delete', 'payload': {...}}
+
+        Returns:
+            A dictionary with the result of the operation.
+        """
+        if not self.current_user_id:
+            return {"status": "error", "message": "User not authenticated."}
+
+        action = user_input_events.get("action")
+        payload = user_input_events.get("payload", {})
+
+        try:
+            if action == "create":
+                created_event = self.backend_api.create_event(self.current_user_id, payload)
+                return {"status": "success", "data": created_event}
+            elif action == "update":
+                event_id = payload.pop("event_id", None)
+                if not event_id:
+                    raise ValueError("event_id is required for update action.")
+                updated_event = self.backend_api.update_event(self.current_user_id, event_id, payload)
+                if updated_event:
+                    return {"status": "success", "data": updated_event}
+                else:
+                    return {"status": "error", "message": f"Event with id {event_id} not found."}
+            elif action == "delete":
+                event_id = payload.get("event_id")
+                if not event_id:
+                    raise ValueError("event_id is required for delete action.")
+                was_deleted = self.backend_api.delete_event(self.current_user_id, event_id)
+                if was_deleted:
+                    return {"status": "success", "message": f"Event {event_id} deleted."}
+                else:
+                    return {"status": "error", "message": f"Event with id {event_id} not found."}
+            else:
+                raise ValueError(f"Unknown action: {action}")
+        except (ValueError, KeyError) as e:
+            return {"status": "error", "message": str(e)}
+
+
+    def get_user_dashboard_interface(self) -> Dict[str, Any]:
+        """
+        Provides the 'user_dashboard_interface' output.
+        This method returns the data structure required by the mobile UI to render the calendar dashboard.
+
+        Returns:
+            UserInterface (Object): La interfaz de usuario móvil principal que muestra el calendario de eventos del usuario.
+        """
+        if not self.current_user_id:
+            return {
+                "is_authenticated": False,
+                "user_id": None,
+                "events": []
+            }
+
+        events = self.backend_api.get_events(self.current_user_id)
+        return {
+            "is_authenticated": True,
+            "user_id": self.current_user_id,
+            "events": events
+        }
+```

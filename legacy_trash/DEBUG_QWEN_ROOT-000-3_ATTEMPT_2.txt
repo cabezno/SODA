@@ -1,0 +1,67 @@
+```sql
+-- Define the Database Schema
+
+CREATE TABLE Users (
+    UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Username TEXT NOT NULL,
+    Email TEXT NOT NULL UNIQUE,
+    GoogleSSOIdentifier TEXT UNIQUE
+);
+
+CREATE TABLE Products (
+    ProductID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT NOT NULL,
+    Description TEXT,
+    Price REAL,
+    IsActive BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE OneTimePurchaseLicenses (
+    LicenseID INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserID INTEGER,
+    ProductID INTEGER,
+    PurchaseDate DATETIME,
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (ProductID) REFERENCES Products(ProductID)
+);
+
+CREATE TABLE SubscriptionPlans (
+    PlanID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT NOT NULL,
+    Description TEXT,
+    Price REAL,
+    IsActive BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE UserSubscriptions (
+    SubscriptionID INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserID INTEGER,
+    PlanID INTEGER,
+    StartDate DATETIME,
+    EndDate DATETIME,
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (PlanID) REFERENCES SubscriptionPlans(PlanID)
+);
+
+CREATE TABLE TokenBalances (
+    UserID INTEGER PRIMARY KEY,
+    TokenBalance REAL DEFAULT 0.0,
+    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+);
+
+-- Create Indexes
+
+CREATE INDEX idx_products_name ON Products(Name);
+CREATE INDEX idx_subscriptions_user_id ON UserSubscriptions(UserID);
+CREATE INDEX idx_subscriptions_plan_id ON UserSubscriptions(PlanID);
+
+-- Database Seeding Scripts
+
+INSERT INTO Products (Name, Description, Price) VALUES
+('Product A', 'Description of Product A', 19.99),
+('Product B', 'Description of Product B', 29.99);
+
+INSERT INTO SubscriptionPlans (Name, Description, Price) VALUES
+('Basic Plan', 'Basic subscription plan', 4.99),
+('Premium Plan', 'Premium subscription plan', 9.99);
+```

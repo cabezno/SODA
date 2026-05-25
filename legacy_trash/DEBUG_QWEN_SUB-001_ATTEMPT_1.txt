@@ -1,0 +1,119 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive React Landing Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            background-color: #4CAF50;
+            color: white;
+            text-align: center;
+            padding: 1em;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            padding: 2em;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        input[type="email"], textarea {
+            width: 100%;
+            padding: 1em;
+            margin-bottom: 1em;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 1em;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Welcome to Our Product</h1>
+        <p>Sign up for updates and special offers!</p>
+    </div>
+    <div class="container">
+        <form id="leadCaptureForm">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required placeholder="Enter your email"/>
+            <label for="message">Message (optional):</label>
+            <textarea id="message" name="message" placeholder="Tell us more about what you're looking for..."></textarea>
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+
+    <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
+    <script type="text/babel">
+        const leadCaptureEndpoint = "YOUR_BACKEND_API_ENDPOINT_HERE";
+
+        class LandingPage extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { email: '', message: '' };
+
+                this.handleChange = this.handleChange.bind(this);
+                this.handleSubmit = this.handleSubmit.bind(this);
+            }
+
+            handleChange(event) {
+                const target = event.target;
+                const value = target.value;
+                const name = target.name;
+
+                this.setState({
+                    [name]: value
+                });
+            }
+
+            handleSubmit(event) {
+                event.preventDefault();
+                fetch(leadCaptureEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(this.state)
+                })
+                .then(response => response.json())
+                .then(data => console.log('Success:', data))
+                .catch((error) => console.error('Error:', error));
+            }
+
+            render() {
+                return (
+                    <div className="container">
+                        <form onSubmit={this.handleSubmit}>
+                            <label htmlFor="email">Email:</label>
+                            <input type="email" id="email" name="email" value={this.state.email} onChange={this.handleChange} required placeholder="Enter your email"/>
+                            <label htmlFor="message">Message (optional):</label>
+                            <textarea id="message" name="message" value={this.state.message} onChange={this.handleChange} placeholder="Tell us more about what you're looking for..."></textarea>
+                            <button type="submit">Submit</button>
+                        </form>
+                    </div>
+                );
+            }
+        }
+
+        ReactDOM.render(<LandingPage />, document.getElementById('root'));
+    </script>
+</body>
+</html>
+```

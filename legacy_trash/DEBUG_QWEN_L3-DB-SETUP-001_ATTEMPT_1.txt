@@ -1,0 +1,55 @@
+```python
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Enum, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+
+class SoftwareProduct(Base):
+    __tablename__ = 'software_products'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+
+class LicenseModel(Enum):
+    ONE_TIME = 'one_time'
+    SUBSCRIPTION = 'subscription'
+    PERPETUAL = 'perpetual'
+
+class Order(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    product_id = Column(Integer, ForeignKey('software_products.id'), nullable=False)
+    license_model = Column(Enum(LicenseModel), nullable=False)
+    purchase_date = Column(DateTime, nullable=False)
+
+class LicenseKey(Base):
+    __tablename__ = 'license_keys'
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
+    key_code = Column(String, unique=True, nullable=False)
+    valid_until = Column(DateTime, nullable=True)
+    is_used = Column(Boolean, default=False)
+
+# Database setup function
+def setup_database(db_url):
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    return Session
+
+# Example usage
+if __name__ == "__main__":
+    db_url = 'sqlite:///license_management.db'
+    Session = setup_database(db_url)
+    session = Session()
+    # Perform database operations here
+    session.close()
+```

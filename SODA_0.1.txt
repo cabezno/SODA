@@ -1,0 +1,1045 @@
+================================================================================
+SODA — Sistema Orquestado de Desarrollo Autónomo
+VERSION 0.1 — Documento de referencia completo
+Fecha: 2026-04-28
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÍNDICE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ¿Qué es SODA?
+2. Stack técnico
+3. Funcionalidades completas — lista
+4. Pipeline: 8 fases explicadas
+5. Arquitectura del sistema
+6. Drivers de IA (Claude, Gemini, Ollama, OpenAI)
+7. Skills (31) y Profiles (7)
+8. Sistema de contratos y validación
+9. Generación de tests automáticos
+10. Monitoreo, salud y costos
+11. UI, API REST y WebSocket
+12. Telegram Bot
+13. Sandbox y ejecución segura
+14. Memoria, linaje y branching
+15. Sistema de aprendizaje
+16. Tests del propio sistema (468 tests)
+17. Cambios y mejoras implementadas en esta versión
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. ¿QUÉ ES SODA?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SODA toma una descripción en lenguaje natural y genera un proyecto de software
+funcional completo, sin intervención humana durante la generación.
+
+Entrada:  "Necesito una API REST con autenticación JWT y base de datos SQLite"
+Salida:   Proyecto completo en projects/<id>/source/ con:
+          - Código fuente validado
+          - Tests automáticos (unit + funcionales)
+          - Documentación generada
+          - Blueprint, arquitectura y contratos tipados guardados
+          - Boot + smoke tests ejecutados
+
+SODA no es un autocomplete de código. Es un pipeline multi-agente determinístico
+que orquesta modelos de IA especializados (Claude, Gemini, Qwen local) para
+producir software real.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. STACK TÉCNICO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Lenguaje base:   Python 3.11.9
+  OS:              Windows 11 Pro nativo (sin WSL2)
+  Shell target:    bash (Unix paths en configuración)
+
+  Modelos IA:
+    - Claude Sonnet 4.6  (claude-sonnet-4-6)        → REQ, ARCH v2, DEV escal.
+    - Claude Haiku 4.5   (claude-haiku-4-5)          → Conformance verify
+    - Claude Opus 4.7    (claude-opus-4-7)            → Proyectos complejos
+    - Gemini 2.5 Flash/Pro                            → CAP, WISDOM, ARCH v1
+    - Qwen 2.5-coder:7b/14b (Ollama local)           → DEV primario
+
+  Web framework:   FastAPI + uvicorn
+  UI nativa:       pywebview + Monaco Editor
+  Sandbox:         Docker Desktop (npipe Windows)
+  Vectorial:       ChromaDB (persistencia local)
+  Telegram:        python-telegram-bot v22 (@Soda_black_bot)
+  Testing:         pytest 9.0.3
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. FUNCIONALIDADES COMPLETAS — LISTA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PIPELINE CORE
+  [F01] Generación de proyectos desde descripción en lenguaje natural
+  [F02] Selección automática de skills por keyword (31 skills disponibles)
+  [F03] Selección automática de perfil de desarrollador (7 perfiles)
+  [F04] Detección de riesgos y ambigüedades antes de generar (WisdomAgent)
+  [F05] Generación de blueprint JSON (especificación funcional estructurada)
+  [F06] Generación de topología de módulos (Gemini, DAG con snake_case IDs)
+  [F07] Generación de MasterContract tipado (interfaces + data_types, por Claude)
+  [F08] Clasificación de complejidad automática (simple/medium/complex)
+  [F09] Selección de modelo según complejidad (Haiku/Sonnet/Opus)
+  [F10] Planificación de ejecución con grafo de dependencias (Kahn topological sort)
+  [F11] Detección y rotura automática de ciclos en el DAG
+  [F12] Paralelismo: módulos sin dependencias generados simultáneamente
+  [F13] Generación de código con escalación automática (9 niveles)
+  [F14] Validación de sintaxis Python en Docker (py_compile)
+  [F15] Inyección de contratos tipados en el generador de código
+  [F16] Inyección de contexto de skills y perfil en cada generación
+  [F17] Inyección de patrones aprendidos (learning context)
+  [F18] Verificación de conformancia post-generación (Haiku audita c/módulo)
+  [F19] Detección de código huérfano (anti-orphan, GoalIntegrityValidator)
+  [F20] Validación de imports y dependencias Python
+  [F21] Revisión de seguridad con Claude (SQL injection, XSS, etc.)
+  [F22] Generación de unit tests contract-based (≥1 test por método del contrato)
+  [F23] Generación de tests funcionales E2E por funcionalidad del blueprint
+  [F24] Ejecución de suite de tests + triage automático de fallos
+  [F25] Triage: clasifica BAD_TEST (regenera test) vs BAD_CODE (auto-fix)
+  [F26] Validación de contrato API frontend ↔ backend
+  [F27] Auditoría de lenguaje (reglas específicas: PY001 requirements.txt, etc.)
+  [F28] Validación + auto-fix iterativo del código generado
+  [F29] Boot Agent: instala deps, arranca proyecto, auto-repara si falla
+  [F30] Smoke tests HTTP post-arranque
+  [F31] Generación de documentación README
+  [F32] Evolution: actualiza el perfil con patrones aprendidos tras cada proyecto
+  [F33] Git commit automático en checkpoints del pipeline
+
+OPERACIONES POST-GENERACIÓN
+  [F34] modify(): aplica cambios a proyecto existente con clasificación de impacto
+  [F35] GoalInterpreter: clasifica cambio (bug_fix/enhancement/structural/scope)
+  [F36] ImpactAnalyzer: calcula módulos afectados transitivamente
+  [F37] Branching automático para cambios estructurales (copia workspace)
+  [F38] Comparación A/B entre rama y padre
+  [F39] Promoción de rama ganadora
+  [F40] refound(): comprime contexto y reinicia pipeline con descripción condensada
+  [F41] resume(): retoma proyecto pausado desde el estado guardado
+
+INFRAESTRUCTURA IA
+  [F42] Driver abstraction: interfaz unificada para Claude/Gemini/Ollama/OpenAI
+  [F43] Prompt Caching (Anthropic): ~90% ahorro en tokens de entrada
+  [F44] Continuación automática de JSON truncado (Claude streaming)
+  [F45] Probing dinámico de modelos Gemini (prueba en orden, cae al siguiente)
+  [F46] Resolución lazy de modelo Ollama (ollama list async, cachea resultado)
+  [F47] AIProviderHub: enrutamiento con fallback configurable por fase
+  [F48] ContextHealthMonitor: monitoreo pasivo de tokens/errores sin bloquear
+  [F49] Alertas automáticas cuando contexto crece o error rate sube
+  [F50] Sugerencia automática de refundación cuando contexto es insostenible
+
+VALIDACIÓN Y CONTRATOS
+  [F51] ConsistencyValidator: naming consistente entre módulos
+  [F52] CompletenessValidator: todos los módulos tienen interfaces
+  [F53] DependencyValidator: no ciclos, deps resolubles
+  [F54] NamingValidator: snake_case, convenciones por lenguaje
+  [F55] ExtensibilityValidator: arquitectura permite extensión sin modificar existentes
+  [F56] TraceabilityValidator: requerimientos → módulos → código
+  [F57] TopologyConsistencyValidator: topology.json estructuralmente válido
+  [F58] ContractAuditor: verifica que código generado cumple el contrato tipado
+  [F59] AutoFixAgent: repara archivos con errores runtime usando Claude + contrato
+
+MONITOREO Y COSTOS
+  [F60] PerformanceTracker: métricas de duración/tokens/errores por fase
+  [F61] UsageMonitor: registro de llamadas API (provider, role, tokens, tiempo)
+  [F62] CostTracker: estimación de costo en USD por modelo y proyecto
+  [F63] AlertManager: alertas por salud de contexto, error rate, slow calls
+
+UI Y COMUNICACIÓN
+  [F64] FastAPI server con 30+ endpoints REST
+  [F65] WebSocket con broadcast en tiempo real a todos los clientes
+  [F66] Monaco Editor integrado (UI nativa via pywebview)
+  [F67] CopilotKit integration para chat IA en la UI
+  [F68] Telegram Bot @Soda_black_bot con /pair /status /projects
+  [F69] Notificaciones Telegram rate-limited (~20 msg/s, retry en 429)
+  [F70] Temperatura de copilot configurable (baja/media/alta)
+
+MEMORIA Y CONOCIMIENTO
+  [F71] ProjectLineage: log append-only de todos los proyectos y ramas
+  [F72] BranchManager: creación, promoción y comparación A/B de ramas
+  [F73] ChromaDB: búsqueda semántica de patrones, skills, arquitecturas
+  [F74] BehaviorObserver: captura de observaciones en JSONL (code_gen, escalations)
+  [F75] KnowledgeBase: patrón library por lenguaje + framework
+
+SANDBOX Y EJECUCIÓN
+  [F76] DynamicEnvironment: venv aislado por proyecto (.soda_venv)
+  [F77] DockerSandbox: contenedores ephemeral con límites (512MB, 1 CPU, 30s)
+  [F78] ProjectRunner: orchestrator de ejecución (detect → install → run → smoke)
+  [F79] StackDetector: detección automática de stack (Python/Node/Java/Rust/etc.)
+  [F80] PortManager: gestión de puertos para proyectos con múltiples servicios
+
+CAPACIDADES AVANZADAS
+  [F81] LogCollector: recolección de logs del sistema para contexto de auto-fix
+  [F82] VisualInspector: análisis visual de screenshots con Gemini (vision)
+  [F83] WebResearcher: búsqueda web via Perplexity API
+  [F84] UIDesignAgent: genera design_spec.json para proyectos frontend
+  [F85] ContextBuilder: inyección contextual (system + user) con caché por rol
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. PIPELINE: 8 FASES EXPLICADAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ENTRADA: Descripción en lenguaje natural del usuario
+         ↓
+
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 0 — CAPABILITIES                  ~5-10s               │
+├──────────────────────────────────────────────────────────────┤
+│ Driver:  Gemini Flash                                        │
+│ Agentes: SkillMatcher + ProfileMatcher                       │
+│ Input:   Descripción del proyecto                            │
+│ Output:  Lista de skills + nombre de profile                 │
+│                                                              │
+│ SkillMatcher usa Gemini para extraer skills por keyword.     │
+│ 31 skills disponibles (fastapi, react, jwt_auth, etc.)       │
+│ ProfileMatcher elige el profile más alineado (7 disponibles) │
+│ Los skills y profile se inyectan en TODAS las fases siguient │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 0.5 — WISDOM                      ~5-10s               │
+├──────────────────────────────────────────────────────────────┤
+│ Driver:  Gemini Flash                                        │
+│ Agente:  WisdomAgent                                         │
+│ Input:   Descripción + skills + profile                      │
+│ Output:  WisdomReport (riesgos, ambigüedades, advertencias)  │
+│                                                              │
+│ Detecta ambigüedades antes de invertir tiempo en generación. │
+│ Ejemplo: "sistema de pagos" sin aclarar gateway → advierte.  │
+│ Las observaciones se incluyen en el blueprint como contexto. │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 1 — REQUIREMENTS                  ~10-20s              │
+├──────────────────────────────────────────────────────────────┤
+│ Driver:  Claude Sonnet                                       │
+│ Rol:     requirements_interviewer                            │
+│ Input:   Descripción + skills + profile + wisdom_report      │
+│ Output:  blueprint.json                                      │
+│                                                              │
+│ blueprint.json contiene:                                     │
+│   nombre_proyecto, funcionalidades[], stack_sugerido{},      │
+│   modulos_principales[], estimacion_complejidad,             │
+│   comando_ejecucion, comando_instalacion                     │
+│                                                              │
+│ BlueprintValidator verifica el schema antes de continuar.    │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 2 — ARCHITECTURE                  ~35-70s              │
+├──────────────────────────────────────────────────────────────┤
+│ Sub-fase 2a: Topología (Gemini)                              │
+│   Driver:  Gemini Pro/Flash                                  │
+│   Rol:     global_architect                                  │
+│   Output:  topology.json                                     │
+│   Contenido: módulos con IDs snake_case, responsabilidades,  │
+│              archivos_principales[], depende_de_ids[]        │
+│                                                              │
+│ Sub-fase 2b: MasterContract (Claude) — NUEVO en v0.1        │
+│   Driver:  Claude (Haiku/Sonnet/Opus según complejidad)      │
+│   Agente:  Architect (complexity-aware model selection)      │
+│   Output:  master_contract.json                              │
+│   Contenido: modules[] con interfaces tipadas                │
+│              (name, parameters:{}, returns, description)     │
+│              + data_types[] con schemas JSON                 │
+│              + complexity_level + model_used                 │
+│                                                              │
+│ El ContractRefinementLoop ejecuta hasta 3 intentos con       │
+│ Claude y 2 de fallback con Gemini. Si ambos fallan usa       │
+│ architecture legacy de topology.json.                        │
+│                                                              │
+│ Validators activos: topology_consistency, dependency         │
+│ Output legacy: architecture.json (compatibilidad v1)        │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 3 — PLANNING                      <100ms               │
+├──────────────────────────────────────────────────────────────┤
+│ Driver:  Python puro (sin IA)                                │
+│ Input:   master_contract.json > topology.json > architecture │
+│ Output:  execution_plan.json                                 │
+│                                                              │
+│ DependencyGraph.break_cycles()     → DFS, elimina back-edges│
+│ DependencyGraph.topological_sort_kahn() → Kahn's algorithm  │
+│                                                              │
+│ execution_plan.json:                                         │
+│   levels: [["db", "auth"], ["api"], ["frontend"]]            │
+│   order:  ["db", "auth", "api", "frontend"]                  │
+│   parallelizable: true                                       │
+│   broken_edges: []  (ciclos eliminados si los hubo)         │
+│                                                              │
+│ Pre-creación de venv en background (fire-and-forget).        │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 3.5 — DESIGN (si proyecto frontend)   ~10-20s          │
+├──────────────────────────────────────────────────────────────┤
+│ Agente:  UIDesignAgent                                       │
+│ Output:  design_spec.json (paleta, tipografías, componentes) │
+│ Solo activo para proyectos con frontend React/Next/Angular.  │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 4 — DEVELOPMENT                  ~5-15 min             │
+├──────────────────────────────────────────────────────────────┤
+│ Por cada módulo en orden topológico (niveles en paralelo):   │
+│                                                              │
+│ Para cada archivo del módulo:                                │
+│   1. FileComplexityRouter clasifica complejidad del archivo  │
+│   2. Inyecta contrato tipado (interfaces + data_types)       │
+│   3. Inyecta skills_context + profile_context               │
+│   4. Inyecta learning_context (patrones aprendidos)          │
+│   5. Escalación de 9 niveles:                                │
+│      L1: Qwen temp=0.2     L4: Gemini Flash int1             │
+│      L2: Qwen temp=0.5     L5: Gemini Flash int2             │
+│      L3: Qwen temp=0.7     L6: Gemini Flash int3             │
+│                            L7: Claude Sonnet int1            │
+│                            L8: Claude Sonnet int2            │
+│                            L9: Claude Sonnet int3            │
+│      Si L9 falla → guarda con validated=False y continúa    │
+│   6. Validación sintaxis Python (Docker py_compile)          │
+│   7. Inyección de metadata (goal_id en comentario)           │
+│   8. BehaviorObserver.record_*() → JSONL append-only        │
+│   9. Level runtime check (syntax + startup probe por nivel)  │
+│                                                              │
+│ Archivos generados → source/ en workspace del proyecto       │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 4.V — CONFORMANCE VERIFY          ~30-60s              │
+├──────────────────────────────────────────────────────────────┤
+│ Driver:  Claude Haiku (rápido y barato)                      │
+│ Agente:  ConformanceVerifier                                 │
+│ Input:   source/ + master_contract.json + topology.json      │
+│ Proceso: Para cada módulo, lee archivos_principales y        │
+│          verifica que las firmas implementadas coinciden con  │
+│          el contrato. Reescribe el archivo si no conforma.   │
+│ Output:  Archivos corregidos in-place                        │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 4.1 — IMPORT VALIDATION                                 │
+│ FASE 4.2 — SECURITY REVIEW                                   │
+│ FASE 4.3 — TEST GENERATION        ~20-40s (contract-based)  │
+│ FASE 4.4 — RUN & TRIAGE TESTS                               │
+│ FASE 4.5 — VALIDATION + AUTO-FIX  ~2-5 min                 │
+│ FASE 4.6 — API CONTRACT CHECK                                │
+│ FASE 4.7 — LANGUAGE AUDIT                                    │
+├──────────────────────────────────────────────────────────────┤
+│ Test Generation (4.3):                                       │
+│   TestGenerator: genera <modulo>_test.py con ≥1 test        │
+│     por método del contrato (contract-based testing)         │
+│   FunctionalTestGenerator: genera test_e2e.py por feature    │
+│     del blueprint (tests funcionales vía httpx)              │
+│                                                              │
+│ Run & Triage (4.4):                                          │
+│   Ejecuta pytest (timeout 120s)                              │
+│   Si falla → TestTriage clasifica:                           │
+│     BAD_TEST  → regenera el test                             │
+│     BAD_CODE  → AutoFixAgent repara el archivo fuente        │
+│     UNKNOWN   → registra para análisis manual                │
+│                                                              │
+│ Validation + Auto-fix (4.5):                                 │
+│   ProjectValidator: instala deps, ejecuta proyecto           │
+│   Si hay errores → AutoFixAgent (≤2 rondas de reparación)   │
+│   _validate_and_maybe_regen: detecta módulos con errores     │
+│     concentrados y regenera solo esos módulos                │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 5 — INTEGRATION / BOOT          ~2-5 min               │
+├──────────────────────────────────────────────────────────────┤
+│ BootAgent: detecta stack → instala → arranca → auto-repara   │
+│ SmokeTester: HTTP probe al endpoint principal                 │
+│ DockerSandbox: tests TDD (advisory, no bloquea DONE)         │
+│ VisualInspector: screenshot + análisis visual (opcional)     │
+│ DocsGenerator: genera README.md                              │
+│ Git commit de documentación                                  │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│ FASE 6 — EVOLUTION                    ~10s                  │
+├──────────────────────────────────────────────────────────────┤
+│ Driver:  Gemini Flash                                        │
+│ Agente:  ProfileEvolutionEngine                              │
+│ Input:   Proyecto completo (blueprint, arch, source, tests)  │
+│ Output:  Actualización del experience/ del perfil activo     │
+│          Registra patrones exitosos y escalaciones           │
+└──────────────────────────────────────────────────────────────┘
+         ↓
+
+SALIDA: projects/<project_id>/
+  source/              → Código fuente generado y validado
+  blueprint.json       → Especificación funcional
+  topology.json        → Topología Gemini (módulos + deps)
+  master_contract.json → Contratos tipados Claude (interfaces)
+  execution_plan.json  → Plan topológico de ejecución
+  metadata.json        → Skills, profile, timestamps, estado
+  tests/               → Unit tests + tests funcionales
+  README.md            → Documentación auto-generada
+  lineage.json         → Historia de este proyecto
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. ARQUITECTURA DEL SISTEMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SODA-PROJECT/
+├── kernel/                    → Core del sistema (~15,000 líneas)
+│   ├── orchestrator.py        → Motor principal + máquina de estados
+│   ├── code_generator.py      → Generación con escalación 9 niveles
+│   ├── dependency_graph.py    → DAG + Kahn topological sort
+│   ├── docker_sandbox.py      → Sandbox Docker ephemeral
+│   ├── project_validator.py   → Validación post-generación
+│   │
+│   ├── orchestration/         → Fases del pipeline (PhaseMixin)
+│   │   ├── phase_mixin.py     → Implementación de las 15 sub-fases
+│   │   ├── contract_refinement_loop.py → Loop Claude/Gemini para contratos
+│   │   └── intensity_orchestrator.py   → Perfil de intensidad
+│   │
+│   ├── drivers/               → Abstracción de proveedores IA
+│   │   ├── claude_driver.py   → Anthropic, streaming, prompt cache
+│   │   ├── gemini_driver.py   → Google, probing dinámico de modelos
+│   │   ├── ollama_driver.py   → Qwen local, resolución lazy
+│   │   ├── openai_driver.py   → OpenAI (fallback opcional)
+│   │   └── provider_hub.py    → Enrutamiento con fallback
+│   │
+│   ├── intelligence/          → Agentes especializados de análisis
+│   │   ├── architect.py       → MasterContract v2 (typed interfaces)
+│   │   ├── complexity_classifier.py
+│   │   ├── conformance_verifier.py
+│   │   ├── context_health_monitor.py
+│   │   ├── goal_interpreter.py
+│   │   ├── impact_analyzer.py
+│   │   ├── wisdom_agent.py
+│   │   └── contract_schemas.py → Pydantic schemas MasterContract
+│   │
+│   ├── integrity/             → Contratos y validación
+│   │   ├── contract_auditor.py
+│   │   ├── goal_integrity_validator.py
+│   │   └── validators/        → 7 validators modulares
+│   │
+│   ├── capabilities/          → Selección de skills y perfiles
+│   ├── context/               → Inyección de contexto en prompts
+│   ├── communication/         → Telegram, mensajería
+│   ├── lineage/               → Historia y branching
+│   ├── testing/               → Generación automática de tests
+│   ├── agents/                → AutoFixAgent, ErrorSanitizer
+│   ├── execution/             → ProjectRunner, BootAgent, AutoFixer
+│   ├── monitoring/            → PerformanceTracker, CostTracker
+│   ├── sandbox/               → DynamicEnvironment (venv aislado)
+│   ├── knowledge/             → ChromaDB vectorial
+│   ├── learning/              → BehaviorObserver, KnowledgeBase
+│   ├── validation/            → Validators post-generación
+│   ├── security/              → SecurityReviewer
+│   ├── design/                → UIDesignAgent
+│   └── vision/                → VisualInspector (Gemini vision)
+│
+├── ui/                        → Interfaz de usuario
+│   ├── server.py              → FastAPI + WebSocket (~3,500 líneas)
+│   ├── launcher.py            → pywebview (UI nativa)
+│   └── static/index.html      → Monaco Editor + UI
+│
+├── prompts/<provider>/<rol>.md → 25+ system prompts organizados por rol
+├── skills/base/               → 31 skills con manifest + knowledge
+├── profiles/base/             → 7 profiles con identity + experience
+├── tests/                     → 16 archivos de test (468 tests)
+├── data/learning/             → Observaciones y patrones (JSONL + JSON)
+└── projects/                  → Workspaces generados
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. DRIVERS DE IA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CLAUDE (claude_driver.py)
+  Modelo:    claude-sonnet-4-6 (por defecto), haiku-4-5, opus-4-7
+  Features:
+    - Streaming obligatorio (Anthropic API)
+    - Prompt Caching: bloque cached_context → ~90% ahorro en tokens input
+    - Continuación automática de JSON truncado (stop_reason="max_tokens")
+    - max_tokens inteligente: Haiku=8k, Sonnet=64k, Opus=32k
+    - Soporte imágenes base64 (vision)
+    - Metadata pass-through para observability
+  Config:    ANTHROPIC_API_KEY
+
+GEMINI (gemini_driver.py)
+  Modelos:   gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash (en orden)
+  Features:
+    - Probing dinámico: prueba modelos en orden hasta que uno responda
+    - Modelo preferido via GEMINI_MODEL env var o soda_config.json
+    - Error classification: AUTH, RATE_LIMIT, OVERLOADED, BAD_REQUEST
+    - Timeout: 120s (connect 10s)
+    - Soporte imágenes base64
+  Config:    GEMINI_API_KEY, GEMINI_MODEL (opcional)
+
+OLLAMA / QWEN (ollama_driver.py)
+  Modelos:   qwen2.5-coder:14b (preferido), qwen2.5-coder:7b (fallback)
+  Features:
+    - Resolución lazy async (ollama list en thread pool, cachea resultado)
+    - Auto-selección 14b > 7b según lo disponible
+    - Timeout 180s (Qwen típicamente 15-25s)
+    - Error messages claros con sugerencia de ollama pull
+  Config:    OLLAMA_BASE_URL (default: http://127.0.0.1:11434)
+
+OPENAI (openai_driver.py)
+  Modelos:   gpt-4-turbo, gpt-3.5-turbo
+  Features:  Fallback opcional cuando otros providers fallan
+  Config:    OPENAI_API_KEY
+
+PROVIDER HUB (provider_hub.py)
+  Enrutamiento configurable en soda_config.json:
+    ai_routing: { "claude": ["claude","gemini","openai","ollama"] }
+    ai_phase_provider: { "requirements_interviewer": "claude" }
+  Lógica: primary → fallbacks en orden → si todos fallan, levanta excepción
+
+ESCALACIÓN EN DEV (code_generator.py)
+  Nivel 1-3: Qwen (temp 0.2/0.5/0.7)
+  Nivel 4-6: Gemini Flash (3 intentos)
+  Nivel 7-9: Claude Sonnet (3 intentos)
+  Fallback final: guarda con validated=False, pipeline continúa
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. SKILLS (31) Y PROFILES (7)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SKILLS DISPONIBLES (skills/base/):
+
+  Backend:           skill_fastapi, skill_nodejs, skill_java_spring,
+                     skill_csharp_dotnet, skill_php_laravel, skill_golang,
+                     skill_nestjs, skill_rust, skill_cpp_cmake
+
+  Frontend:          skill_react, skill_nextjs, skill_angular, skill_vue,
+                     skill_electron
+
+  Mobile:            skill_react_native, skill_flutter, skill_android_kotlin
+
+  Datos/DB:          skill_postgresql, skill_mongodb, skill_sqlite
+
+  Auth/Seguridad:    skill_jwt_auth, skill_rest_api
+
+  AI/ML:             skill_langchain, skill_openai, skill_anthropic
+
+  Domain:            skill_finance, skill_legal, skill_marketing,
+                     skill_ui_design, skill_ux
+
+Cada skill tiene:
+  manifest.yaml    → name, category, activation_keywords, applies_to_roles
+  system_prompt.md → Instrucciones específicas inyectadas en el generador
+  knowledge/       → Archivos .md de referencia (patterns, best practices)
+
+PROFILES DISPONIBLES (profiles/base/):
+
+  profile_web_fullstack   → Generalista React + FastAPI + PostgreSQL
+  profile_backend_api     → API-first (FastAPI/Node/Spring)
+  profile_frontend_dev    → React/Next.js especialista
+  profile_fullstack_js    → JavaScript full stack (Node + React)
+  profile_java_dev        → Java/Spring especialista
+  profile_dotnet_dev      → .NET/C# especialista
+  profile_general_dev     → Stack flexible (generalista)
+
+Cada profile tiene:
+  identity.yaml    → name, activation_signals, skills_included
+  experience/      → best_practices.md, common_errors.md, optimization.md
+  style/           → naming_conventions.md, code_structure.md
+
+Los profiles evolucionan después de cada proyecto generado (EVOLUTION phase).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. SISTEMA DE CONTRATOS Y VALIDACIÓN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MASTER CONTRACT (nuevo en v0.1):
+  Archivo:    master_contract.json
+  Generador:  Architect (Claude, modelo según complejidad)
+  Estructura:
+    {
+      "modules": [
+        {
+          "id": "auth_service",
+          "purpose": "Handles JWT authentication",
+          "archivos_principales": ["src/auth/service.py"],
+          "depends_on": ["db_module"],
+          "interfaces": [
+            {
+              "name": "login",
+              "parameters": {"email": "str", "password": "str"},
+              "returns": "Dict[str, Any]",
+              "description": "Authenticate user and return JWT token"
+            }
+          ]
+        }
+      ],
+      "data_types": [
+        {
+          "name": "User",
+          "fields": {"id": "int", "email": "str", "password_hash": "str"}
+        }
+      ],
+      "complexity_level": "simple",
+      "model_used": "claude-haiku-4-5-20251001"
+    }
+
+VALIDATORS (7 modulares, en kernel/integrity/validators/):
+
+  ConsistencyValidator       → Naming consistente, convenciones mantenidas
+  CompletenessValidator      → Todos los módulos con interfaces definidas
+  DependencyValidator        → No ciclos, todas las deps resolubles
+  NamingValidator            → IDs en snake_case, archivos por convención
+  ExtensibilityValidator     → Arquitectura permite extensión sin modificar
+  TraceabilityValidator      → Reqs → módulos → código mapeado
+  TopologyConsistencyValidator → topology.json válido, IDs consistentes
+
+CONTRACT AUDITOR (kernel/integrity/contract_auditor.py):
+  Verifica que el código generado cumple el master_contract:
+    - Las interfaces existen en el código
+    - Las firmas de funciones coinciden con el contrato
+    - Los data_types están correctamente usados
+
+CONFORMANCE VERIFIER (kernel/intelligence/conformance_verifier.py):
+  Post-generación, Haiku audita cada módulo:
+    - Lee archivos del módulo desde archivos_principales
+    - Verifica firma de cada interfaz del contrato
+    - Reescribe el archivo si no conforma (in-place)
+  Enriquecible con topology + master_contract para mayor precisión
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. GENERACIÓN DE TESTS AUTOMÁTICOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TEST GENERATOR (kernel/testing/test_generator.py):
+  Genera unit tests en pytest para cada módulo.
+  Con master_contract: inyecta bloque <contrato_del_modulo> con todas las
+    interfaces tipadas. El prompt exige ≥1 test por método del contrato.
+  Sin master_contract: genera tests heurísticos desde el código fuente.
+  Template: prompts/claude/test_engineer.md
+
+FUNCTIONAL TEST GENERATOR (kernel/testing/functional_test_generator.py):
+  Genera tests E2E HTTP desde blueprint.funcionalidades.
+  Usa httpx para llamadas HTTP a la API.
+  Primero intenta Gemini, fallback a Claude.
+  Genera tests/test_functional_e2e.py.
+  Templates: prompts/gemini/functional_test_engineer.md,
+             prompts/claude/functional_test_engineer.md
+
+TEST TRIAGE (kernel/testing/test_triage.py):
+  Clasifica fallos de tests en 3 categorías:
+
+  BAD_TEST:  El test es incorrecto (no el código)
+    Señales: ImportError en test_, fixture not found, SyntaxError en test_,
+             Cannot find module desde test
+    Acción:  Regenera el archivo de test
+
+  BAD_CODE:  El código bajo test tiene el bug
+    Señales: AssertionError, TypeError, KeyError, 4xx/5xx HTTP status,
+             NotImplementedError
+    Acción:  AutoFixAgent repara el archivo fuente
+
+  UNKNOWN:   No se puede clasificar
+    Acción:  Registra para análisis manual
+
+  TriageResult: (verdict, confidence, matched_pattern, suggestion)
+  BatchTriageReport: (results[], bad_test_count, bad_code_count, unknown_count)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. MONITOREO, SALUD Y COSTOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CONTEXT HEALTH MONITOR (kernel/intelligence/context_health_monitor.py):
+  Monitoreo pasivo, no bloquea el pipeline.
+  Umbrales calibrados:
+    TOKEN_WARN_THRESHOLD = 80,000 tokens (~80% del límite 100k)
+    SLOW_CALL_S          = 30s (Qwen normal: 15-25s)
+    ERROR_RATE_WARN      = 0.50 (evita falso positivo en burst Qwen×3→Claude)
+    ROLLING_WINDOW       = 15 llamadas
+  Niveles de salud:
+    0 = healthy
+    1 = observe (llamadas lentas)
+    2 = warn (tokens altos o error rate)
+    3 = critical (contexto creciendo sostenidamente → sugiere refund)
+
+PERFORMANCE TRACKER (kernel/monitoring/performance_tracker.py):
+  Registra duración/tokens/errores por fase.
+  Genera reporte al final de cada pipeline.
+  record_gemini_phase(), record_claude_phase()
+
+COST TRACKER (kernel/monitoring/cost_tracker.py):
+  Precios por modelo (USD/1M tokens):
+    Claude Sonnet: $3.00 input / $15.00 output
+    Claude Haiku:  $0.80 input / $4.00 output
+    Claude Opus:   $15.00 input / $75.00 output
+    Gemini 2.5 Flash: $0.075 input / $0.30 output
+    Qwen local:    $0.00
+
+USAGE MONITOR (kernel/monitoring/usage_monitor.py):
+  Log de todas las llamadas (provider, role, tokens, duración).
+  get_summary(): total_calls, total_tokens, by_provider, by_role, avg_duration
+
+ALERT MANAGER (kernel/monitoring/alert_manager.py):
+  Emite alertas cuando ContextHealthMonitor reporta nivel ≥ 2.
+  Alertas enviadas por: WebSocket (UI) + Telegram + print
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. UI, API REST Y WEBSOCKET
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SERVER (ui/server.py) — FastAPI + WebSocket:
+
+  Endpoints REST (selección):
+    POST /api/projects               → Crea proyecto
+    GET  /api/projects               → Lista proyectos
+    GET  /api/projects/{id}          → Detalles
+    PUT  /api/projects/{id}          → Modifica
+    POST /api/projects/{id}/modify   → Aplica cambio post-gen
+    POST /api/projects/{id}/refound  → Refunda proyecto
+    POST /api/pipeline/run           → Inicia pipeline
+    POST /api/pipeline/pause         → Pausa
+    POST /api/pipeline/resume        → Reanuda
+    GET  /api/skills                 → Lista skills
+    GET  /api/profiles               → Lista profiles
+    POST /api/projects/{id}/run      → Ejecuta proyecto
+    POST /api/research               → Web research (Perplexity)
+    POST /api/vision/capture         → Screenshot
+    POST /api/vision/inspect         → Análisis visual
+
+  WebSocket /ws:
+    Broadcast en tiempo real a todos los clientes conectados.
+    Eventos: PHASE_START, PHASE_UPDATE, FILE_GENERATED, CHECKPOINT,
+             HEALTH_WARN, SANDBOX_REPORT, FAILED, DONE, LOG, etc.
+
+  CopilotKit:
+    Acciones registradas: create_project, resume_project
+    Temperatura configurable: baja/media/alta
+    Middleware: captura mensajes → Telegram
+
+  Inicialización:
+    load_dotenv() explícito en server.py (no hereda del shell)
+    CORS abierto para desarrollo
+    Single orchestrator global por sesión
+
+LAUNCHER (ui/launcher.py):
+  pywebview: ventana nativa sin Electron
+  Monaco Editor: editor de código integrado
+  Árbol de objetivos interactivo
+  Progress tracker de fases en tiempo real
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. TELEGRAM BOT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bot:       @Soda_black_bot
+Config:    TELEGRAM_BOT_TOKEN en .env
+           chat_id en soda_config.json (guardado al hacer /pair)
+
+Comandos:
+  /pair     → Empareja chat_id actual con SODA
+  /status   → Estado del pipeline en ejecución
+  /projects → Lista de proyectos recientes
+  /help     → Ayuda
+
+Eventos notificados:
+  ✅ Proyecto completado
+  ❌ Pipeline falló (con error)
+  ⚠️  Escalación Qwen → Claude
+  📊 Health warnings (tokens altos, error rate)
+  🔄 Cambios aplicados (modify)
+  🎯 Refundación iniciada
+
+Rate limiting:
+  Worker background thread: ~20 msg/s ceiling
+  Retry automático en 429 (lee retry_after)
+  Truncado a 4096 chars (límite Telegram)
+  Fire-and-forget: send_from_loop() no bloquea el pipeline
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. SANDBOX Y EJECUCIÓN SEGURA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DOCKER SANDBOX (kernel/docker_sandbox.py):
+  Imagen:   python:3.11-slim
+  Límites:  512MB RAM, 1 CPU, 30s timeout
+  Windows:  npipe (no unix socket)
+  Features:
+    - Auto-detección si proyecto necesita Docker (docker-compose.yml)
+    - Auto-start de Docker Desktop si autostart=True
+    - Contenedores ephemeral (se eliminan tras ejecución)
+    - Validación de sintaxis Python (py_compile dentro del contenedor)
+
+DYNAMIC ENVIRONMENT (kernel/sandbox/dynamic_env.py):
+  Venv aislado por proyecto (.soda_venv en workspace)
+  Lifecycle:
+    1. ensure_venv()         → crea .soda_venv si no existe
+    2. install_requirements() → pip install desde requirements.txt
+    3. run_syntax_check()    → py_compile todos los .py
+    4. run_project()         → ejecuta entry point
+    5. parse_errors()        → extrae file/line de tracebacks
+  Timeouts: venv=60s, install=180s, exec=60s
+
+BOOT AGENT (kernel/execution/boot_agent.py):
+  Detecta stack → instala deps → arranca → auto-repara si falla
+  Soporta: Python, Node.js, Java, Rust, Go, C#, C++, Flutter
+
+PROJECT RUNNER (kernel/execution/project_runner.py):
+  detect_stack → venv/env → install → run → smoke test
+  install_timeout=300s, run_timeout=60s
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. MEMORIA, LINAJE Y BRANCHING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROJECT LINEAGE (kernel/lineage/project_lineage.py):
+  Log append-only: projects/lineage.json
+  Registra: project_id, description, parent_id, branch_name,
+            state (running/done/failed), skills, profile,
+            started_at, completed_at
+
+BRANCHING (kernel/lineage/branching.py):
+  Trigger: change_type in {structural, scope, new_module} AND requires_regeneration=True
+  Operaciones:
+    create_branch(parent_id, branch_name)  → Copia workspace completo
+    promote_branch(parent_id, branch_id)   → Sobrescribe source/ del padre
+    run_both_and_compare(...)              → Comparación A/B paralela
+  Branch ID: {parent_id}_branch_{name}_{timestamp}
+
+REFOUNDATION (kernel/intelligence/refoundation.py):
+  Cuando el contexto es insostenible (~80k tokens):
+    1. Condensa blueprint + architecture en descripción concisa
+    2. Incluye key_decisions del proyecto original
+    3. Lanza run() con la descripción condensada → nuevo proyecto
+    4. Registra parent_id en lineage del nuevo proyecto
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+15. SISTEMA DE APRENDIZAJE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BEHAVIOR OBSERVER (kernel/learning/behavior_observer.py):
+  Captura cada generación, escalación y fase:
+    code_generation.jsonl  → {provider, filepath, module, framework,
+                               validated, attempt, task_summary, response_snippet}
+    escalations.jsonl      → {filepath, qwen_attempts[], cloud_provider,
+                               cloud_response_snippet, cloud_validated}
+    phase_outcomes.jsonl   → {phase, provider, duration_s, success}
+    architecture.jsonl     → {blueprint, architecture, topology}
+  Thread-safe con file lock.
+
+KNOWLEDGE BASE (kernel/learning/knowledge_base.py):
+  Construye patrón library desde observaciones + patrones curados:
+    data/learning/patterns/python.json
+    data/learning/patterns/javascript.json
+    data/learning/patterns/typescript.json
+    data/learning/patterns/cross_language.json
+  Búsqueda: by language + framework + task_description
+  Los patrones se inyectan como learning_context en cada generación.
+
+CHROMADB (kernel/knowledge/chromadb_manager.py):
+  Colecciones: skills, profiles, architecture_patterns, code_examples
+  Operaciones: add(collection, documents, ids), query(collection, query, top_k)
+  Búsqueda semántica para enrichment de contexto.
+
+PROFILE EVOLUTION (kernel/capabilities/profile_evolution.py):
+  Al finalizar cada proyecto:
+    Actualiza experience/ del profile activo
+    Registra escalaciones (cuándo Qwen falló)
+    Sugiere skills si se detectaron gaps
+    Registra patterns que funcionaron bien
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+16. TESTS DEL PROPIO SISTEMA (468 tests)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Total: 468 tests — 0 fallos — ~7s (sin pipeline) / ~6min (con pipeline)
+
+Archivos de test:
+  tests/
+  ├── test_unit.py                      → 225 unit tests
+  ├── test_pipeline.py                  → 28 integration tests (pipeline mockeado)
+  ├── test_performance_and_conformance.py → 23 tests
+  ├── test_metadata_injector.py         → Tests de metadata injection
+  ├── test_log_collector.py             → Tests de log collector
+  ├── test_runtime_manager.py           → Tests de runtime
+  ├── intelligence/
+  │   ├── test_architect.py             → 16 tests (MasterContract generation)
+  │   ├── test_complexity_classifier.py → Tests de clasificación
+  │   └── test_contract_schemas.py      → Tests de schemas Pydantic
+  └── integrity/
+      ├── test_architect_audit_integration.py → 11 tests (pipeline completo)
+      ├── test_contract_auditor.py           → Tests de auditoría
+      ├── test_contract_refinement_loop.py   → Tests de loop refinement
+      └── test_validators.py                 → 40 tests (todos los validators)
+
+Sin API keys, sin Docker, sin Ollama. Todo mockeado.
+
+Ejecución:
+  python -m pytest tests/ --ignore=tests/test_pipeline.py -q  → 440 tests, ~2s
+  python -m pytest tests/ -q                                   → 468 tests, ~6min
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+17. CAMBIOS Y MEJORAS IMPLEMENTADAS EN ESTA VERSIÓN (v0.1)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── ARQUITECTURA v2: CONTRATOS TIPADOS ─────────────────────────────────────────
+
+[NUEVO] Architect (kernel/intelligence/architect.py)
+  Generador de MasterContract con selección de modelo por complejidad.
+  Antes: arquitectura solo contenía módulos con responsabilidades textuales.
+  Ahora: cada módulo tiene interfaces tipadas (name, parameters{}, returns)
+         y data_types definidos como schemas JSON.
+  Benefit: el generador de código sabe exactamente qué firmas implementar.
+
+[NUEVO] ComplexityClassifier (kernel/intelligence/complexity_classifier.py)
+  Clasifica blueprint en simple/medium/complex.
+  Selecciona Haiku/Sonnet/Opus según complejidad.
+  Benefit: costo proporcional a la complejidad real del proyecto.
+
+[NUEVO] ContractRefinementLoop (kernel/orchestration/contract_refinement_loop.py)
+  Loop de 3 intentos Claude + 2 intentos Gemini para generar master_contract.
+  Si ambos fallan → usa arquitectura legacy de topology.json.
+  Benefit: resiliencia total en la fase de arquitectura.
+
+[NUEVO] contract_schemas.py (kernel/intelligence/contract_schemas.py)
+  Pydantic schemas para MasterContract, ModuleSpec, InterfaceSpec, DataType.
+  Benefit: validación tipada del contrato en runtime.
+
+[NUEVO] Topology v2 con IDs snake_case
+  Gemini ahora genera topology.json con campo "id" (no "nombre").
+  depende_de_ids[] (no "dependencias").
+  DependencyGraph soporta ambos formatos.
+  Benefit: IDs determinísticos y validables, compatibilidad hacia atrás.
+
+── CONTRACT-BASED TESTING ──────────────────────────────────────────────────────
+
+[NUEVO] TestGenerator v2 (kernel/testing/test_generator.py)
+  Inyecta bloque <contrato_del_modulo> con todas las interfaces del módulo.
+  Exige ≥1 test por método del contrato.
+  Template contract-aware: prompts/claude/test_engineer.md
+  Benefit: tests que verifican lo que el contrato promete.
+
+[NUEVO] FunctionalTestGenerator (kernel/testing/functional_test_generator.py)
+  Genera tests E2E HTTP desde blueprint.funcionalidades.
+  Usa httpx para llamadas reales a la API.
+  Fallback Gemini → Claude.
+  Benefit: cobertura de flujos de usuario end-to-end.
+
+[NUEVO] TestTriage (kernel/testing/test_triage.py)
+  Clasifica fallos: BAD_TEST / BAD_CODE / UNKNOWN.
+  Acción automática: regenera tests malos, auto-fix código buggy.
+  Benefit: pipeline no se frena en el primer test rojo.
+
+[NUEVO] _phase_run_and_triage_tests (kernel/orchestration/phase_mixin.py)
+  Nueva fase 4.4 que ejecuta la suite de tests y triagea fallos.
+  Timeout 120s, soporte pytest/jest/go_test.
+  Benefit: verificación post-generación antes de validación.
+
+── CONFORMANCE VERIFIER MEJORADO ──────────────────────────────────────────────
+
+[MEJORADO] ConformanceVerifier (kernel/intelligence/conformance_verifier.py)
+  Ahora acepta topology=dict y master_contract=dict como parámetros.
+  Con topology: usa archivos_principales para descubrir archivos correctos.
+  Con master_contract: enriquece el prompt con interfaces tipadas.
+  Benefit: verificación más precisa, menos falsos positivos.
+
+── CLEANUP Y REFACTORIZACIÓN ──────────────────────────────────────────────────
+
+[LIMPIEZA] .soda_archive/ — código muerto archivado
+  Archivados scripts huérfanos de sesiones anteriores:
+  patch_wisdom.py, patch_bridge.py, patch_cleanup.py, patch_docker.py,
+  patch_hardware_cycle.py, patch_rag.py, patch_server_cleanup.py, patch_tg.py,
+  auto_test.py, check_errors.py, clagada.txt, code_generator_backup2.py
+
+[LIMPIEZA] kernel/agents/__init__.py
+  Exports explícitos: AutoFixAgent, sanitize_runtime_error, extract_files_from_error.
+  Antes: archivo vacío.
+
+[LIMPIEZA] kernel/orchestration/phase_mixin.py
+  _phase_test_generation(): carga master_contract.json del workspace,
+    pasa a TestGenerator + FunctionalTestGenerator.
+  _phase_run_and_triage_tests(): nueva fase completa.
+  Limpieza de imports huérfanos.
+
+[LIMPIEZA] kernel/orchestrator.py
+  FunctionalTestGenerator instanciado en __init__.
+  Imports lazy para módulos de triage (evita circular imports).
+
+── TESTS DEL SISTEMA ──────────────────────────────────────────────────────────
+
+[NUEVO] tests/intelligence/test_architect.py — 2 tests añadidos
+  test_generate_with_topology_does_not_crash()
+  test_generate_topology_none_explicit_matches_default()
+
+[NUEVO] tests/test_performance_and_conformance.py — 3 tests añadidos
+  test_verify_with_topology_uses_archivos_principales()
+  test_verify_with_master_contract_enriches_prompt()
+  test_verify_topology_and_master_contract_combined()
+
+[NUEVO] tests/test_unit.py — TestPhaseArchitectureHandlerIntegration reescrito
+  3 tests reescritos (los anteriores probaban comportamiento eliminado):
+  test_topology_calls_gemini_exactly_once()
+  test_master_contract_loop_is_executed()
+  test_approved_contract_is_saved()
+  Setup corregido: MagicMock(spec=Project) requiere attrs explícitos.
+  Patch correcto: ContractRefinementLoop tiene import lazy (dentro de función).
+
+[FIX] tests/test_pipeline.py — Fixture orchestrator mejorada
+  DynamicEnvironment mockeado: ensure_venv/install_requirements/run_syntax_check/run_tests
+  _validate_and_maybe_regen mockeado: evita real venv creation en tests
+  Antes: test_plan_built_correctly COLGABA indefinidamente (~∞ min)
+  Ahora: pipeline tests corren en ~6 min sin crear venvs reales
+
+[FIX] Aislamiento asyncio en todos los test files
+  tests/intelligence/test_architect.py
+  tests/integrity/test_architect_audit_integration.py
+  tests/integrity/test_contract_auditor.py
+  tests/integrity/test_contract_refinement_loop.py
+  tests/integrity/test_validators.py
+  tests/test_performance_and_conformance.py
+  Cambio: asyncio.get_event_loop().run_until_complete() → asyncio.run()
+  Antes: 98 tests fallaban cuando se ejecutaban en combinación (Python 3.11
+         cierra el event loop después de asyncio.run() y get_event_loop()
+         posterior lanza RuntimeError).
+  Ahora: todos los tests son independientes del orden de ejecución.
+
+── DOCS Y MEMORIA ─────────────────────────────────────────────────────────────
+
+[NUEVO] memory/project_soda_core_refactor.md
+  Documento de referencia interno (para Claude Code) con:
+  APIs estables, invariantes del pipeline, qué NO cambiar sin análisis.
+
+[NUEVO] SODA_0.1.txt (este archivo)
+  Inventario completo de funcionalidades, arquitectura y cambios.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ESTADO ACTUAL — RESUMEN EJECUTIVO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  468 tests — 0 fallos
+  85 funcionalidades identificadas
+  Pipeline de 8 fases + 7 sub-fases
+  9 niveles de escalación en generación de código
+  7 validators modulares de contratos
+  31 skills + 7 profiles editables
+  4 drivers de IA (Claude, Gemini, Ollama, OpenAI)
+
+Listo para producción en Windows 11 nativo.
+Altamente extensible: agregar skill = crear carpeta + manifest.yaml.
+Sin vendor lock-in: si Claude falla → Gemini → Qwen local.
+
+
+================================================================================
+Fin del documento SODA 0.1
+================================================================================

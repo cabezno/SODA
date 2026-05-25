@@ -10,21 +10,22 @@ class ModelPrice:
 
 
 class CostTracker:
-    # Conservative references. Local models are always 0.
+    # Standard Google Cloud Vertex AI prices (USD per 1M tokens)
     PRICES = {
-        "claude": {
-            "claude-sonnet-4-6": ModelPrice(input_per_1m=3.0, output_per_1m=15.0),
-            "claude-sonnet-4-5-20250929": ModelPrice(input_per_1m=3.0, output_per_1m=15.0),
-            "claude-haiku-4-5": ModelPrice(input_per_1m=0.8, output_per_1m=4.0),
-        },
         "gemini": {
-            # SODA prioriza free tier en Gemini; keep near-zero unless billed usage is configured.
-            "gemini-2.5-pro": ModelPrice(input_per_1m=0.0, output_per_1m=0.0),
-            "gemini-2.5-flash": ModelPrice(input_per_1m=0.0, output_per_1m=0.0),
-            "gemini-3.0-pro": ModelPrice(input_per_1m=0.0, output_per_1m=0.0),
-            "gemini-3.0-flash": ModelPrice(input_per_1m=0.0, output_per_1m=0.0),
-            "gemini-2.0-pro": ModelPrice(input_per_1m=0.0, output_per_1m=0.0),
-            "gemini-2.0-flash": ModelPrice(input_per_1m=0.0, output_per_1m=0.0),
+            "gemini-3.1-pro-preview": ModelPrice(input_per_1m=1.25, output_per_1m=10.0),
+            "gemini-3-flash-preview": ModelPrice(input_per_1m=0.15, output_per_1m=0.60),
+            "gemini-3.1-flash-lite-preview": ModelPrice(input_per_1m=0.075, output_per_1m=0.30),
+            "gemini-2.5-pro": ModelPrice(input_per_1m=1.25, output_per_1m=3.75),
+            "gemini-2.5-flash": ModelPrice(input_per_1m=0.10, output_per_1m=0.30),
+        },
+        "gemini_pro": {
+            "gemini-3.1-pro-preview": ModelPrice(input_per_1m=1.25, output_per_1m=10.0),
+            "gemini-2.5-pro": ModelPrice(input_per_1m=1.25, output_per_1m=3.75),
+        },
+        "claude": {
+            "claude-3-5-sonnet-20241022": ModelPrice(input_per_1m=3.0, output_per_1m=15.0),
+            "claude-3-haiku-20240307": ModelPrice(input_per_1m=0.25, output_per_1m=1.25),
         },
         "ollama": {},
     }

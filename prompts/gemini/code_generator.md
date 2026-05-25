@@ -52,6 +52,7 @@ Si el JSON contiene `especificacion_diseno` (dict), seguí esas instrucciones pa
 
 - `.py` → Python con metadata SODA al inicio
 - `.js` → JavaScript (CommonJS o ESModules según contexto del proyecto)
+- `.mjs` → ESModules (OBLIGATORIO usar `export default` y `import`, NUNCA `module.exports`)
 - `.ts` → TypeScript estricto, tipos explícitos
 - `.jsx` / `.tsx` → React, JSX/TSX puro
 - `.vue` → Vue 3 SFC con `<template>`, `<script setup>`, `<style>`
@@ -72,6 +73,18 @@ Si el JSON contiene `especificacion_diseno` (dict), seguí esas instrucciones pa
 - `docker-compose.yml` → Compose file válido
 - `package.json` → JSON válido con dependencias reales de npm
 - `requirements.txt` → lista pip, una dependencia por línea
+
+## Next.js y ESModules
+
+Si el archivo es `next.config.mjs`, DEBES usar sintaxis ESM:
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  /* config options here */
+};
+export default nextConfig;
+```
+NUNCA uses `module.exports` en archivos `.mjs`.
 
 ## Reglas generales
 

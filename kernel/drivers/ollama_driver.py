@@ -9,11 +9,28 @@ PREFERRED_MODELS = ["qwen2.5-coder:14b", "qwen2.5-coder:7b"]
 CHAT_TIMEOUT = 180  # seconds — Qwen 7B typically 15-25s; 180 gives generous headroom
 
 
+import psutil
 def _resolve_model_sync(host: str, preferred: list[str]) -> str:
-    """Return the first model from `preferred` that Ollama has pulled, else the last fallback."""
+    """Return 14b if RAM is sufficient, else fallback to 7b."""
     try:
+        import ollama
         client = ollama.Client(host=host)
         available = {m["name"] for m in client.list().get("models", [])}
+        
+        # Hardware Check
+        ram = psutil.virtual_memory()
+        free_ram_gb = ram.available / (1024 ** 3)
+        
+        # 14b usually needs at least ~10GB of free RAM/VRAM combined to run decently
+        # If we have less than 8GB of system RAM free, we aggressively fallback to 7b.
+        if "qwen2.5-coder:14b" in available and free_ram_gb >= 8.0:
+            return "qwen2.5-coder:14b"
+        elif "qwen2.5-coder:7b" in available:
+            if free_ram_gb < 8.0:
+                print(f"  [Ollama] RAM crítica detectada ({free_ram_gb:.1f}GB libres). Activando fallback a Qwen 7B.")
+            return "qwen2.5-coder:7b"
+            
+        # Standard fallback if neither specific logic hits
         for candidate in preferred:
             if candidate in available:
                 return candidate
@@ -49,10 +66,18 @@ class OllamaDriver(BaseDriver):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         response_format: str = "text",
+        model: str | None = None,
         images: list | None = None,
         metadata: dict | None = None,
+        **kwargs,
     ) -> DriverResponse:
-        model = await self._get_model()
+        # Honour explicit model request (e.g. from ModelLockedProxy or FinopsRouter).
+        # Fall back to lazy hardware-aware resolution only when no model specified.
+        if model:
+            resolved_model = model
+        else:
+            resolved_model = await self._get_model()
+        model = resolved_model
         client = ollama.AsyncClient(host=self.host)
         t0 = perf_counter()
         try:

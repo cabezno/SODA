@@ -30,10 +30,13 @@ class GenericOpenAIDriver(BaseDriver):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         response_format: str = "text",
+        model: Optional[str] = None, # Permitimos sobrescribir el modelo
         images: list | None = None,
         metadata: dict | None = None,
+        **kwargs # Capturamos argumentos extra (como response_schema) para no crashear
     ) -> DriverResponse:
         t0 = perf_counter()
+        target_model = model or self.model
 
         if not self._api_key:
             return self._build_response(
@@ -41,12 +44,12 @@ class GenericOpenAIDriver(BaseDriver):
                 system_prompt=system_prompt,
                 user_message=user_message,
                 latency_start=t0,
-                model_used=self.model,
+                model_used=target_model,
                 metadata=metadata,
             )
 
         payload: dict = {
-            "model": self.model,
+            "model": target_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -55,7 +58,10 @@ class GenericOpenAIDriver(BaseDriver):
             "temperature": temperature,
         }
         if response_format == "json":
+            # DeepSeek y otros compatibles suelen preferir refuerzo en el prompt 
+            # ya que json_object a veces no es soportado nativamente por todos los endpoints
             payload["response_format"] = {"type": "json_object"}
+            user_message += "\n\nIMPORTANTE: Responde únicamente con un objeto JSON válido."
 
         client = self._get_client()
         try:
@@ -87,7 +93,10 @@ class GenericOpenAIDriver(BaseDriver):
                 )
 
             body = response.json()
-            content = body["choices"][0]["message"]["content"]
+            message_obj = body["choices"][0]["message"]
+            content = message_obj.get("content", "")
+            reasoning = message_obj.get("reasoning_content") or message_obj.get("reasoning") # Algunos proveedores usan 'reasoning'
+            
             usage = body.get("usage", {})
             return self._build_response(
                 content=content,
@@ -97,6 +106,7 @@ class GenericOpenAIDriver(BaseDriver):
                 model_used=self.model,
                 tokens_input=usage.get("prompt_tokens"),
                 tokens_output=usage.get("completion_tokens"),
+                reasoning_content=reasoning,
                 metadata=metadata,
             )
 
@@ -119,13 +129,6 @@ class GenericOpenAIDriver(BaseDriver):
                 latency_start=t0, model_used=self.model, metadata=metadata,
             )
 
-    def prompt(self, system: str, user: str) -> str:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                    return ex.submit(asyncio.run, self.call(system, user)).result().content
-            return loop.run_until_complete(self.call(system, user)).content
-        except RuntimeError:
-            return asyncio.run(self.call(system, user)).content
+    async def prompt(self, system: str, user: str) -> str:
+        response = await self.call(system, user)
+        return response.content

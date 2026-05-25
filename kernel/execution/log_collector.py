@@ -162,7 +162,7 @@ class LogCollector:
 
     def __init__(
         self,
-        max_bytes_per_tool: int = 3_000,
+        max_bytes_per_tool: int = 1_000,
         max_age_minutes: int = 5,  # short window prevents cross-project contamination
     ) -> None:
         self.max_bytes_per_tool = max_bytes_per_tool

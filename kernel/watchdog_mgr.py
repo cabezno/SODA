@@ -145,6 +145,54 @@ class ProjectWatchdog:
 
             self._snapshot = current
 
+    def take_tree_snapshot(self) -> dict[str, dict]:
+        """
+        [IMP-022] Toma una firma completa del estado actual del árbol de archivos.
+        """
+        snapshot = {}
+        if not self.workspace.exists():
+            return snapshot
+            
+        for p in self.workspace.rglob("*"):
+            if p.is_file():
+                # Ignorar carpetas de sistema
+                if any(d in str(p) for d in self.IGNORED_DIRS):
+                    continue
+                try:
+                    stat = p.stat()
+                    snapshot[str(p.relative_to(self.workspace))] = {
+                        "size": stat.st_size,
+                        "mtime": stat.st_mtime
+                    }
+                except OSError:
+                    pass
+        return snapshot
+
+    def verify_and_restore_tree(self, previous_snapshot: dict[str, dict]) -> list[str]:
+        """
+        [IMP-022] Compara el estado actual con el snapshot previo y restaura 
+        archivos eliminados o drásticamente truncados.
+        """
+        violations = []
+        current_snapshot = self.take_tree_snapshot()
+
+        for rel_path, meta in previous_snapshot.items():
+            full_path = self.workspace / rel_path
+
+            # Caso 1: El archivo fue eliminado
+            if rel_path not in current_snapshot:
+                if self.restore_file(full_path):
+                    violations.append(f"Restaurado archivo eliminado: {rel_path}")
+                else:
+                    violations.append(f"Fallo al restaurar: {rel_path}")
+
+            # Caso 2: Reducción drástica de tamaño (Vaciado accidental)
+            elif current_snapshot[rel_path]["size"] < (meta["size"] * 0.4) and meta["size"] > 100:
+                if self.restore_file(full_path):
+                    violations.append(f"Revertido truncado destructivo: {rel_path} ({meta['size']} -> {current_snapshot[rel_path]['size']} bytes)")
+
+        return violations
+
     def _take_snapshot(self) -> dict[str, float]:
         snap: dict[str, float] = {}
         for p in self.workspace.rglob("*"):

@@ -1,0 +1,87 @@
+```cpp
+#include <iostream>
+#include <string>
+#include <curl/curl.h>
+
+// Define the structure for AI API credentials
+struct Credentials {
+    std::string api_key;
+    std::string endpoint;
+};
+
+// Define the structure for the prompt payload
+struct PromptPayload {
+    // Add fields according to the specific requirements of the AI model
+    std::string prompt_text;
+    int max_tokens;
+    double temperature;
+};
+
+// Define the structure for the API call response
+struct ApiResponse {
+    bool success;
+    std::string data;
+    std::string error_message;
+};
+
+// Function to handle the response from CURL
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    ((std::string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
+// Function to make an API call to the external AI model
+ApiResponse MakeApiCall(const Credentials& credentials, const PromptPayload& payload) {
+    ApiResponse response;
+    CURL* curl;
+    CURLcode res;
+
+    curl = curl_easy_init();
+    if(curl) {
+        // Set up the URL with the endpoint and api key
+        std::string url = credentials.endpoint + "?api_key=" + credentials.api_key;
+
+        // Set up the POST data
+        std::string post_data = "prompt=" + payload.prompt_text +
+                               "&max_tokens=" + std::to_string(payload.max_tokens) +
+                               "&temperature=" + std::to_string(payload.temperature);
+
+        // Set up the CURL options
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.data);
+
+        // Perform the API call
+        res = curl_easy_perform(curl);
+
+        // Check for errors
+        if(res != CURLE_OK) {
+            response.success = false;
+            response.error_message = curl_easy_strerror(res);
+        } else {
+            response.success = true;
+        }
+
+        // Clean up
+        curl_easy_cleanup(curl);
+    }
+    return response;
+}
+
+// Main function to demonstrate the API call
+int main() {
+    Credentials credentials = {"your_api_key_here", "https://api.openai.com/v1/engines/davinci-codex/completions"};
+    PromptPayload payload = {"Translate this sentence from English to French: 'Hello, how are you?'", 50, 0.7};
+
+    ApiResponse response = MakeApiCall(credentials, payload);
+
+    if(response.success) {
+        std::cout << "API Response: " << response.data << std::endl;
+    } else {
+        std::cout << "Error: " << response.error_message << std::endl;
+    }
+
+    return 0;
+}
+```

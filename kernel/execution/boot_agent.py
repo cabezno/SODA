@@ -1,35 +1,28 @@
 """
 BootAgent — installs and boots a generated project, captures exact errors,
 maps them to source files, and runs a targeted fix loop.
-
-Flow:
-  1. install()  — run pip install / npm install / go mod tidy / etc.
-  2. boot()     — start the process, capture first N lines of stdout/stderr
-  3. parse_errors() — map error messages to source files + line numbers
-  4. fix_loop() — call Claude/Gemini with exact errors + relevant file content
-  5. retry()    — repeat up to MAX_ROUNDS
-
-Returns a BootReport with all attempts and final status.
+Strictly uses DockerSandbox for all executions (Zero-Host Policy).
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import sys
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable
 
-from kernel.execution.project_runner import _kill_process_tree
-
 from kernel.execution.log_collector import LogCollector
+from kernel.docker_sandbox import DockerSandbox, SandboxResult
 
-
-MAX_ROUNDS = 3
-BOOT_TIMEOUT = 30       # seconds to wait for process to start
-INSTALL_TIMEOUT = 120   # seconds for dependency installation
-OUTPUT_LINES = 80       # max lines of output to capture
-
+MAX_ROUNDS = 5
+BOOT_TIMEOUT = 45 
+INSTALL_TIMEOUT = 180
+OUTPUT_LINES = 100
+HEALTH_CHECK_TIMEOUT = 15
+HEALTH_CHECK_INTERVAL = 0.5
 
 @dataclass
 class BootError:
@@ -40,7 +33,6 @@ class BootError:
 
     def to_dict(self) -> dict:
         return {"file": self.file, "line": self.line, "message": self.message}
-
 
 @dataclass
 class BootAttempt:
@@ -61,7 +53,6 @@ class BootAttempt:
             "files_fixed": self.files_fixed,
         }
 
-
 @dataclass
 class BootReport:
     stack: str
@@ -80,551 +71,234 @@ class BootReport:
             "last_errors": [e.to_dict() for e in (self.attempts[-1].errors if self.attempts else [])],
         }
 
+_FATAL_ENV_ERRORS = [
+    (re.compile(r"CMAKE_CXX_COMPILER not set|CMAKE_C_COMPILER not set|No CMAKE_CXX_COMPILER", re.I), "Falta compilador C++. Instalá Build Tools."),
+    (re.compile(r"'cmake' is not recognized|cmake.*not found", re.I), "CMake no instalado."),
+    (re.compile(r"'cargo' is not recognized|cargo.*not found", re.I), "Rust no instalado."),
+    (re.compile(r"'docker' is not recognized|docker.*not found", re.I), "Docker no instalado."),
+    (re.compile(r"No space left on device|ENOSPC", re.I), "Sin espacio en disco."),
+]
 
-# ─────────────────────────────── env bootstrap ──
-
-_NPM_VALID_RE = re.compile(
-    r'^(?!@/)(?!~)(?!\.)(@[a-z0-9\-~][a-z0-9\-._~]*/[a-z0-9\-._~]+|[a-z0-9\-~][a-z0-9\-._~]*)$'
-)
-_NODE_BUILTINS = frozenset({
-    "fs", "fs/promises", "path", "os", "crypto", "stream", "util",
-    "http", "https", "net", "events", "buffer", "child_process", "url",
-    "querystring", "readline", "assert", "module", "process",
-})
-
+def _detect_fatal_env_error(output: str) -> str | None:
+    for pattern, fix in _FATAL_ENV_ERRORS:
+        if pattern.search(output): return fix
+    return None
 
 def _sanitize_package_json(pkg_path: Path) -> None:
-    """Remove invalid/hallucinated entries from package.json before npm install (PASO 3).
-
-    Rejects: TypeScript path aliases (@/...), sub-path imports (next/link),
-    Node built-ins, and anything that doesn't match a valid npm package name.
-    """
-    import json
     try:
-        text = pkg_path.read_text(encoding="utf-8")
-        pkg = json.loads(text)
+        pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
         changed = False
-        removed_total: list[str] = []
-        for section in ("dependencies", "devDependencies", "peerDependencies"):
-            deps = pkg.get(section, {})
-            if not isinstance(deps, dict):
-                continue
-            bad = [
-                k for k in deps
-                if k in _NODE_BUILTINS
-                or not _NPM_VALID_RE.match(k)
-            ]
+        for s in ("dependencies", "devDependencies"):
+            deps = pkg.get(s, {})
+            bad = [k for k in deps if k.startswith(("@/", "~", "."))]
             for k in bad:
                 del deps[k]
-                removed_total.append(k)
                 changed = True
         if changed:
-            pkg_path.write_text(json.dumps(pkg, indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"  [BootAgent] Sanitized package.json — removed {len(removed_total)}: {removed_total[:10]}")
-    except Exception as e:
-        print(f"  [BootAgent] Could not sanitize package.json: {e}")
-
+            pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
+    except Exception: pass
 
 def _bootstrap_env(source_dir: Path, notify=None) -> None:
-    """Copy .env.example → .env.local (and .env) if they don't exist yet.
-
-    Next.js reads .env.local; Python/FastAPI reads .env.
-    SODA generates .env.example but never creates the real file — without it,
-    process.env vars are undefined and rewrites/connections break at startup.
-    """
-    _notify = notify or (lambda *a, **kw: None)
-    candidates = [
-        (".env.local.example", ".env.local"),
-        (".env.example",       ".env.local"),
-        (".env.example",       ".env"),
-    ]
-    copied: list[str] = []
+    candidates = [(".env.example", ".env"), (".env.example", ".env.local")]
     for src_name, dst_name in candidates:
-        src = source_dir / src_name
-        dst = source_dir / dst_name
+        src, dst = source_dir / src_name, source_dir / dst_name
         if src.exists() and not dst.exists():
             try:
                 import shutil
                 shutil.copy2(src, dst)
-                copied.append(dst_name)
-            except OSError as e:
-                _notify(
-                    f"BootAgent: no se pudo copiar {src_name} → {dst_name}: {e}",
-                    "HEALTH_WARN",
-                    {"phase": "boot_env", "src": src_name, "dst": dst_name, "error": str(e)},
-                )
-    if copied:
-        _notify(
-            f"BootAgent: creó {', '.join(copied)} desde .env.example (completá las API keys reales).",
-            "LOG",
-            {"env_files": copied},
-        )
+            except Exception: pass
 
+def _detect_commands(source_dir: Path, architecture: dict) -> tuple[list[str], list[str], str, Path]:
+    # Recursive search for manifests
+    py_reqs = list(source_dir.rglob("requirements.txt"))
+    py_proj = list(source_dir.rglob("pyproject.toml"))
+    pkg_jsons = list(source_dir.rglob("package.json"))
+    dc_files = list(source_dir.rglob("docker-compose.y*ml"))
 
-# ─────────────────────────────── stack commands ──
+    # Check if docker is actually available in the system
+    import shutil
+    docker_available = shutil.which("docker") is not None
 
-def _detect_commands(source_dir: Path, architecture: dict) -> tuple[list[str], list[str], str]:
-    """Returns (install_cmd, run_cmd, stack_name)."""
-    stack = architecture.get("stack", {})
-    backend = (stack.get("backend") or "").lower()
-    frontend = (stack.get("frontend") or "").lower()
+    # Docker Compose wins for microservices ONLY if docker is installed
+    if dc_files and docker_available:
+        f = dc_files[0]
+        cmd = "docker-compose" # simplify
+        return [cmd, "-f", f.name, "build"], [cmd, "-f", f.name, "up", "-d"], "docker-compose", f.parent
 
-    # Check Node.js FIRST — if package.json exists it's the primary entrypoint.
-    # A project with both package.json and requirements.txt (fullstack) should
-    # start the frontend; Python backend is managed separately.
-    if (source_dir / "package.json").exists():
-        npm = "npm"
-        # Sanitize package.json before installing — remove TS path aliases and sub-paths
-        _sanitize_package_json(source_dir / "package.json")
-        # --legacy-peer-deps avoids peer-dep conflicts that block install on many generated projects
-        install = [npm, "install", "--legacy-peer-deps"]
-        # Check scripts
-        try:
-            import json
-            pkg = json.loads((source_dir / "package.json").read_text(encoding="utf-8"))
-            scripts = pkg.get("scripts", {})
-            if "dev" in scripts:
-                run = [npm, "run", "dev"]
-            elif "start" in scripts:
-                run = [npm, "start"]
-            else:
-                run = [npm, "run", "build"]
-        except Exception:
-            run = [npm, "start"]
-        return install, run, "node"
+    # Node.js
+    if pkg_jsons:
+        f = pkg_jsons[0]
+        _sanitize_package_json(f)
+        return ["npm", "install"], ["npm", "start"], "node", f.parent
 
-    if (source_dir / "requirements.txt").exists() or (source_dir / "pyproject.toml").exists():
-        install = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"]
-        for candidate in ("main.py", "app.py", "run.py", "server.py", "manage.py"):
-            if (source_dir / candidate).exists():
-                run = [sys.executable, candidate]
-                return install, run, "python"
-        run = [sys.executable, "-m", "uvicorn", "main:app", "--port", "8080"]
-        return install, run, "python"
+    # Python
+    if py_reqs or py_proj or any(f.suffix == ".py" for f in source_dir.rglob("*")):
+        manifest = (py_reqs or py_proj)[0] if (py_reqs or py_proj) else None
+        eff_cwd = manifest.parent if manifest else source_dir
+        req_file = "requirements.txt" if (eff_cwd / "requirements.txt").exists() else None
+        
+        # In Zero-Host, we use the python interpreter inside the container.
+        # sys.executable refers to the host's python, so we replace it with "python" or "pip".
+        install = ["pip", "install", "-r", req_file] if req_file else []
+        
+        # Priority 1: Standard entry points
+        for c in ("main.py", "app.py", "run.py", "server.py", "api.py"):
+            if (eff_cwd / c).exists():
+                return install, ["python", c], "python", eff_cwd
+        
+        # Priority 2: Files with __main__
+        for py_file in eff_cwd.glob("*.py"):
+            try:
+                if "__main__" in py_file.read_text(encoding="utf-8"):
+                    return install, ["python", py_file.name], "python", eff_cwd
+            except Exception: pass
+            
+        # Priority 3: First .py file found (Desperate fallback)
+        all_pys = list(eff_cwd.glob("*.py"))
+        if all_pys:
+            return install, ["python", all_pys[0].name], "python", eff_cwd
 
-    if (source_dir / "go.mod").exists():
-        install = ["go", "mod", "tidy"]
-        run = ["go", "run", "."]
-        return install, run, "go"
-
-    if (source_dir / "Cargo.toml").exists():
-        install = ["cargo", "build"]
-        run = ["cargo", "run"]
-        return install, run, "rust"
-
-    if any(source_dir.glob("*.csproj")):
-        install = ["dotnet", "restore"]
-        run = ["dotnet", "run"]
-        return install, run, "dotnet"
-
-    if (source_dir / "pom.xml").exists():
-        install = ["mvn", "install", "-DskipTests", "-q"]
-        run = ["mvn", "spring-boot:run", "-q"]
-        return install, run, "java"
-
-    return [], [], "unknown"
-
-
-# ─────────────────────────────── error parsers ──
-
-_ERROR_PATTERNS: list[tuple[re.Pattern, str, str]] = [
-    # Python: File "path/file.py", line N
-    (re.compile(r'File "([^"]+)", line (\d+)'), "python_traceback", "{file}:{line}"),
-    # Python: ModuleNotFoundError: No module named 'X'
-    (re.compile(r"ModuleNotFoundError: No module named '([^']+)'"), "python_import", "missing module: {match1}"),
-    # Python: ImportError
-    (re.compile(r"ImportError: ([^\n]+)"), "python_import", "{match1}"),
-    # Python: SyntaxError
-    (re.compile(r"SyntaxError: ([^\n]+)"), "python_syntax", "{match1}"),
-    # Node: Cannot find module 'X'
-    (re.compile(r"Cannot find module '([^']+)'"), "node_import", "missing module: {match1}"),
-    # Node: at Object.<file>:line:col
-    (re.compile(r'at .+\(([^:)]+):(\d+):\d+\)'), "node_stack", "{file}:{line}"),
-    # TypeScript: error TS\d+: ...
-    (re.compile(r"error TS\d+: ([^\n]+)"), "typescript_error", "{match1}"),
-    # Go: ./file.go:line:col: error
-    (re.compile(r'\./?([\w./]+\.go):(\d+):\d+:\s*(.+)'), "go_error", "{file}:{line}: {match3}"),
-    # Rust: error[E...]: ...
-    (re.compile(r'error\[E\d+\]: ([^\n]+)'), "rust_error", "{match1}"),
-    # General: error: ... at file:line
-    (re.compile(r'(?:error|Error|ERROR):\s*([^\n]+)'), "general_error", "{match1}"),
-]
-
+    return [], [], "unknown", source_dir
 
 def parse_errors(output: str, source_dir: Path) -> list[BootError]:
-    errors: list[BootError] = []
-    lines = output.splitlines()
-
-    for line in lines:
-        for pattern, kind, _ in _ERROR_PATTERNS:
-            m = pattern.search(line)
-            if not m:
-                continue
-
-            file_ref: Optional[str] = None
-            line_ref: Optional[int] = None
-
-            if kind in ("python_traceback", "node_stack", "go_error"):
-                raw_file = m.group(1)
-                try:
-                    line_ref = int(m.group(2))
-                except (IndexError, ValueError):
-                    pass
-                # Resolve to source_dir-relative path
-                fp = Path(raw_file)
-                if fp.is_absolute():
-                    try:
-                        file_ref = str(fp.relative_to(source_dir)).replace("\\", "/")
-                    except ValueError:
-                        file_ref = raw_file
-                else:
-                    file_ref = str(fp).replace("\\", "/")
-
-            message = m.group(0)
-            errors.append(BootError(file=file_ref, line=line_ref, message=message[:200], raw=line[:200]))
-
-            if len(errors) >= 20:
-                return errors
-
-    return errors
-
-
-# ─────────────────────────────── subprocess helpers ──
-
-async def _run_cmd(cmd: list[str], cwd: Path, timeout: int) -> tuple[bool, str]:
-    """Run command, return (success, combined_output)."""
-    if not cmd:
-        return True, ""
-    try:
-        import subprocess as _sp
-        if sys.platform == "win32":
-            proc = await asyncio.create_subprocess_shell(
-                _sp.list2cmdline(cmd),
-                cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            _kill_process_tree(proc)
-            return False, f"Timeout después de {timeout}s"
-        output = (stdout or b"").decode("utf-8", errors="replace")
-        return proc.returncode == 0, output[-4000:]  # last 4000 chars
-    except FileNotFoundError as e:
-        return False, f"Comando no encontrado: {e}"
-    except Exception as e:
-        return False, str(e)
-
-
-async def _boot_and_capture(cmd: list[str], cwd: Path, timeout: int) -> tuple[bool, str]:
-    """Start process, wait timeout seconds, capture output, check if still alive."""
-    if not cmd:
-        return True, ""
-    try:
-        import subprocess as _sp
-        if sys.platform == "win32":
-            proc = await asyncio.create_subprocess_shell(
-                _sp.list2cmdline(cmd),
-                cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        lines_collected = []
-        deadline = asyncio.get_event_loop().time() + timeout
-
-        async def _read_lines():
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    break
-                lines_collected.append(line.decode("utf-8", errors="replace").rstrip())
-                if len(lines_collected) >= OUTPUT_LINES:
-                    break
-
-        try:
-            await asyncio.wait_for(_read_lines(), timeout=timeout)
-        except asyncio.TimeoutError:
-            pass
-
-        output = "\n".join(lines_collected)
-
-        # Check if crashed
-        await asyncio.sleep(0.5)
-        alive = proc.returncode is None
-        if not alive and proc.returncode != 0:
-            _kill_process_tree(proc)
-            return False, output
-        _kill_process_tree(proc)  # clean up after capture
-        return alive, output
-
-    except FileNotFoundError as e:
-        return False, f"Comando no encontrado: {e}"
-    except Exception as e:
-        return False, str(e)
-
-
-# ─────────────────────────────── main class ──
+    errors = []
+    # Python Tracebacks
+    m_py = re.findall(r'File "([^"]+)", line (\d+)', output)
+    for f, l in m_py:
+        errors.append(BootError(file=f, line=int(l), message="Traceback", raw=f"File {f}, line {l}"))
+    
+    # Node/NPM specific errors
+    if "npm ERR!" in output:
+        msg = re.search(r'npm ERR! (.*)', output)
+        errors.append(BootError(file=None, line=None, message=msg.group(1) if msg else "NPM Install Error", raw=output))
+    
+    # Module missing (Python or Node)
+    if "ModuleNotFoundError" in output or "Cannot find module" in output:
+        errors.append(BootError(file=None, line=None, message="Missing Dependency", raw=output))
+        
+    if not errors and output.strip():
+        # Catch-all for generic failure
+        errors.append(BootError(file=None, line=None, message="Unknown Boot Error", raw=output[:500]))
+        
+    return errors[:20]
 
 class BootAgent:
-    """
-    Installs and boots a generated project, captures errors,
-    and runs a targeted AI fix loop.
-    """
-
-    def __init__(self, claude_driver=None, gemini_driver=None, context_builder=None, notify_fn: Optional[Callable] = None):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver=None, claude_driver=None, context_builder=None, notify_fn=None):
         self.gemini = gemini_driver
+        self.notify = notify_fn or (lambda *a: None)
         self.builder = context_builder
-        self.notify = notify_fn or (lambda *a, **kw: None)
-        self._log_collector = LogCollector(max_bytes_per_tool=3_000, max_age_minutes=30)
+        self.sandbox = DockerSandbox()
 
     async def run(self, source_dir: Path, architecture: dict, blueprint: dict) -> BootReport:
-        install_cmd, run_cmd, stack = _detect_commands(source_dir, architecture)
+        install_cmd, run_cmd, stack, eff_cwd = _detect_commands(source_dir, architecture)
         report = BootReport(stack=stack)
 
         if not install_cmd and not run_cmd:
             report.skipped = True
-            report.reason = "Stack no reconocido para boot automático."
-            self.notify(report.reason, "LOG", {"phase": "boot_agent", "reason": report.reason, "stack": stack})
+            report.reason = "No se detectaron comandos de instalación o ejecución."
             return report
 
-        # Bootstrap env files before any install/run so env vars are available
-        _bootstrap_env(source_dir, self.notify)
+        _bootstrap_env(eff_cwd, self.notify)
 
-        # Environment detection + venv setup for Python projects
-        if stack == "python":
-            from kernel.execution.environment_detector import EnvironmentDetector
-            from kernel.execution.venv_manager import VenvManager
-            env_report = EnvironmentDetector().detect(source_dir)
-            for warning in env_report.warnings:
-                self.notify(warning, "HEALTH_WARN", {"phase": "env_check"})
-            venv_info = VenvManager().ensure(source_dir, self.notify)
-            # Route install/run through venv python instead of host sys.executable
-            install_cmd = [
-                venv_info.python if c == sys.executable else c
-                for c in install_cmd
-            ]
-            run_cmd = [
-                venv_info.python if c == sys.executable else c
-                for c in run_cmd
-            ]
+        self.notify(f"BootAgent: Iniciando despliegue en Sandbox Aislado (Stack: {stack})", "LOG")
 
-        self.notify(
-            f"BootAgent [{stack}]: instalando dependencias…",
-            "PHASE_START",
-            {"phase": "boot_agent", "stack": stack},
-        )
+        for r in range(MAX_ROUNDS):
+            attempt = BootAttempt(round=r+1, install_ok=False, install_output="", boot_ok=False, boot_output="")
+            
+            # Ejecutamos el proyecto completo en el Sandbox
+            self.notify(f"BootAgent: Ronda {r+1}/{MAX_ROUNDS} en Sandbox...", "LOG")
+            
+            # run_project is a blocking call in docker-py, but we are in an async run()
+            # For simplicity and given the agentic nature, we run it.
+            # In a high-concurrency server, we'd use run_in_executor.
+            result: SandboxResult = self.sandbox.run_project(
+                source_dir=eff_cwd,
+                install_cmd=install_cmd,
+                run_cmd=run_cmd,
+                timeout=BOOT_TIMEOUT
+            )
+            
+            # Analizar el resultado
+            output = result.stdout + "\n" + result.stderr
+            if "DOCKER_UNAVAILABLE" in output:
+                report.final_ok = False
+                report.reason = "CRÍTICO: SODA requiere Docker para ejecución segura (Zero-Host Policy)."
+                self.notify(report.reason, "ERROR")
+                return report
 
-        for round_idx in range(MAX_ROUNDS):
-            attempt = BootAttempt(round=round_idx + 1, install_ok=False, install_output="", boot_ok=False, boot_output="")
-
-            # Step 1: Install
-            install_ok, install_out = await _run_cmd(install_cmd, source_dir, INSTALL_TIMEOUT)
-            attempt.install_ok = install_ok
-            attempt.install_output = install_out[-2000:]
-
-            if not install_ok:
-                self.notify(
-                    f"BootAgent ronda {round_idx+1}: instalación falló.",
-                    "HEALTH_WARN",
-                    {"phase": "boot_install", "round": round_idx + 1, "stack": stack, "origin": "install", "output": install_out[-500:]},
-                )
-                errors = parse_errors(install_out, source_dir)
-                attempt.errors = errors
+            if not result.success:
+                attempt.install_ok = "pip install" not in output.lower() or "successfully installed" in output.lower()
+                attempt.boot_ok = False
+                attempt.boot_output = output
+                attempt.errors = parse_errors(output, eff_cwd)
                 report.attempts.append(attempt)
-                fixed = await self._fix_errors(errors, install_out, source_dir, blueprint, architecture)
-                attempt.files_fixed = fixed
-                if not fixed:
-                    break
+                
+                self.notify(f"BootAgent: Fallo en ronda {r+1}. Intentando reparación...", "WARNING")
+                await self._fix_errors(attempt.errors, output, eff_cwd)
                 continue
-
-            self.notify(f"BootAgent ronda {round_idx+1}: dependencias instaladas. Iniciando…", "LOG", {"phase": "boot_install", "round": round_idx + 1, "stack": stack})
-
-            # Sanity check: node_modules must exist for Node projects
-            if stack == "node" and not (source_dir / "node_modules").exists():
-                self.notify(
-                    "BootAgent: node_modules no encontrado tras install — reintentando sin --legacy-peer-deps.",
-                    "HEALTH_WARN",
-                    {"phase": "boot_install", "round": round_idx + 1, "stack": stack, "origin": "npm_fallback"},
-                )
-                fallback_install = ["npm", "install"]
-                install_ok2, install_out2 = await _run_cmd(fallback_install, source_dir, INSTALL_TIMEOUT)
-                if not install_ok2 or not (source_dir / "node_modules").exists():
-                    attempt.install_ok = False
-                    attempt.install_output += f"\n[FALLBACK]\n{install_out2[-1000:]}"
-                    errors = parse_errors(install_out2, source_dir)
-                    attempt.errors = errors
-                    report.attempts.append(attempt)
-                    break
-
-            # Step 2: Boot
-            boot_ok, boot_out = await _boot_and_capture(run_cmd, source_dir, BOOT_TIMEOUT)
-            attempt.boot_ok = boot_ok
-            attempt.boot_output = boot_out[-2000:]
-
-            if boot_ok:
-                self.notify(
-                    f"BootAgent: proyecto arranca correctamente en ronda {round_idx+1}.",
-                    "LOG",
-                    {"phase": "boot", "round": round_idx + 1, "stack": stack},
-                )
+            else:
+                attempt.install_ok = True
+                attempt.boot_ok = True
+                attempt.boot_output = output
                 report.final_ok = True
                 report.attempts.append(attempt)
+                self.notify(f"BootAgent: Proyecto desplegado exitosamente en el Sandbox.", "SUCCESS")
                 break
 
-            # Boot failed
-            errors = parse_errors(boot_out, source_dir)
-            attempt.errors = errors
-            report.attempts.append(attempt)
-
-            self.notify(
-                f"BootAgent ronda {round_idx+1}: el proyecto no arranca — {len(errors)} error(es) detectados.",
-                "HEALTH_WARN",
-                {"phase": "boot", "round": round_idx + 1, "stack": stack, "origin": "boot_crash", "errors": [e.to_dict() for e in errors[:3]]},
-            )
-
-            fixed = await self._fix_errors(errors, boot_out, source_dir, blueprint, architecture)
-            attempt.files_fixed = fixed
-            if not fixed:
-                break
-
-        if not report.final_ok:
-            last = report.attempts[-1] if report.attempts else None
-            last_phase = "install" if (last and not last.install_ok) else "boot"
-            last_errors = [e.message for e in (last.errors[:3] if last else [])]
-            self.notify(
-                f"BootAgent: proyecto no pudo arrancar tras {len(report.attempts)} intento(s). "
-                f"Última fase fallida: {last_phase}. Errores: {'; '.join(last_errors) or 'desconocido'}",
-                "HEALTH_WARN",
-                {**report.to_dict(), "last_phase_failed": last_phase, "last_errors": last_errors},
-            )
+        if not report.final_ok and not report.reason:
+            last_attempt = report.attempts[-1] if report.attempts else None
+            if last_attempt and last_attempt.errors:
+                report.reason = "; ".join(e.message for e in last_attempt.errors[:3])
+            else:
+                report.reason = "Límite de reintentos alcanzado sin éxito en el Sandbox."
 
         return report
 
-    async def _fix_errors(
-        self,
-        errors: list[BootError],
-        raw_output: str,
-        source_dir: Path,
-        blueprint: dict,
-        architecture: dict,
-    ) -> list[str]:
-        """Ask Claude/Gemini to fix the errors. Returns list of patched file paths."""
-        if not errors or (not self.claude and not self.gemini):
-            return []
+    async def _fix_errors(self, errors: list[BootError], output: str, cwd: Path):
+        """Implementation of AI fix loop: sends the error to the IA to get a correction."""
+        if not self.gemini: return
+        
+        self.notify(f"BootAgent: detectados {len(errors)} errores. Iniciando auto-reparación...", "LOG")
+        
+        # Collect relevant files
+        files_to_send = set()
+        for e in errors:
+            if e.file:
+                # Resolve relative or absolute path
+                p = Path(e.file)
+                if not p.is_absolute(): p = cwd / p
+                if p.exists(): files_to_send.add(p)
 
-        # Detect stack for log collection
-        stack = architecture.get("stack", {})
-        stack_name = (stack.get("backend") or stack.get("frontend") or "").lower()
-        extra_stacks = [
-            v.lower() for v in stack.values()
-            if isinstance(v, str) and v.lower() != stack_name
-        ]
-
-        # Collect system + workspace logs relevant to this failure
-        log_context = self._log_collector.collect(
-            stack=stack_name or "node",
-            workspace=source_dir,
-            extra_stacks=extra_stacks,
-        )
-        if log_context:
-            self.notify(
-                "BootAgent: logs del sistema recolectados para contexto de corrección.",
-                "LOG",
-                {"log_bytes": len(log_context)},
-            )
-
-        # Build context: relevant source files
-        file_snippets = ""
-        seen: set[str] = set()
-        for err in errors[:6]:
-            if err.file and err.file not in seen:
-                seen.add(err.file)
-                fp = source_dir / err.file
-                if fp.exists():
-                    content = fp.read_text(encoding="utf-8", errors="ignore")[:2500]
-                    file_snippets += f"\n### {err.file}\n```\n{content}\n```\n"
-
-        errors_text = "\n".join(
-            f"  {'→ ' + err.file + ':' + str(err.line) if err.file else '  '} {err.message}"
-            for err in errors[:10]
-        )
-
-        task = (
-            f"El proyecto no arranca. Estos son los errores:\n\n{errors_text}\n\n"
-            f"OUTPUT COMPLETO:\n{raw_output[-1500:]}\n\n"
-            f"ARCHIVOS RELEVANTES:{file_snippets}"
-            + (f"\n{log_context}" if log_context else "")
-            + "\n\nCorregí los archivos necesarios para que el proyecto arranque. "
-            f'Respondé con JSON array: [{{"file": "ruta/relativa", "content": "código completo corregido"}}]\n'
-            f"Solo archivos que necesitan cambios reales."
-        )
-
-        for driver, provider in [(self.claude, "claude"), (self.gemini, "gemini")]:
-            if driver is None:
-                continue
+        combined_code = ""
+        for f in files_to_send:
             try:
-                payload = self.builder.build_payload(provider, "code_fixer", task)
-                raw = await driver.prompt(payload["system"], payload["user"])
-                if hasattr(raw, "content"):
-                    raw = raw.content
+                rel_path = f.relative_to(cwd)
+                combined_code += f"\n--- FILE: {rel_path} ---\n{f.read_text(encoding='utf-8')}\n"
+            except Exception: pass
 
-                import json as _json, re as _re
-                # Try array extraction
-                m = _re.search(r"\[.*\]", raw, _re.DOTALL)
-                if not m:
-                    continue
-                fixes = _json.loads(m.group(0))
-                if not isinstance(fixes, list):
-                    continue
-
-                patched: list[str] = []
-                for fix in fixes:
-                    fpath = fix.get("file", "")
-                    content = fix.get("content", "")
-                    if not fpath or not content:
-                        continue
-                    out = source_dir / fpath
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_text(content, encoding="utf-8")
-                    patched.append(fpath)
-                    self.notify(
-                        f"BootAgent corrigió: {fpath}",
-                        "FILE_GENERATED",
-                        {"filename": fpath, "code": content, "validated": False, "phase": "boot_fix"},
-                    )
-
-                if patched:
-                    return patched
-
-            except Exception as e:
-                import traceback as _tb
-                self.notify(
-                    f"BootAgent fix error ({provider}): {type(e).__name__}: {e}",
-                    "HEALTH_WARN",
-                    {
-                        "phase": "boot_fix",
-                        "provider": provider,
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                        "traceback": _tb.format_exc()[-1500:],
-                    },
-                )
-                continue
-
-        return []
+        sys_p = (
+            "Eres el Ingeniero de Debugging de SODA (Nivel L3).\n"
+            "Tu misión es corregir errores de ejecución (Tracebacks, TypeErrors, ModuleNotFound).\n"
+            "MANDATORIO: Devuelve solo los archivos corregidos usando <FILE path='...'> tags.\n"
+            "Analiza el error cuidadosamente. Si es un 'non-default argument follows default', reordena los campos."
+        )
+        
+        user_msg = (
+            f"ERROR DE EJECUCIÓN EN SANDBOX:\n{output}\n\n"
+            f"CÓDIGO RELACIONADO:\n{combined_code}\n\n"
+            "Corrige los archivos para que la aplicación arranque sin errores en el contenedor."
+        )
+        
+        try:
+            resp = await self.gemini.call(system_prompt=sys_p, user_message=user_msg, max_tokens=8192)
+            from kernel.validators.v2.polyglot_validator import PolyglotValidator
+            corrected_files = PolyglotValidator.extract_files(resp.content)
+            
+            for path, content in corrected_files.items():
+                dest = cwd / path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content, encoding="utf-8")
+                self.notify(f"BootAgent: archivo {path} reparado.", "LOG")
+                
+        except Exception as e:
+            self.notify(f"BootAgent: fallo crítico en la reparación: {e}", "ERROR")

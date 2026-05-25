@@ -16,7 +16,7 @@
             const r = await fetch('/api/tts/status');
             const d = await r.json();
             _enabled = d.available && d.enabled;
-            if (d.active) _activeVoice = d.active;
+            if (d.active || d.current_voice) _activeVoice = d.active || d.current_voice;
             if (d.speed) _activeSpeed = d.speed;
             return d;
         } catch (_) {
@@ -104,7 +104,7 @@
         if (!sw) return;
         sw.checked = state;
         const label = document.getElementById('tts-toggle-label');
-        if (label) label.textContent = state ? 'Voz ON' : 'Voz OFF';
+        if (label) label.textContent = state ? 'Talk ON' : 'Talk OFF';
     }
 
     // Initialise on load
@@ -123,51 +123,48 @@
     }
 
     const _VOICE_LABELS = {
-        ef_dora: 'ef_dora — Español (mujer)', em_alex: 'em_alex — Español (hombre)',
-        em_santa: 'em_santa — Español (hombre 2)',
-        af_heart: 'af_heart — English (mujer)', af_bella: 'af_bella — English (mujer)',
-        af_nicole: 'af_nicole — English (mujer)', af_sarah: 'af_sarah — English (mujer)',
-        af_sky: 'af_sky — English (mujer)', am_adam: 'am_adam — English (hombre)',
-        am_michael: 'am_michael — English (hombre)', bf_emma: 'bf_emma — British (mujer)',
-        bf_isabella: 'bf_isabella — British (mujer)', bm_george: 'bm_george — British (hombre)',
-        bm_lewis: 'bm_lewis — British (hombre)',
+        'es-AR-ElenaNeural': 'Elena — Argentina (femenina)',
+        'es-AR-TomasNeural': 'Tomás — Argentina (masculino)',
+        'es-ES-AlvaroNeural': 'Álvaro — España (masculino)',
+        'es-ES-ElviraNeural': 'Elvira — España (femenina)',
+        'es-MX-DaliaNeural': 'Dalia — México (femenina)',
+        'es-MX-JorgeNeural': 'Jorge — México (masculino)',
     };
 
     function _populateVoiceSelector(status) {
         const sel = document.getElementById('tts-voice-select');
         if (!sel) return;
         sel.innerHTML = '';
+        const active = status.active || status.current_voice || '';
         const builtin = status.builtin || [];
         const custom = status.custom || [];
-        if (builtin.length) {
-            const esVoices = builtin.filter(v => v.startsWith('e'));
-            const enVoices = builtin.filter(v => !v.startsWith('e'));
-            const addGroup = (label, voices) => {
-                if (!voices.length) return;
-                const og = document.createElement('optgroup');
-                og.label = label;
-                voices.forEach(v => {
-                    const o = document.createElement('option');
-                    o.value = v;
-                    o.textContent = _VOICE_LABELS[v] || v;
-                    if (v === status.active) o.selected = true;
-                    og.appendChild(o);
-                });
-                sel.appendChild(og);
-            };
-            addGroup('Español', esVoices);
-            addGroup('English / British', enVoices);
-        }
-        if (custom.length) {
+
+        const addGroup = (label, voices) => {
+            if (!voices.length) return;
             const og = document.createElement('optgroup');
-            og.label = 'Voces clonadas';
-            custom.forEach(v => {
+            og.label = label;
+            voices.forEach(v => {
                 const o = document.createElement('option');
-                o.value = v; o.textContent = v;
-                if (v === status.active) o.selected = true;
+                o.value = v;
+                o.textContent = _VOICE_LABELS[v] || v;
+                if (v === active) o.selected = true;
                 og.appendChild(o);
             });
             sel.appendChild(og);
+        };
+
+        if (builtin.length) {
+            const arVoices = builtin.filter(v => v.includes('-AR-'));
+            const esVoices = builtin.filter(v => v.includes('-ES-'));
+            const mxVoices = builtin.filter(v => v.includes('-MX-'));
+            const otherVoices = builtin.filter(v => !v.includes('-AR-') && !v.includes('-ES-') && !v.includes('-MX-'));
+            addGroup('Argentina', arVoices);
+            addGroup('España', esVoices);
+            addGroup('México', mxVoices);
+            addGroup('Otros', otherVoices);
+        }
+        if (custom.length) {
+            addGroup('Voces clonadas', custom);
         }
     }
 

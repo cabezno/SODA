@@ -120,7 +120,7 @@ def _wait_for_server(timeout: float = 30.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            urllib.request.urlopen(f"{SERVER_URL}/api/health", timeout=1)
+            urllib.request.urlopen(f"http://127.0.0.1:{SERVER_PORT}/api/health", timeout=1)
             return True
         except Exception:
             time.sleep(0.3)

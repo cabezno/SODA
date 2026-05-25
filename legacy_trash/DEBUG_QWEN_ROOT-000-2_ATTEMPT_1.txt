@@ -1,0 +1,36 @@
+```php
+<?php
+
+function php_email_handler_script($recipient_email_address, $form_field_names) {
+    // Validate recipient email address
+    if (!filter_var($recipient_email_address, FILTER_VALIDATE_EMAIL)) {
+        return "error: Invalid recipient email address.";
+    }
+
+    // Retrieve form data from POST request
+    $form_data = [];
+    foreach ($form_field_names as $field_name) {
+        if (isset($_POST[$field_name])) {
+            $form_data[$field_name] = $_POST[$field_name];
+        } else {
+            return "error: Missing form field '$field_name'.";
+        }
+    }
+
+    // Construct the email body
+    $email_body = "";
+    foreach ($form_data as $name => $value) {
+        $email_body .= "$name: $value\n";
+    }
+
+    // Send the email
+    if (mail($recipient_email_address, "Form Submission", $email_body)) {
+        return "success: Email sent successfully.";
+    } else {
+        return "error: Failed to send email.";
+    }
+}
+
+// Example usage:
+// echo php_email_handler_script("example@example.com", ["name", "email", "message"]);
+```

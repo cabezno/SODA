@@ -1,0 +1,39 @@
+name: skill_repository
+category: data_access
+description: Repository + Unit of Work pattern for abstracting persistence — interfaces + concrete implementations per language/ORM
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+activation_keywords:
+  - repository
+  - crud
+  - persist
+  - store
+  - database
+  - users
+  - products
+  - orders
+  - inventory
+  - records
+  - data access
+  - sqlite
+  - postgres
+  - mysql
+  - orm
+  - entity
+activation_signals:
+  dependencies:
+    - sqlalchemy
+    - prisma
+    - better-sqlite3
+    - database/sql
+    - sqlx
+  file_patterns:
+    - "*repository*"
+    - "*repo*"
+    - "*store*"
+version: "1.0"

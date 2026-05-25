@@ -1,0 +1,172 @@
+```cpp
+// CMakeLists.txt
+cmake_minimum_required(VERSION 3.10)
+
+# Project Name
+project(WindowsDesktopFramework CXX)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Add the executable
+# WIN32 is used for GUI applications on Windows to use the WinMain entry point
+add_executable(CoreApp WIN32 main.cpp)
+
+# Link against necessary Windows libraries
+# user32.lib is for windowing functions (CreateWindow, ShowWindow, etc.)
+# gdi32.lib is for graphics device interface functions (painting, drawing, etc.)
+target_link_libraries(CoreApp PRIVATE user32 gdi32)
+
+```
+```cpp
+// main.cpp
+#ifndef UNICODE
+#define UNICODE
+#endif
+
+#include <windows.h>
+
+// Define a control ID for our button
+#define IDC_MAIN_BUTTON 101
+
+// Forward declaration of the window procedure
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+// The entry point for a Windows GUI application
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
+{
+    // Register the window class.
+    const wchar_t CLASS_NAME[] = L"Sample Window Class";
+
+    WNDCLASSEXW wc = { };
+
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+
+
+    if (!RegisterClassExW(&wc))
+    {
+        MessageBoxW(NULL, L"Window Registration Failed!", L"Error", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Create the window.
+    HWND hwnd = CreateWindowExW(
+        0,                              // Optional window styles.
+        CLASS_NAME,                     // Window class
+        L"Core Windows UI Framework",   // Window text
+        WS_OVERLAPPEDWINDOW,            // Window style
+
+        // Size and position
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
+
+        NULL,       // Parent window
+        NULL,       // Menu
+        hInstance,  // Instance handle
+        NULL        // Additional application data
+    );
+
+    if (hwnd == NULL)
+    {
+        MessageBoxW(NULL, L"Window Creation Failed!", L"Error", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    // The message loop.
+    // This loop retrieves messages from the application's message queue and dispatches them
+    // to the appropriate window procedure.
+    MSG msg = { };
+    while (GetMessage(&msg, NULL, 0, 0) > 0)
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    return static_cast<int>(msg.wParam);
+}
+
+// The window procedure. It processes messages for the main window.
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_CREATE:
+        {
+            // Create a simple button control when the window is created.
+            CreateWindowW(
+                L"BUTTON",  // Predefined class; Unicode assumed
+                L"Click Me",      // Button text
+                WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,  // Styles
+                10,         // x position
+                10,         // y position
+                100,        // Button width
+                30,         // Button height
+                hwnd,       // Parent window
+                (HMENU)IDC_MAIN_BUTTON, // Control ID
+                (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                NULL);      // Pointer not needed.
+        }
+        return 0;
+
+    case WM_COMMAND:
+        {
+            // Process notifications from child controls (like the button)
+            int wmId = LOWORD(wParam);
+            switch (wmId)
+            {
+            case IDC_MAIN_BUTTON:
+                MessageBoxW(hwnd, L"Button was clicked!", L"Notification", MB_OK);
+                break;
+            default:
+                return DefWindowProc(hwnd, uMsg, wParam, lParam);
+            }
+        }
+        return 0;
+
+    case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+
+            // All painting occurs here, between BeginPaint and EndPaint.
+            FillRect(hdc, &ps.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
+            
+            // Example of drawing text
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            rect.top = 50; // Position text below the button
+            DrawTextW(hdc, L"This is the foundational UI framework.", -1, &rect, DT_CENTER | DT_TOP);
+
+            EndPaint(hwnd, &ps);
+        }
+        return 0;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+
+    case WM_CLOSE:
+        if (MessageBoxW(hwnd, L"Really quit?", L"My application", MB_OKCANCEL) == IDOK)
+        {
+            DestroyWindow(hwnd);
+        }
+        // If user clicks cancel, do nothing.
+        return 0;
+
+    default:
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+```

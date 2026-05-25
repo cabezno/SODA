@@ -1,0 +1,259 @@
+```python
+import json
+from typing import Dict, Any, List, Optional
+
+# ----------------------------------------------------------------------------
+# Dependency Stubs (Simulating external services as per the contract)
+# These would be replaced by actual network clients in a real application.
+# ----------------------------------------------------------------------------
+
+class AuthServiceClient:
+    """
+    Stub for SUB-002: Authentication Service.
+    Simulates validating a Google Auth Token.
+    """
+    def validate_token(self, token: str) -> Dict[str, Any]:
+        """Validates the token and returns user info."""
+        if token and "valid-google-token" in token:
+            user_id = token.split(":")[1] if ":" in token else "user123"
+            return {"is_valid": True, "user_id": user_id, "email": f"{user_id}@example.com"}
+        return {"is_valid": False, "error": "Invalid Token"}
+
+class BackendApiClient:
+    """
+    Stub for SUB-001: Backend API.
+    Simulates a database/API for event management.
+    """
+    def __init__(self):
+        # Pre-populate with some data for a consistent simulation
+        self._events_db: Dict[str, List[Dict[str, Any]]] = {
+            "user123": [
+                {"id": "evt1", "title": "Team Standup", "date": "2024-08-15", "time": "10:00"},
+                {"id": "evt2", "title": "Project Kickoff", "date": "2024-08-15", "time": "14:30"},
+                {"id": "evt3", "title": "Dentist Appointment", "date": "2024-08-16", "time": "11:00"},
+            ]
+        }
+        self._next_event_id = 4
+
+    def get_events(self, user_id: str) -> List[Dict[str, Any]]:
+        """Fetches all events for a given user."""
+        return self._events_db.get(user_id, [])
+
+    def create_event(self, user_id: str, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Creates a new event for the user."""
+        if user_id not in self._events_db:
+            self._events_db[user_id] = []
+        
+        new_event = {
+            "id": f"evt{self._next_event_id}",
+            "title": event_data.get("title", "New Event"),
+            "date": event_data.get("date"),
+            "time": event_data.get("time")
+        }
+        self._events_db[user_id].append(new_event)
+        self._next_event_id += 1
+        return new_event
+
+    def update_event(self, user_id: str, event_id: str, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Updates an existing event."""
+        user_events = self._events_db.get(user_id, [])
+        for event in user_events:
+            if event["id"] == event_id:
+                event.update(event_data)
+                return event
+        return None
+
+    def delete_event(self, user_id: str, event_id: str) -> bool:
+        """Deletes an event."""
+        user_events = self._events_db.get(user_id, [])
+        event_to_remove = next((e for e in user_events if e["id"] == event_id), None)
+        if event_to_remove:
+            user_events.remove(event_to_remove)
+            return True
+        return False
+
+class NotificationServiceClient:
+    """
+    Stub for SUB-003: Notification Service.
+    Simulates registering for push notifications.
+    """
+    def register_device(self, user_id: str, device_token: str) -> bool:
+        """Registers a device token for push notifications."""
+        print(f"[NotificationService] Registered device '{device_token}' for user '{user_id}'.")
+        return True
+
+# ----------------------------------------------------------------------------
+# Android Application Simulation (Kotlin Architecture in Python)
+# This structure mimics a modern Android architecture (MVVM).
+# ----------------------------------------------------------------------------
+
+class EventRepository:
+    """
+    Simulates the Repository layer in Android.
+    It is the single source of truth for data and abstracts data sources.
+    """
+    def __init__(self, api_client: BackendApiClient):
+        self._api_client = api_client
+
+    def get_events(self, user_id: str) -> List[Dict[str, Any]]:
+        return self._api_client.get_events(user_id)
+
+    def create_event(self, user_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self._api_client.create_event(user_id, data)
+
+    def update_event(self, user_id: str, event_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        return self._api_client.update_event(user_id, event_id, data)
+
+    def delete_event(self, user_id: str, event_id: str) -> bool:
+        return self._api_client.delete_event(user_id, event_id)
+
+
+class CalendarViewModel:
+    """
+    Simulates an Android ViewModel.
+    It holds and prepares UI-related data and survives configuration changes.
+    """
+    def __init__(self, repository: EventRepository):
+        self._repository = repository
+        # Simulates LiveData or StateFlow for holding UI state
+        self.ui_state: Dict[str, Any] = {
+            "events": [],
+            "is_loading": False,
+            "error": None
+        }
+
+    def process_user_action(self, user_id: str, action: Dict[str, Any]):
+        """Handles incoming user actions from the UI."""
+        action_type = action.get("type")
+        payload = action.get("payload", {})
+        
+        self.ui_state["error"] = None # Reset error on new action
+        self.ui_state["is_loading"] = True
+
+        try:
+            if action_type == "create":
+                self._repository.create_event(user_id, payload)
+            elif action_type == "update":
+                self._repository.update_event(user_id, payload["id"], payload["data"])
+            elif action_type == "delete":
+                self._repository.delete_event(user_id, payload["id"])
+            # After any CUD operation, or on a 'view' action, we refresh the event list.
+            self.load_events(user_id)
+        except Exception as e:
+            self.ui_state["error"] = f"Action failed: {str(e)}"
+        finally:
+            self.ui_state["is_loading"] = False
+
+    def load_events(self, user_id: str):
+        """Loads events into the ViewModel's state."""
+        self.ui_state["is_loading"] = True
+        try:
+            self.ui_state["events"] = self._repository.get_events(user_id)
+        except Exception as e:
+            self.ui_state["error"] = f"Failed to load events: {str(e)}"
+        self.ui_state["is_loading"] = False
+
+
+class AndroidCalendarApp:
+    """
+    Simulates the main Android Application class or Activity.
+    It orchestrates the authentication, view model, and repository interactions
+    to produce the final UI state.
+    """
+    def __init__(self):
+        # Dependency Injection simulation
+        self._auth_client = AuthServiceClient()
+        self._api_client = BackendApiClient()
+        self._notification_client = NotificationServiceClient()
+        self._repository = EventRepository(self._api_client)
+        self._view_model = CalendarViewModel(self._repository)
+        self._current_user_id: Optional[str] = None
+
+    def _authenticate(self, google_auth_token: str) -> bool:
+        """Handles the authentication flow."""
+        auth_result = self._auth_client.validate_token(google_auth_token)
+        if auth_result["is_valid"]:
+            self._current_user_id = auth_result["user_id"]
+            # In a real app, we'd get a Firebase/FCM token here
+            device_token = f"device-token-for-{self._current_user_id}"
+            self._notification_client.register_device(self._current_user_id, device_token)
+            return True
+        return False
+
+    def _render_ui(self) -> Dict[str, Any]:
+        """
+        Constructs the final output object representing the mobile UI state.
+        This is the implementation of the 'user_dashboard_interface' output.
+        """
+        if not self._current_user_id:
+            return {
+                "ui_screen": "LOGIN",
+                "state": {
+                    "is_authenticated": False,
+                    "error_message": "Authentication failed. Please log in."
+                }
+            }
+        
+        # The ViewModel holds the current state of the data to be displayed.
+        vm_state = self._view_model.ui_state
+        return {
+            "ui_screen": "CALENDAR_DASHBOARD",
+            "state": {
+                "is_authenticated": True,
+                "user_id": self._current_user_id,
+                "is_loading": vm_state["is_loading"],
+                "error_message": vm_state["error"],
+                "events": sorted(vm_state["events"], key=lambda x: (x['date'], x['time']))
+            }
+        }
+
+    def run(self, google_auth_token: str, user_input_events: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Main entry point that simulates the app's lifecycle for a given set of inputs.
+        """
+        is_authenticated = self._authenticate(google_auth_token)
+
+        if not is_authenticated:
+            return self._render_ui()
+
+        # If authenticated, process the user's action.
+        # An empty action dict can mean just viewing the calendar.
+        if not user_input_events:
+            user_input_events = {"type": "view"}
+            
+        self._view_model.process_user_action(self._current_user_id, user_input_events)
+
+        return self._render_ui()
+
+# ----------------------------------------------------------------------------
+# Contract Interface Implementation
+# ----------------------------------------------------------------------------
+
+class SUB_005_AndroidCalendarApp:
+    """
+    A class wrapper that strictly adheres to the contract's interface.
+    This class is the deliverable for the contract.
+    """
+    def __init__(self):
+        # The entire simulated application is instantiated here.
+        self.app_instance = AndroidCalendarApp()
+        print("Layer 4: Coder - SUB-005: AndroidCalendarApp (Python Simulation) Initialized.")
+
+    def user_dashboard_interface(self, user_input_events: Dict[str, Any], google_auth_token: str) -> Dict[str, Any]:
+        """
+        Provides the main user interface for the mobile dashboard.
+
+        Args:
+            user_input_events: User interactions to create, edit, or delete events.
+            google_auth_token: Authentication token for session validation.
+
+        Returns:
+            A dictionary representing the state of the user interface.
+        """
+        # The run method of the simulated app is called with the contract inputs.
+        return self.app_instance.run(
+            google_auth_token=google_auth_token,
+            user_input_events=user_input_events
+        )
+
+```

@@ -1,0 +1,13 @@
+```python
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+@app.post("/display_result/")
+async def display_result(sum_result: float):
+    try:
+        print(f"The calculated sum is: {sum_result}")
+        return {"message": "Sum displayed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```

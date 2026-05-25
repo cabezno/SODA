@@ -1,0 +1,75 @@
+```python
+from pathlib import Path
+
+def generate_contact_page(form_fields_config: list, site_style_guide: dict):
+    # Define the file paths
+    html_file_path = "index.html"
+    css_file_path = "style.css"
+
+    # Create the HTML content
+    html_content = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Us</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Contact Us</h1>
+    <form action="#" method="post">
+        {}
+    </form>
+</body>
+</html>
+""".format("\n".join(f'<label for="{field["name"]}">{field["label"]}</label><input type="{field["type"]}" id="{field["name"]}" name="{field["name"]}"><br>' for field in form_fields_config))
+
+    # Create the CSS content
+    css_content = """
+body {{
+    background-color: {primary};
+    color: white;
+    font-family: {font_family};
+}}
+form {{
+    width: 300px;
+    margin: auto;
+}}
+input[type="text"], input[type="email"], textarea {{
+    display: block;
+    width: 100%;
+    padding: 12px 20px;
+    margin: 8px 0;
+    box-sizing: border-box;
+    background-color: {secondary};
+    color: white;
+    border: none;
+    border-radius: 4px;
+}}
+input[type="submit"] {{
+    width: 100%;
+    padding: 12px 20px;
+    margin: 8px 0;
+    box-sizing: border-box;
+    background-color: magenta;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}}
+input[type="submit"]:hover {{
+    background-color: darkmagenta;
+}}
+""".format(primary=site_style_guide['palette']['primary'], secondary=site_style_guide['palette']['secondary'], font_family=site_style_guide['font'])
+
+    # Write the HTML file
+    with open(html_file_path, 'w') as html_file:
+        html_file.write(html_content)
+
+    # Write the CSS file
+    with open(css_file_path, 'w') as css_file:
+        css_file.write(css_content)
+
+    return html_file_path, css_file_path
+```

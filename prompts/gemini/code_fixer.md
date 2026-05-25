@@ -21,7 +21,7 @@ Devolvé SOLO un array JSON. Sin markdown, sin texto antes ni después, sin expl
 ## Reglas estrictas
 
 - Incluí el archivo COMPLETO, no solo el fragmento corregido
-- Rutas relativas a la carpeta del proyecto (sin slash inicial)
+- El campo `file` debe ser EXACTAMENTE el path que aparece en el header `### <path>` de la sección ARCHIVOS DEL PROYECTO. No uses paths absolutos, no agregues prefijos ni subcarpetas extra.
 - Si un error cruza múltiples archivos, incluí todos los afectados
 - Si el error es por una dependencia faltante, añadila al requirements.txt / package.json / .csproj correspondiente
 - No inventes funcionalidad nueva; solo corregí los errores reportados

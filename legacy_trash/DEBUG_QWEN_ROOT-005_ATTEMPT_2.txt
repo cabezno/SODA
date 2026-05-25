@@ -1,0 +1,86 @@
+```typescript
+import NextApiHandler from 'next/api-handler';
+import { sign, verify } from 'jsonwebtoken';
+import GoogleOAuth2Client from 'google-auth-library';
+
+const SECRET_KEY = 'your_secret_key_here';
+const googleClient = new GoogleOAuth2Client();
+
+const authApiEndpoints: any = {
+  register: { path: '/api/auth/register', method: 'POST' },
+  login_email: { path: '/api/auth/login/email', method: 'POST' },
+  login_google: { path: '/api/auth/login/google', method: 'POST' },
+  logout: { path: '/api/auth/logout', method: 'POST' },
+  profile: { path: '/api/auth/profile', method: 'GET' }
+};
+
+const registerUser = async (email: string, password: string) => {
+  // Implement user registration logic here
+};
+
+const loginUserWithEmail = async (email: string, password: string) => {
+  // Implement user login with email/password logic here
+  return { token: sign({ role: 'customer' }, SECRET_KEY), user: {} };
+};
+
+const loginUserWithGoogle = async (idToken: string) => {
+  const ticket = await googleClient.verifyIdToken({
+    idToken,
+    audience: process.env.GOOGLE_CLIENT_ID!
+  });
+  const payload = ticket.getPayload();
+  if (!payload) throw new Error('Invalid Google ID token');
+
+  return { token: sign({ role: 'customer' }, SECRET_KEY), user: {} };
+};
+
+const logoutUser = async (token: string) => {
+  // Implement user logout logic here
+  return true;
+};
+
+const getUserProfile = async (token: string) => {
+  // Implement get user profile logic here
+  const decoded = verify(token, SECRET_KEY);
+  if (!decoded || !('role' in decoded)) throw new Error('Invalid token');
+
+  return { role: decoded.role };
+};
+
+const authApiHandler: NextApiHandler = async (req, res) => {
+  const { method } = req;
+  let response;
+
+  switch (method) {
+    case 'POST':
+      if (req.body.action === 'register') {
+        response = await registerUser(req.body.email, req.body.password);
+      } else if (req.body.action === 'login_email') {
+        response = await loginUserWithEmail(req.body.email, req.body.password);
+      } else if (req.body.action === 'login_google') {
+        response = await loginUserWithGoogle(req.body.idToken);
+      }
+      break;
+    case 'GET':
+      if (req.query.action === 'profile') {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) throw new Error('Missing token');
+        response = await getUserProfile(token);
+      }
+      break;
+    case 'DELETE':
+      if (req.body.action === 'logout') {
+        const token = req.body.token;
+        if (!token) throw new Error('Missing token');
+        response = await logoutUser(token);
+      }
+      break;
+    default:
+      return res.status(405).json({ message: `Method ${method} Not Allowed` });
+  }
+
+  res.json(response);
+};
+
+export default authApiHandler;
+```

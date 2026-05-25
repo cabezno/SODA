@@ -2,7 +2,7 @@
 SecurityReviewer — static security analysis of generated code.
 
 Runs fast, deterministic rules (no AI needed for detection).
-Optionally calls Claude for fix suggestions on critical findings.
+Optionally calls Gemini for fix suggestions on critical findings.
 
 Rules cover:
   - Hardcoded secrets / credentials
@@ -291,8 +291,8 @@ class SecurityReviewer:
     Optionally requests AI fix suggestions for critical/high findings.
     """
 
-    def __init__(self, claude_driver=None, context_builder=None, notify_fn=None):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver=None, context_builder=None, notify_fn=None):
+        self.gemini = gemini_driver
         self.builder = context_builder
         self.notify = notify_fn or (lambda *a, **kw: None)
 
@@ -337,8 +337,8 @@ class SecurityReviewer:
         return report
 
     async def request_ai_suggestions(self, report: SecurityReport, source_dir: Path) -> list[dict]:
-        """Ask Claude for fix suggestions on critical/high findings."""
-        if not self.claude or not self.builder:
+        """Ask Gemini for fix suggestions on critical/high findings."""
+        if not self.gemini or not self.builder:
             return []
         actionable = [f for f in report.findings if f.severity in ("critical", "high")]
         if not actionable:
@@ -370,8 +370,8 @@ class SecurityReviewer:
         )
 
         try:
-            payload = self.builder.build_payload("claude", "code_fixer", task)
-            response = await self.claude.prompt(payload["system"], payload["user"])
+            payload = self.builder.build_payload("gemini", "code_fixer", task)
+            response = await self.gemini.prompt(payload["system"], payload["user"])
             import json as _json, re as _re
             m = _re.search(r"\[.*\]", response, _re.DOTALL)
             if m:

@@ -1,4 +1,4 @@
-"""ConformanceVerifier — uses Claude Haiku to check and fix generated files against contracts."""
+"""ConformanceVerifier — uses Gemini Haiku to check and fix generated files against contracts."""
 from __future__ import annotations
 
 import json
@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from kernel.monitoring.performance_tracker import PerformanceTracker
 
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
-_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "claude" / "conformance_verifier.md"
+_HAIKU_MODEL = "gemini-3-flash-preview"
+_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "gemini" / "conformance_verifier.md"
 _MAX_CONTENT_CHARS = 8_000
 _CODE_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".cs", ".rb", ".php"}
 
@@ -21,8 +21,8 @@ class ConformanceVerifier:
     and overwrites any file Haiku determines needs correction.
     """
 
-    def __init__(self, claude_driver, tracker: Optional["PerformanceTracker"] = None, notify_fn=None) -> None:
-        self.driver = claude_driver
+    def __init__(self, gemini_driver, tracker: Optional["PerformanceTracker"] = None, notify_fn=None) -> None:
+        self.driver = gemini_driver
         self.tracker = tracker
         self._notify = notify_fn or (lambda msg, t, d: None)
         self._system_prompt: Optional[str] = None  # loaded lazily on first use
@@ -32,7 +32,7 @@ class ConformanceVerifier:
             if not _PROMPT_PATH.exists():
                 raise FileNotFoundError(
                     f"ConformanceVerifier: prompt no encontrado en {_PROMPT_PATH}. "
-                    "Verificá que prompts/claude/conformance_verifier.md exista."
+                    "Verificá que prompts/gemini/conformance_verifier.md exista."
                 )
             self._system_prompt = _PROMPT_PATH.read_text(encoding="utf-8")
         return self._system_prompt
@@ -81,7 +81,7 @@ class ConformanceVerifier:
                 if isinstance(m, dict) and m.get("id"):
                     _contract_by_id[m["id"]] = m
 
-        print(f"\n[FASE 4.V] Conformance Verify — {len(modules)} módulo(s) con Claude Haiku...")
+        print(f"\n[FASE 4.V] Conformance Verify — {len(modules)} módulo(s) con Gemini Haiku...")
         checked = fixed = skipped = 0
 
         for module in modules:

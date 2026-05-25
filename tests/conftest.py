@@ -2,56 +2,47 @@
 import sys
 import pytest
 
+# ── Windows: patch shutil.rmtree to survive locked files (daemon-thread log handles) ──
+if sys.platform == "win32":
+    import shutil as _shutil
+    import stat as _stat
+    import os as _os
+    import time as _time
 
-def _robust_rmtree(path):
-    """shutil.rmtree with Windows-safe retry on PermissionError (locked venv files)."""
-    import shutil, time, stat, os
+    _orig_rmtree = _shutil.rmtree  # capture BEFORE patching to avoid recursion
 
-    def _on_error(func, fpath, exc_info):
-        # Make read-only files writable then retry
+    def _soda_onerror(func, fpath, exc_info):
+        """Best-effort: chmod → retry → sleep 100ms → retry → give up silently."""
         try:
-            os.chmod(fpath, stat.S_IWRITE)
+            _os.chmod(fpath, _stat.S_IWRITE)
             func(fpath)
         except PermissionError:
-            time.sleep(0.05)
+            _time.sleep(0.1)
             try:
                 func(fpath)
             except Exception:
-                pass  # best-effort — don't block teardown
+                pass  # locked by a daemon thread — skip, don't block teardown
         except Exception:
             pass
 
-    shutil.rmtree(path, onerror=_on_error)
+    def _patched_rmtree(path, ignore_errors=False, onerror=None):
+        # Always call _orig_rmtree (not the patched version) with our onerror
+        # so locked files are silently skipped instead of crashing fixture teardown.
+        _orig_rmtree(path, onerror=_soda_onerror)
 
-
-if sys.platform == "win32":
-    # Patch pytest's internal cleanup to use the robust rmtree
-    try:
-        import _pytest.tmpdir as _pt
-        _orig_cleanup = getattr(_pt, "cleanup_on_next_exit", None)
-        # Patch shutil.rmtree used by TempPathFactory
-        import shutil as _shutil
-        _orig_rmtree = _shutil.rmtree
-
-        def _patched_rmtree(path, ignore_errors=False, onerror=None):
-            if onerror is None and not ignore_errors:
-                _robust_rmtree(path)
-            else:
-                _orig_rmtree(path, ignore_errors=ignore_errors, onerror=onerror)
-
-        _shutil.rmtree = _patched_rmtree
-    except Exception:
-        pass
+    _shutil.rmtree = _patched_rmtree
 
 
 def pytest_configure(config):
     """Redirect tmp_path to D: drive to avoid filling C:\\Temp during pipeline tests."""
     if sys.platform == "win32":
-        import pathlib
-        basetemp = pathlib.Path("D:/Desktop/pytest-soda-tmp")
+        import os, pathlib
+        root = pathlib.Path("D:/Desktop/pytest-soda-tmp-root")
         try:
-            basetemp.mkdir(parents=True, exist_ok=True)
-            config.option.basetemp = str(basetemp)
+            root.mkdir(parents=True, exist_ok=True)
+            # PYTEST_DEBUG_TEMPROOT makes pytest use make_numbered_dir_with_cleanup,
+            # which creates a session-unique subdir and handles stale dirs gracefully.
+            os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(root))
         except (PermissionError, OSError):
             pass  # fallback to default if D: is unavailable
 

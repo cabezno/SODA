@@ -80,11 +80,11 @@ class FileComplexityRouter:
 
         - simple:  use the base list as-is (starts with Qwen)
         - medium:  skip Qwen, start from Gemini
-        - complex: skip Qwen + Gemini, start directly from Claude
+        - complex: skip Qwen + Gemini, start directly from Gemini
         """
         if complexity == "simple":
             return base_levels
         if complexity == "medium":
             return [l for l in base_levels if l != "qwen"]
-        # complex: Claude only
-        return [l for l in base_levels if l == "claude"]
+        # complex: Gemini only
+        return [l for l in base_levels if l == "gemini"]

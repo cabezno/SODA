@@ -1,0 +1,21 @@
+```javascript
+// dependencies.js
+
+/**
+ * @typedef {Object} EmailAddress
+ * @property {string} value - The email address of the user.
+ */
+
+/**
+ * @typedef {Object} Credentials
+ * @property {string} host - The SMTP server host.
+ * @property {number} port - The SMTP server port.
+ * @property {string} username - The SMTP server username.
+ * @property {string} password - The SMTP server password.
+ */
+
+module.exports = {
+  EmailAddress,
+  Credentials
+};
+```

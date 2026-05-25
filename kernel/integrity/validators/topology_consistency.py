@@ -12,7 +12,7 @@ from kernel.integrity.validators.base_validator import BaseValidator
 
 
 class TopologyConsistencyValidator(BaseValidator):
-    """Validates that Claude's master_contract is consistent with Gemini's topology."""
+    """Validates that Gemini's master_contract is consistent with Gemini's topology."""
 
     def __init__(self, topology: dict) -> None:
         self._topology = topology
@@ -28,7 +28,7 @@ class TopologyConsistencyValidator(BaseValidator):
         topology_ids = {m["id"] for m in topo_modules if isinstance(m, dict) and m.get("id")}
         contract_ids = {m.id for m in contract.modules}
 
-        # 1. Claude must not invent or drop modules relative to topology
+        # 1. Gemini must not invent or drop modules relative to topology
         missing = topology_ids - contract_ids
         invented = contract_ids - topology_ids
 

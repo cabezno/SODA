@@ -89,7 +89,7 @@ class VisualInspector:
             }
             url = (
                 "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-2.0-flash:generateContent?key={api_key}"
+                f"gemini-3-flash-preview:generateContent?key={api_key}"
             )
             async with httpx.AsyncClient(timeout=30.0) as client:
                 r = await client.post(url, json=payload)

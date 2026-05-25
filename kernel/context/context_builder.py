@@ -80,7 +80,7 @@ class ContextBuilder:
             else:
                 base_instruction = f"You are a SODA agent specialized in {role}."
 
-            if role == "code_generator" and provider in ("claude", "gemini", "ollama"):
+            if role == "code_generator" and provider in ("gemini", "deepseek", "claude", "ollama"):
                 system_instruction = build_provider_system(
                     provider=provider,
                     role=role,

@@ -1,0 +1,111 @@
+```cpp
+// CORE-APP-001: Windows Desktop Application Framework
+
+#include <windows.h>
+#include <tchar.h> // Required for _TCHAR and _T() macro for Unicode compatibility
+
+// Global constants
+const TCHAR g_szClassName[] = _T("CoreAppWindowClass");
+
+// Forward declaration of the Window Procedure
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Main entry point for the Windows application
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+    WNDCLASSEX wc;
+    HWND hwnd;
+    MSG Msg;
+
+    // Step 1: Registering the Window Class
+    // Define the properties of the window class
+    wc.cbSize        = sizeof(WNDCLASSEX);          // Size of this structure
+    wc.style         = 0;                           // Class style (e.g., CS_HREDRAW | CS_VREDRAW)
+    wc.lpfnWndProc   = WndProc;                     // Pointer to the window procedure
+    wc.cbClsExtra    = 0;                           // Extra bytes to allocate for this class
+    wc.cbWndExtra    = 0;                           // Extra bytes to allocate for each window
+    wc.hInstance     = hInstance;                   // Handle to the instance that registers the class
+    wc.hIcon         = LoadIcon(NULL, IDI_APPLICATION); // Large icon for the window
+    wc.hCursor       = LoadCursor(NULL, IDC_ARROW);     // Cursor for the window
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);  // Background brush
+    wc.lpszMenuName  = NULL;                        // Name of the menu resource
+    wc.lpszClassName = g_szClassName;               // Name of the window class
+    wc.hIconSm       = LoadIcon(NULL, IDI_APPLICATION); // Small icon for the window
+
+    // Register the window class
+    if (!RegisterClassEx(&wc))
+    {
+        MessageBox(NULL, _T("Window Registration Failed!"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Step 2: Creating the Window
+    // Create an instance of the window based on the registered class
+    hwnd = CreateWindowEx(
+        WS_EX_CLIENTEDGE,                       // Extended window style
+        g_szClassName,                          // Window class name
+        _T("CORE-APP-001: Windows Desktop Application"), // Window title
+        WS_OVERLAPPEDWINDOW,                    // Window style (e.g., WS_OVERLAPPEDWINDOW for a standard window)
+        CW_USEDEFAULT, CW_USEDEFAULT,           // Initial x, y position
+        800, 600,                               // Initial width, height
+        NULL,                                   // Parent window handle
+        NULL,                                   // Menu handle
+        hInstance,                              // Instance handle
+        NULL                                    // Pointer to creation data
+    );
+
+    // Check if window creation was successful
+    if (hwnd == NULL)
+    {
+        MessageBox(NULL, _T("Window Creation Failed!"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Show and update the window
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    // Step 3: The Message Loop
+    // Process messages until WM_QUIT is received
+    while (GetMessage(&Msg, NULL, 0, 0) > 0)
+    {
+        TranslateMessage(&Msg); // Translate virtual-key messages into character messages
+        DispatchMessage(&Msg);  // Dispatch the message to the window procedure
+    }
+
+    // Return the wParam of the WM_QUIT message
+    return Msg.wParam;
+}
+
+// Step 4: The Window Procedure (WndProc)
+// Handles messages sent to the window
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+        case WM_CLOSE:
+            // Handle the close button click
+            DestroyWindow(hwnd); // Destroy the window
+            break;
+        case WM_DESTROY:
+            // Handle the window being destroyed
+            PostQuitMessage(0); // Post a WM_QUIT message to terminate the message loop
+            break;
+        // Add more message handling here for UI interactions, painting, etc.
+        // For example:
+        // case WM_PAINT:
+        //     {
+        //         PAINTSTRUCT ps;
+        //         HDC hdc = BeginPaint(hwnd, &ps);
+        //         // All painting occurs here, between BeginPaint and EndPaint.
+        //         FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
+        //         EndPaint(hwnd, &ps);
+        //     }
+        //     break;
+        default:
+            // For any messages not explicitly handled, call the default window procedure
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0; // Message handled
+}
+```

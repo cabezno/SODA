@@ -221,8 +221,6 @@ PYTHON_IMPORT_TO_PIP: dict[str, str] = {
     "jwt": "PyJWT",
     "dateutil": "python-dateutil",
     "attr": "attrs",
-    "google.cloud": "google-cloud",
-    "google.generativeai": "google-generativeai",
     "anthropic": "anthropic",
     "openai": "openai",
     "fastapi": "fastapi",

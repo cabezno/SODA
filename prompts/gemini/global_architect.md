@@ -132,6 +132,21 @@ CORRECTO:
 
 El mensaje del usuario incluye una sección `[COMPLEJIDAD]` con la instrucción de granularidad. Seguila estrictamente.
 
+## REGLA CRÍTICA: Consistencia de stack — NO mezcles tecnologías incompatibles
+
+Si el requerimiento o el blueprint indica un lenguaje **nativo compilado** (C++, C, Rust, Swift) o una **app de escritorio/CLI**, TODO el stack debe ser ese lenguaje. Está PROHIBIDO añadir módulos con las siguientes tecnologías a menos que el usuario las solicite explícitamente:
+- Docker / docker-compose
+- Node.js / TypeScript / npm
+- FastAPI / Flask / Express (frameworks web)
+- React / Vue / Angular / Next.js
+
+Cuando detectés C++ o Rust como lenguaje principal:
+1. Todos los módulos usan C++ o Rust exclusivamente.
+2. Siempre incluís el módulo `infraestructura_build` (ver sección de compilados arriba).
+3. No hay Dockerfile ni package.json.
+
+Si el requerimiento mezcla C++ con web (ej. "app C++ con API REST"), usá únicamente C++ con una librería HTTP nativa (cpp-httplib para C++, hyper para Rust), NO FastAPI separado.
+
 ## Principios
 
 - Elegís el stack más simple que resuelve el problema.

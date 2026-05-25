@@ -1,7 +1,7 @@
 """ProjectComplexityClassifier — pure Python, no AI (Arquitecto v2).
 
 Analyzes a project blueprint and returns a complexity level used to select
-the appropriate Claude model for the Architect.
+the appropriate Gemini model for the Architect.
 """
 from __future__ import annotations
 
@@ -12,19 +12,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
-# Model assignment by complexity — Arquitecto v2
+# Model assignment by complexity — Arquitecto v2 (Gemini)
 # ---------------------------------------------------------------------------
 MODEL_ASSIGNMENT_BY_COMPLEXITY: dict[str, str] = {
-    "simple": "claude-haiku-4-5-20251001",
-    "medium": "claude-sonnet-4-6",
-    "complex": "claude-opus-4-7",
+    "simple": "gemini-3-flash-preview",
+    "medium": "gemini-3.1-pro-preview",
+    "complex": "gemini-3.1-pro-preview",
 }
 
 MODEL_CALL_CONFIG: dict[str, dict] = {
-    "claude-haiku-4-5-20251001": {"max_tokens": 8192},
-    "claude-sonnet-4-6":         {"max_tokens": 64000},
-    # Opus output cap is 32K; max_continuations allows multi-turn completion for large JSONs
-    "claude-opus-4-7":           {"max_tokens": 32000, "max_continuations": 2},
+    "gemini-3-flash-preview": {"max_tokens": 8192, "max_continuations": 3},
+    "gemini-3.1-pro-preview": {"max_tokens": 8192, "max_continuations": 4},
 }
 
 # ---------------------------------------------------------------------------
@@ -58,6 +56,22 @@ _SENSITIVE_KEYWORDS = {
 _COMPLIANCE_PATTERN = re.compile(
     r"\b(gdpr|hipaa|pci[\-\s]?dss|sox|rgpd|iso\s*27001)\b", re.IGNORECASE
 )
+
+# Tipos de proyecto que siempre son SIMPLE — sin importar funcionalidades ni stack
+_SIMPLE_PROJECT_PATTERNS = {
+    "landing page", "landing", "sitio estático", "static site",
+    "página de presentación", "one-page", "one page", "página web simple",
+    "página web estática", "sitio web estático", "landing-page",
+    "portfolio", "portafolio", "cv online", "curriculum web", "página de bienvenida",
+    "microsite", "micro-site", "splash page",
+}
+
+# Valores en stack_sugerido que indican "no hay esta capa" — no deben contar como stack
+_NULL_STACK_PATTERNS = {
+    "ninguno", "none", "no requerida", "no aplica", "not required",
+    "no backend", "sin backend", "no database", "sin base de datos",
+    "n/a", "no", "-",
+}
 
 
 class ComplexityLevel(str, Enum):
@@ -105,12 +119,22 @@ class ProjectComplexityClassifier:
 
     def classify(self, blueprint: dict) -> ComplexityAssessment:
         signals = self._extract_signals(blueprint)
+
+        # Fast-path: tipo de proyecto reconocido como simple (landing page, portfolio, etc.)
+        forced = self._detect_forced_simple(blueprint)
+        if forced:
+            scores = {"simple": 1, "medium": 0, "complex": 0}
+            return ComplexityAssessment(
+                level=ComplexityLevel.SIMPLE,
+                score=1,
+                signals=signals,
+                reasoning=f"Proyecto clasificado como simple\nTipo de proyecto detectado: {forced}",
+            )
+
         scores = self._calculate_scores(signals)
         level = self._determine_level(scores)
         level = self._apply_minimum_level(level, signals)
-        
 
-            
         reasoning = self._build_reasoning(signals, scores, level)
 
         return ComplexityAssessment(
@@ -184,14 +208,50 @@ class ProjectComplexityClassifier:
         return modules * 600
 
     def _count_stacks(self, blueprint: dict) -> int:
-        """Count distinct technology stacks."""
+        """Count distinct real technology stacks (ignores 'ninguno'/'no requerida' entries)."""
         stack = blueprint.get("stack_sugerido") or blueprint.get("stack", {})
         if isinstance(stack, dict):
-            # Count distinct non-empty top-level stack categories
-            return max(1, len([v for v in stack.values() if v]))
+            count = 0
+            for v in stack.values():
+                if not v:
+                    continue
+                v_str = str(v).strip().lower()
+                if any(pat in v_str for pat in _NULL_STACK_PATTERNS):
+                    continue
+                count += 1
+            return max(1, count)
         if isinstance(stack, list):
             return max(1, len(stack))
         return 1
+
+    def _detect_forced_simple(self, blueprint: dict) -> str | None:
+        """Return the matched pattern if this project is inherently simple, else None."""
+        # Check explicit hint from the requirements interviewer
+        if str(blueprint.get("estimacion_complejidad", "")).lower() == "simple":
+            # Only trust it if there's no backend or DB stack
+            stack = blueprint.get("stack_sugerido") or {}
+            if isinstance(stack, dict):
+                backend = str(stack.get("backend", "")).strip().lower()
+                db = str(stack.get("base_de_datos", "")).strip().lower()
+                has_backend = backend and not any(p in backend for p in _NULL_STACK_PATTERNS)
+                has_db = db and not any(p in db for p in _NULL_STACK_PATTERNS)
+                if not has_backend and not has_db:
+                    return "estimacion_complejidad=simple + sin backend/DB"
+
+        # Check project name and description for known simple types
+        name = (
+            blueprint.get("nombre_proyecto") or
+            blueprint.get("nombre") or
+            blueprint.get("name") or ""
+        ).lower()
+        desc = (blueprint.get("descripcion") or blueprint.get("description") or "").lower()
+        searchable = f"{name} {desc}"
+
+        for pat in _SIMPLE_PROJECT_PATTERNS:
+            if pat in searchable:
+                return pat
+
+        return None
 
     def _extract_integrations(self, blueprint: dict, text_lower: str) -> list[str]:
         """Extract external service integrations."""

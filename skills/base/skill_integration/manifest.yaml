@@ -1,0 +1,34 @@
+name: skill_integration
+category: communication
+description: HTTP client patterns for inter-service communication — typed clients, retry, timeout, error handling
+applies_to_roles:
+  code_generator:
+    load_level: full
+  global_architect:
+    load_level: summary
+  reviewer:
+    load_level: checklist
+activation_keywords:
+  - api client
+  - http client
+  - microservice
+  - external api
+  - service communication
+  - webhook
+  - fetch
+  - axios
+  - httpx
+  - requests
+  - rest client
+  - integration
+activation_signals:
+  dependencies:
+    - httpx
+    - aiohttp
+    - axios
+    - node-fetch
+  file_patterns:
+    - "*client*"
+    - "*gateway*"
+    - "*adapter*"
+version: "1.0"

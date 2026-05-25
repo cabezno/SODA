@@ -1,0 +1,25 @@
+# SODA Core Blueprint Configuration
+# Define las variables y la estructura lógica para la generación de microservicios.
+
+_subdirectory: "{{ project_name }}"
+
+questions:
+  project_name:
+    type: str
+    help: "Nombre del microservicio o módulo"
+    default: "soda-worker"
+  
+  use_vulkan:
+    type: bool
+    help: "¿Habilitar aceleración por GPU (C++23/Vulkan)?"
+    default: true
+
+  use_go:
+    type: bool
+    help: "¿Habilitar workers de concurrencia masiva (Go)?"
+    default: true
+
+  shm_size_mb:
+    type: int
+    help: "Tamaño por defecto del bus de memoria compartida (MB)"
+    default: 128

@@ -25,7 +25,7 @@ from typing import Optional
 VOICES_DIR = Path(__file__).parent / "voices"
 VOICES_DIR.mkdir(exist_ok=True)
 
-DEFAULT_VOICE = "es-AR-ElenaNeural"
+DEFAULT_VOICE = "es-AR-TomasNeural"
 
 AVAILABLE_VOICES = {
     "es-AR-ElenaNeural": "Argentina — Elena (femenina)",
@@ -98,9 +98,10 @@ def _mp3_to_wav(mp3_bytes: bytes) -> bytes:
 def wav_to_ogg_opus(wav_bytes: bytes) -> bytes:
     """Convierte WAV → OGG Opus (formato de nota de voz de Telegram)."""
     try:
+        ffmpeg = _find_ffmpeg() or "ffmpeg"
         proc = subprocess.run(
             [
-                "ffmpeg", "-y",
+                ffmpeg, "-y",
                 "-f", "wav", "-i", "pipe:0",
                 "-c:a", "libopus", "-b:a", "64k",
                 "-f", "ogg", "pipe:1",
@@ -121,13 +122,12 @@ def wav_to_ogg_opus(wav_bytes: bytes) -> bytes:
 def _build_ssml(text: str, voice: str, rate: str = "+0%", pitch: str = "+0Hz") -> str:
     """Envuelve el texto en SSML con prosody para énfasis y modulación natural."""
     import xml.sax.saxutils as _xml
-    # Agregar pausas naturales en puntuación
-    processed = text
+    # Escape primero, luego agregar pausas (para que los tags XML no se escapen)
+    safe = _xml.escape(text)
     for punct, ms in [("...", "400ms"), (".", "300ms"), (",", "150ms"),
                       ("!", "300ms"), ("?", "300ms"), (";", "200ms"), (":", "150ms")]:
-        processed = processed.replace(punct, f'{punct}<break time="{ms}"/>')
-
-    safe = _xml.escape(processed)
+        escaped_punct = _xml.escape(punct)
+        safe = safe.replace(escaped_punct, f'{escaped_punct}<break time="{ms}"/>')
     return (
         f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
         f'xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="es-AR">'
@@ -193,15 +193,37 @@ class KokoroTTS:
         self._speed = max(0.5, min(2.0, float(speed)))
 
     def list_voices(self) -> dict:
+        custom = [
+            p.stem for p in VOICES_DIR.glob("*.wav")
+            if p.stem not in AVAILABLE_VOICES
+        ]
         return {
-            "current_voice": self._voice,
+            "active": self._voice,
+            "current_voice": self._voice,  # backwards-compat
             "speed": self._speed,
+            "builtin": list(AVAILABLE_VOICES.keys()),
+            "custom": custom,
             "voices": [
                 {"name": k, "label": v}
                 for k, v in AVAILABLE_VOICES.items()
             ],
             "engine": "edge-tts",
         }
+
+    def delete_voice(self, voice_name: str) -> bool:
+        """Elimina una voz clonada. Las voces built-in no se pueden eliminar."""
+        if voice_name in AVAILABLE_VOICES:
+            return False
+        wav = VOICES_DIR / f"{voice_name}.wav"
+        txt = VOICES_DIR / f"{voice_name}.txt"
+        deleted = False
+        if wav.exists():
+            wav.unlink()
+            deleted = True
+        if txt.exists():
+            txt.unlink()
+            deleted = True
+        return deleted
 
     # ── Generación ────────────────────────────────────────────────────────────
 

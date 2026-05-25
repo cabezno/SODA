@@ -4,9 +4,9 @@ import re
 
 
 class RefoundationEngine:
-    def __init__(self, claude_driver, context_builder):
-        self.claude = claude_driver
+    def __init__(self, gemini_driver, context_builder):
         self.builder = context_builder
+        self.gemini = gemini_driver
 
     async def summarize(self, description: str, blueprint: dict, architecture: dict) -> dict:
         task = (
@@ -14,8 +14,8 @@ class RefoundationEngine:
             f"BLUEPRINT:\n{json.dumps(blueprint, ensure_ascii=False, indent=2)[:2000]}\n\n"
             f"ARCHITECTURE:\n{json.dumps(architecture.get('modulos', []), ensure_ascii=False, indent=2)[:2000]}"
         )
-        payload = self.builder.build_payload("claude", "refoundation", task)
-        raw = await self.claude.prompt(payload["system"], payload["user"])
+        payload = self.builder.build_payload("gemini", "refoundation", task)
+        raw = await self.gemini.prompt(payload["system"], payload["user"])
         return self._parse(raw)
 
     def _parse(self, text: str) -> dict:

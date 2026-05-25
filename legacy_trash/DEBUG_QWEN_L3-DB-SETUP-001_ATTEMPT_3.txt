@@ -1,0 +1,116 @@
+```python
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Enum, DateTime, func
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
+from datetime import datetime
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+
+class SoftwareProduct(Base):
+    __tablename__ = 'software_products'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String)
+    license_model = Column(Enum('one-time', 'subscription', 'perpetual'), nullable=False)
+
+class LicenseModel(Base):
+    __tablename__ = 'license_models'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String)
+    price = Column(Float, nullable=False)
+
+class Order(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    product_id = Column(Integer, ForeignKey('software_products.id'), nullable=False)
+    license_model_id = Column(Integer, ForeignKey('license_models.id'), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    total_price = Column(Float, nullable=False)
+    order_date = Column(DateTime, default=func.current_timestamp())
+
+class LicenseKey(Base):
+    __tablename__ = 'license_keys'
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
+    key_value = Column(String, unique=True, nullable=False)
+    activation_date = Column(DateTime)
+
+def generate_database_setup_code(application_data_requirements: str) -> dict[str, str]:
+    # Parse application_data_requirements to extract model definitions
+    # This is a placeholder for actual parsing logic
+    models_code = """
+# models.py
+
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Enum, DateTime, func
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+
+class SoftwareProduct(Base):
+    __tablename__ = 'software_products'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String)
+    license_model = Column(Enum('one-time', 'subscription', 'perpetual'), nullable=False)
+
+class LicenseModel(Base):
+    __tablename__ = 'license_models'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String)
+    price = Column(Float, nullable=False)
+
+class Order(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    product_id = Column(Integer, ForeignKey('software_products.id'), nullable=False)
+    license_model_id = Column(Integer, ForeignKey('license_models.id'), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    total_price = Column(Float, nullable=False)
+    order_date = Column(DateTime, default=func.current_timestamp())
+
+class LicenseKey(Base):
+    __tablename__ = 'license_keys'
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
+    key_value = Column(String, unique=True, nullable=False)
+    activation_date = Column(DateTime)
+"""
+
+    alembic_env_code = """
+# migrations/env.py
+
+from sqlalchemy import engine_from_config
+from sqlalchemy import pool
+
+from logging.config import fileConfig
+
+from myapp.models import Base
+
+fileConfig('alembic.ini')
+target_metadata = Base.metadata
+"""
+
+    return {
+        'models.py': models_code,
+        'migrations/env.py': alembic_env_code
+    }
+```

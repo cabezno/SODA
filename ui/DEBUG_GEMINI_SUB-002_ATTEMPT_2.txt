@@ -1,0 +1,109 @@
+```javascript
+// Layer 4: Coder. Output ONLY pure javascript code implementing the contract interface.
+
+// Import necessary libraries.
+// In a real-world Node.js application, these would be installed via npm:
+// npm install google-auth-library jsonwebtoken
+const { OAuth2Client } = require('google-auth-library');
+const jwt = require('jsonwebtoken');
+
+// --- Configuration from Environment Variables ---
+// These values MUST be set in the environment where this service runs.
+// For example, in a .env file or directly in the deployment environment.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+// GOOGLE_AUDIENCE can be the same as GOOGLE_CLIENT_ID or a specific audience configured for your backend.
+const GOOGLE_AUDIENCE = process.env.GOOGLE_AUDIENCE || GOOGLE_CLIENT_ID;
+const JWT_SECRET = process.env.JWT_SECRET;
+// Default to 1 hour if JWT_EXPIRATION_TIME is not specified.
+const JWT_EXPIRATION_TIME = process.env.JWT_EXPIRATION_TIME || '1h';
+
+// Basic validation for critical environment variables.
+// In a production environment, you might want more sophisticated configuration management.
+if (!GOOGLE_CLIENT_ID) {
+    throw new Error('Environment variable GOOGLE_CLIENT_ID is not set. This is required for Google token verification.');
+}
+if (!JWT_SECRET) {
+    throw new Error('Environment variable JWT_SECRET is not set. This is crucial for generating secure internal session tokens.');
+}
+
+// Initialize Google OAuth2Client with your client ID.
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+/**
+ * Implements the SUB-002 contract for Google OAuth authentication.
+ * Verifies a Google authentication token and generates a secure internal session token
+ * for the backend, along with the user's profile ID.
+ *
+ * @param {Object} inputs - The input object containing required parameters.
+ * @param {string} inputs.google_auth_token - The Google authentication token received from the client.
+ * @returns {Promise<Object>} A promise that resolves to an object containing:
+ *   - {string} internal_auth_token - A secure, signed, and time-limited internal authentication token for the backend.
+ *   - {string} user_profile_id - The unique identifier of the authenticated user's profile (Google 'sub').
+ * @throws {Error} If the Google token is invalid, verification fails, or internal token generation fails.
+ */
+async function authenticateWithGoogle(inputs) {
+    const { google_auth_token } = inputs;
+
+    if (!google_auth_token) {
+        throw new Error('Input "google_auth_token" is required.');
+    }
+
+    let user_profile_id;
+    try {
+        // 1. Verify the Google authentication token.
+        // The 'audience' parameter ensures that the token was issued for your application.
+        const ticket = await googleClient.verifyIdToken({
+            idToken: google_auth_token,
+            audience: GOOGLE_AUDIENCE,
+        });
+
+        const payload = ticket.getPayload();
+
+        // The 'sub' field in the payload is the unique user ID from Google.
+        if (!payload || !payload.sub) {
+            throw new Error('Invalid Google token payload: missing user ID (sub).');
+        }
+        user_profile_id = payload.sub;
+
+        // You can also extract other user information from the payload if needed, e.g.:
+        // const email = payload.email;
+        // const name = payload.name;
+        // const picture = payload.picture;
+
+    } catch (error) {
+        console.error('Google token verification failed:', error.message);
+        throw new Error(`Failed to verify Google token: ${error.message}`);
+    }
+
+    // 2. Generate a secure internal session token (JWT).
+    // This token will be used by your backend to authenticate subsequent requests.
+    let internal_auth_token;
+    try {
+        const jwtPayload = {
+            user_profile_id: user_profile_id,
+            // You can add more claims to the JWT payload as needed, e.g., roles, permissions.
+            // For example: role: 'user', email: payload.email
+        };
+
+        internal_auth_token = jwt.sign(jwtPayload, JWT_SECRET, {
+            expiresIn: JWT_EXPIRATION_TIME, // Token expiration time.
+            // You might also want to add 'issuer' and 'audience' claims for the internal JWT
+            // to specify who issued it and for whom it is intended.
+            // issuer: 'your-auth-service',
+            // audience: 'your-main-backend',
+        });
+    } catch (error) {
+        console.error('Failed to generate internal authentication token:', error.message);
+        throw new Error(`Failed to generate internal authentication token: ${error.message}`);
+    }
+
+    // Return the generated internal token and the user's profile ID.
+    return {
+        internal_auth_token,
+        user_profile_id,
+    };
+}
+
+// Export the function to fulfill the contract interface.
+module.exports = authenticateWithGoogle;
+```

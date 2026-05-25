@@ -1,0 +1,109 @@
+```cpp
+#include <windows.h>
+#include <queue>
+#include <string>
+
+// Define message types for events
+enum TimerEvent {
+    PLAY,
+    PAUSE,
+    STOP,
+    RESET,
+    SET_DURATION
+};
+
+// Event structure for dynamic user interactions
+struct TimerEventMessage {
+    TimerEvent event;
+    int duration = 0; // For SET_DURATION, this holds the duration in minutes
+};
+
+class CountdownTimerUI {
+public:
+    explicit CountdownTimerUI(HWND hWnd);
+    ~CountdownTimerUI();
+
+    void UpdateDisplay(const std::string& time, const std::string& state);
+    void SendEvent(TimerEventMessage event);
+
+private:
+    HWND hWnd;
+    std::queue<TimerEventMessage> user_control_events_queue;
+
+    static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+
+    void CreateWindow();
+    void UpdateUIState(const std::string& state);
+};
+
+CountdownTimerUI::CountdownTimerUI(HWND hWnd) : hWnd(hWnd) {
+    CreateWindow();
+}
+
+CountdownTimerUI::~CountdownTimerUI() {}
+
+void CountdownTimerUI::UpdateDisplay(const std::string& time, const std::string& state) {
+    // Update the display with the given time and state
+    SendMessage(hWnd, WM_SETTEXT, 0, (LPARAM)time.c_str());
+    UpdateUIState(state);
+}
+
+void CountdownTimerUI::SendEvent(TimerEventMessage event) {
+    user_control_events_queue.push(event);
+}
+
+LRESULT CALLBACK CountdownTimerUI::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    static HWND hInputField, hPlayBtn, hPauseBtn, hStopBtn, hResetBtn;
+
+    switch (msg) {
+        case WM_CREATE:
+            // Create and place controls
+            hInputField = CreateWindow(TEXT("EDIT"), TEXT(""), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 10, 10, 60, 20, hWnd, (HMENU)IDC_INPUT_FIELD, NULL, NULL);
+            hPlayBtn = CreateWindow(TEXT("BUTTON"), TEXT("Play"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 10, 50, 20, hWnd, (HMENU)IDC_PLAY_BUTTON, NULL, NULL);
+            hPauseBtn = CreateWindow(TEXT("BUTTON"), TEXT("Pause"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 140, 10, 50, 20, hWnd, (HMENU)IDC_PAUSE_BUTTON, NULL, NULL);
+            hStopBtn = CreateWindow(TEXT("BUTTON"), TEXT("Stop"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 200, 10, 50, 20, hWnd, (HMENU)IDC_STOP_BUTTON, NULL, NULL);
+            hResetBtn = CreateWindow(TEXT("BUTTON"), TEXT("Reset"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 260, 10, 50, 20, hWnd, (HMENU)IDC_RESET_BUTTON, NULL, NULL);
+
+            SetTimer(hWnd, IDT_COUNTDOWN, 1000, NULL); // Start countdown timer
+            return 0;
+        case WM_COMMAND:
+            switch (LOWORD(wParam)) {
+                case IDC_PLAY_BUTTON:
+                    SendEvent({PLAY});
+                    break;
+                case IDC_PAUSE_BUTTON:
+                    SendEvent({PAUSE});
+                    break;
+                case IDC_STOP_BUTTON:
+                    SendEvent({STOP});
+                    break;
+                case IDC_RESET_BUTTON:
+                    SendEvent({RESET});
+                    break;
+            }
+            return 0;
+        case WM_TIMER:
+            if (LOWORD(wParam) == IDT_COUNTDOWN) {
+                // Update countdown logic here
+            }
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProc(hWnd, msg, wParam, lParam);
+}
+
+void CountdownTimerUI::CreateWindow() {
+    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, WndProc, 0, 0, GetModuleHandle(NULL), NULL, NULL, RGB(0, 0, 0), NULL, L"CountdownTimerUI", NULL };
+    RegisterClassEx(&wc);
+    CreateWindow(L"CountdownTimerUI", L"Countdown Timer", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 350, 50, NULL, NULL, GetModuleHandle(NULL), this);
+    ShowWindow(hWnd, SW_SHOW);
+}
+
+void CountdownTimerUI::UpdateUIState(const std::string& state) {
+    // Update UI state based on the given state string
+}
+```
+
+This code provides a basic structure for implementing a countdown timer UI in Windows using C++. It includes window creation, control placement, and handling of user interactions to emit events. The `UpdateDisplay` function updates the time display and visual state, while `SendEvent` puts events into a queue that can be processed elsewhere in your application.

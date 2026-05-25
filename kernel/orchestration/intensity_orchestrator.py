@@ -27,7 +27,7 @@ class IntensityOrchestrator:
         "auth", "oauth", "jwt", "payment", "stripe", "mercadopago", "websocket",
         "queue", "docker", "microservice", "multi service", "ci/cd",
         "celery", "redis", "cache", "search", "elasticsearch", "s3", "storage",
-        "llm", "openai", "gemini", "claude", "ai", "ml", "embedding", "vector",
+        "llm", "openai", "gemini", "gemini", "ai", "ml", "embedding", "vector",
         "agent", "pipeline", "workflow", "scheduler", "cron",
     )
     CRITICAL_KEYWORDS = (

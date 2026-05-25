@@ -6,6 +6,9 @@ Model is downloaded on first use and cached by faster-whisper.
 from __future__ import annotations
 
 import io
+import os
+import subprocess
+import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
@@ -78,7 +81,6 @@ class WhisperSTT:
             return " ".join(s.text.strip() for s in segments).strip()
 
     def _transcribe_wav(self, wav_bytes: bytes) -> str:
-        import tempfile, os
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(wav_bytes)
             tmp = f.name
@@ -93,23 +95,22 @@ class WhisperSTT:
 
 def _to_wav_bytes(data: bytes, fmt: str) -> bytes:
     """Convert any audio format to 16kHz mono WAV via ffmpeg subprocess."""
-    import subprocess, tempfile, os
+    import tempfile
     with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as fin:
         fin.write(data)
         in_path = fin.name
     out_path = in_path + ".wav"
     try:
         subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", in_path,
-                "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
-                out_path,
-            ],
-            check=True,
-            capture_output=True,
+            ["ffmpeg", "-y", "-i", in_path,
+             "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
+             out_path],
+            check=True, capture_output=True, timeout=30,
         )
         with open(out_path, "rb") as f:
             return f.read()
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("ffmpeg conversion timed out")
     finally:
         for p in (in_path, out_path):
             try:

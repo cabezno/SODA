@@ -1,0 +1,117 @@
+```python
+import re
+from bs4 import BeautifulSoup
+
+def apply_css_styling(raw_html_file: str, style_guide: dict) -> tuple[str, dict]:
+    """
+    Applies CSS rules to style the HTML structure based on the provided style guide.
+
+    Args:
+        raw_html_file (str): The unstyled HTML content of the landing page.
+        style_guide (dict): Styling guidelines including color palette, typography,
+                            spacing, and basic responsive adjustments.
+
+    Returns:
+        tuple[str, dict]: A tuple containing:
+            - styled_css_file (str): A CSS file containing all styling rules for the landing page.
+            - landing_page_files (dict): The complete set of static HTML and CSS files
+                                         for the landing page, e.g., {'index.html': '...', 'style.css': '...'}.
+    """
+    css_rules = []
+
+    # 1. CSS Variables for Colors
+    if 'colors' in style_guide:
+        css_rules.append(':root {')
+        for name, value in style_guide['colors'].items():
+            css_rules.append(f'  --{name}: {value};')
+        css_rules.append('}')
+        css_rules.append('') # Add a newline for separation
+
+    # 2. Base Typography and Body Styles
+    css_rules.append('body {')
+    typography = style_guide.get('typography', {})
+    if 'font_family_base' in typography:
+        css_rules.append(f'  font-family: {typography["font_family_base"]};')
+    if 'font_size_base' in typography:
+        css_rules.append(f'  font-size: {typography["font_size_base"]};')
+    if 'line_height_base' in typography:
+        css_rules.append(f'  line-height: {typography["line_height_base"]};')
+    if 'text_color_base' in typography:
+        css_rules.append(f'  color: {typography["text_color_base"]};')
+    elif 'dark' in style_guide.get('colors', {}):
+        css_rules.append(f'  color: var(--dark);')
+    css_rules.append('  margin: 0;') # Basic reset
+    css_rules.append('  padding: 0;') # Basic reset
+    css_rules.append('}')
+    css_rules.append('')
+
+    # 3. Heading Styles
+    if 'font_family_heading' in typography:
+        css_rules.append(f'h1, h2, h3, h4, h5, h6 {{ font-family: {typography["font_family_heading"]}; }}')
+        css_rules.append('')
+
+    for tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a']:
+        if tag in typography:
+            tag_styles = typography[tag]
+            css_rules.append(f'{tag} {{')
+            for prop, value in tag_styles.items():
+                # Convert snake_case to kebab-case for CSS properties
+                css_prop = prop.replace('_', '-')
+                css_rules.append(f'  {css_prop}: {value};')
+            css_rules.append('}')
+            css_rules.append('')
+
+    # 4. Spacing (basic implementation with utility classes)
+    if 'spacing' in style_guide:
+        spacing = style_guide['spacing']
+        # Define utility classes for margin/padding based on spacing units
+        for prefix, prop in [('mt', 'margin-top'), ('mb', 'margin-bottom'),
+                             ('pt', 'padding-top'), ('pb', 'padding-bottom')]:
+            for size_name, size_value in spacing.items():
+                # Avoid 'unit' if it's just a base unit definition
+                if size_name != 'unit':
+                    css_rules.append(f'.{prefix}-{size_name} {{ {prop}: {size_value}; }}')
+        css_rules.append('')
+
+    # 5. Basic Responsive Adjustments (Media Queries)
+    if 'responsive' in style_guide and 'breakpoints' in style_guide['responsive']:
+        breakpoints = style_guide['responsive']['breakpoints']
+
+        # Sort breakpoints to ensure correct min-width cascade (e.g., mobile-first)
+        # Assumes breakpoint values are in 'px' and can be converted to int for sorting.
+        sorted_breakpoints = sorted(breakpoints.items(), key=lambda item: int(item[1].replace('px', '').strip()))
+
+        for bp_name, bp_value in sorted_breakpoints:
+            css_rules.append(f'@media (min-width: {bp_value}) {{')
+            
+            # Apply responsive typography adjustments if defined in style guide
+            for element_tag in ['body', 'h1', 'h2', 'h3', 'p']: # Extend as needed
+                responsive_key = f'{element_tag}_{bp_name}'
+                if responsive_key in typography:
+                    responsive_styles = typography[responsive_key]
+                    css_rules.append(f'  {element_tag} {{')
+                    for prop, value in responsive_styles.items():
+                        css_rules.append(f'    {prop.replace("_", "-")}: {value};')
+                    css_rules.append(f'  }}')
+            
+            css_rules.append('}')
+            css_rules.append('')
+
+    # Join all CSS rules into a single string
+    styled_css_content = '\n'.join(css_rules)
+
+    # 6. Integrate CSS into HTML using BeautifulSoup
+    soup = BeautifulSoup(raw_html_file, 'html.parser')
+    head = soup.find('head')
+
+    # If no head tag exists, create one and insert it
+    if not head:
+        head = soup.new_tag('head')
+        if soup.html:
+            soup.html.insert(0, head)
+        else:
+            # If no html tag, wrap everything in html and add head
+            new_soup = BeautifulSoup('<!DOCTYPE html><html></html>', 'html.parser')
+            new_soup.html.append(head)
+            # Append existing body or the entire original content if no body
+            new_soup.html.append(

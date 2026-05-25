@@ -253,11 +253,11 @@ class TestGenerator:
     when no contract is available.
     """
 
-    def __init__(self, claude_driver, ollama_driver, context_builder, notify_fn: Optional[Callable] = None):
-        self.claude = claude_driver
+    def __init__(self, ollama_driver, context_builder, notify_fn: Optional[Callable] = None):
         self.ollama = ollama_driver
-        self.builder = context_builder
-        self.notify = notify_fn or (lambda *a, **kw: None)
+        self.gemini = gemini_driver
+        self.builder = builder
+        self.notify = notify_fn
 
     async def generate_for_project(
         self,
@@ -366,7 +366,7 @@ class TestGenerator:
         template = "test_engineer" if typed_module else "code_generator"
         system = FRAMEWORK_SYSTEM_HINTS.get(framework, "Generás tests de software.")
 
-        # Try Qwen first (fast), escalate to Claude on failure
+        # Try Qwen first (fast), escalate to Gemini on failure
         try:
             payload = self.builder.build_payload("ollama", template, prompt)
             raw = await self.ollama.prompt(system, payload["user"])
@@ -375,9 +375,9 @@ class TestGenerator:
         except Exception:
             pass
 
-        # Claude escalation — always use test_engineer template for quality
-        payload = self.builder.build_payload("claude", "test_engineer", prompt)
-        raw = await self.claude.prompt(payload.get("system", system), payload["user"])
+        # Gemini escalation — always use test_engineer template for quality
+        payload = self.builder.build_payload("gemini", "test_engineer", prompt)
+        raw = await self.gemini.prompt(payload.get("system", system), payload["user"])
         return self._strip_fence(raw or "")
 
     @staticmethod

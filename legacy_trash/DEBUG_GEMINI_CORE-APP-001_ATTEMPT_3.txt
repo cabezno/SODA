@@ -1,0 +1,100 @@
+```cpp
+#include <windows.h>
+#include <tchar.h> // For _TCHAR and related macros
+
+// Global variables for the application framework
+const TCHAR g_szClassName[] = _T("CoreAppWindowClass");
+HINSTANCE g_hInst = NULL;
+
+// Forward declaration of the Window Procedure
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// WinMain entry point: Establishes the foundational C++ Windows desktop application framework.
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+    g_hInst = hInstance; // Store instance handle for potential future use
+
+    WNDCLASSEX wc;
+    HWND hwnd;
+    MSG Msg;
+
+    // Step 1: Registering the Window Class
+    // This defines the properties of the window, such as its procedure, icon, cursor, and background.
+    wc.cbSize        = sizeof(WNDCLASSEX);
+    wc.style         = 0; // Default style
+    wc.lpfnWndProc   = WndProc; // Pointer to the window procedure
+    wc.cbClsExtra    = 0; // No extra class memory
+    wc.cbWndExtra    = 0; // No extra window memory
+    wc.hInstance     = hInstance; // Handle to the instance that contains the window procedure
+    wc.hIcon         = LoadIcon(NULL, IDI_APPLICATION); // Default application icon
+    wc.hCursor       = LoadCursor(NULL, IDC_ARROW); // Default arrow cursor
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); // Default window background color
+    wc.lpszMenuName  = NULL; // No menu
+    wc.lpszClassName = g_szClassName; // Name of the window class
+    wc.hIconSm       = LoadIcon(NULL, IDI_APPLICATION); // Small icon
+
+    if (!RegisterClassEx(&wc))
+    {
+        MessageBox(NULL, _T("Window Registration Failed!"), _T("Error"), MB_ICONEXCLAMATION | MB_OK);
+        return 0; // Application failed to initialize
+    }
+
+    // Step 2: Creating the Window
+    // This creates an actual window based on the registered class.
+    hwnd = CreateWindowEx(
+        WS_EX_CLIENTEDGE, // Extended window style (e.g., sunken edge)
+        g_szClassName,    // Name of the window class
+        _T("CORE-APP-001: Windows Desktop Application"), // Window title
+        WS_OVERLAPPEDWINDOW, // Standard overlapped window style (title bar, border, min/max buttons)
+        CW_USEDEFAULT, CW_USEDEFAULT, // Default x, y position
+        800, 600, // Default width, height
+        NULL,     // No parent window
+        NULL,     // No menu
+        hInstance, // Handle to the application instance
+        NULL);    // No window creation data
+
+    if (hwnd == NULL)
+    {
+        MessageBox(NULL, _T("Window Creation Failed!"), _T("Error"), MB_ICONEXCLAMATION | MB_OK);
+        return 0; // Application failed to create window
+    }
+
+    // Display and update the window
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    // Step 3: The Message Loop (Event Handling)
+    // This loop retrieves messages from the application's message queue and dispatches them
+    // to the appropriate window procedure. This is the core of event handling.
+    while (GetMessage(&Msg, NULL, 0, 0) > 0)
+    {
+        TranslateMessage(&Msg); // Translates virtual-key messages into character messages
+        DispatchMessage(&Msg);  // Dispatches a message to a window procedure
+    }
+
+    // Return the wParam of the WM_QUIT message, which is typically 0.
+    return Msg.wParam;
+}
+
+// Step 4: The Window Procedure (WndProc)
+// This function handles messages sent to the window. It's the central point for event handling.
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+        case WM_CLOSE:
+            // Handles the close button click. Destroys the window.
+            DestroyWindow(hwnd);
+            break;
+        case WM_DESTROY:
+            // Handles the window being destroyed. Posts a quit message to terminate the application.
+            PostQuitMessage(0);
+            break;
+        // Add more message handling here for other UI interactions and events
+        default:
+            // For any messages not explicitly handled, call the default window procedure.
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0; // Message handled
+}
+```

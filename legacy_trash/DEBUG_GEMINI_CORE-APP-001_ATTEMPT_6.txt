@@ -1,0 +1,138 @@
+```cpp
+// CMakeLists.txt
+cmake_minimum_required(VERSION 3.10)
+
+project(CoreAppFramework CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Add the executable, specifying WIN32 to create a windowed application
+# (no console window).
+add_executable(CoreApp WIN32 main.cpp)
+
+# Link against necessary Windows libraries for UI and graphics.
+target_link_libraries(CoreApp PRIVATE user32 gdi32)
+
+// --- main.cpp ---
+#if !defined(UNICODE)
+#define UNICODE
+#endif
+#if !defined(_UNICODE)
+#define _UNICODE
+#endif
+
+#include <windows.h>
+
+// Global constant for the main window class name
+const wchar_t CLASS_NAME[] = L"CoreAppWindowClass";
+
+// Forward declaration of the Window Procedure
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+// Entry point for a Windows application
+int WINAPI WinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPSTR lpCmdLine,
+    _In_ int nShowCmd)
+{
+    // 1. Register the window class.
+    WNDCLASSEXW wc = { };
+
+    wc.cbSize = sizeof(WNDCLASSEXW);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = CLASS_NAME;
+    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+
+    if (!RegisterClassExW(&wc))
+    {
+        MessageBoxW(NULL, L"Window Registration Failed!", L"Error", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // 2. Create the window.
+    HWND hwnd = CreateWindowExW(
+        0,                              // Optional window styles.
+        CLASS_NAME,                     // Window class
+        L"Core Application Framework",  // Window text
+        WS_OVERLAPPEDWINDOW,            // Window style
+
+        // Size and position
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
+
+        NULL,       // Parent window    
+        NULL,       // Menu
+        hInstance,  // Instance handle
+        NULL        // Additional application data
+    );
+
+    if (hwnd == NULL)
+    {
+        MessageBoxW(NULL, L"Window Creation Failed!", L"Error", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // 3. Show and update the window.
+    ShowWindow(hwnd, nShowCmd);
+    UpdateWindow(hwnd);
+
+    // 4. The message loop.
+    MSG msg = { };
+    // This loop retrieves messages from the application's message queue and dispatches them
+    // to the appropriate window procedure.
+    while (GetMessage(&msg, NULL, 0, 0) > 0)
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    return (int)msg.wParam;
+}
+
+// Window Procedure: handles messages for the main window.
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_DESTROY:
+        // This message is sent when the window is being destroyed (e.g., user clicks the 'X' button).
+        // PostQuitMessage signals the system to terminate the message loop.
+        PostQuitMessage(0);
+        return 0;
+
+    case WM_PAINT:
+        {
+            // This message is sent when the window's client area needs to be redrawn.
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+
+            // All painting occurs here, between BeginPaint and EndPaint.
+            RECT clientRect;
+            GetClientRect(hWnd, &clientRect);
+
+            // Set text color and background mode
+            SetTextColor(hdc, RGB(0, 0, 0));
+            SetBkMode(hdc, TRANSPARENT);
+            
+            // Draw text in the center of the window
+            const wchar_t* text = L"Windows Desktop Application Framework Initialized.";
+            DrawTextW(hdc, text, -1, &clientRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+            EndPaint(hWnd, &ps);
+        }
+        return 0;
+    
+    // Handle other messages by passing them to the default window procedure.
+    // This is crucial for default window behavior (like moving, resizing, etc.).
+    default:
+        return DefWindowProcW(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+```

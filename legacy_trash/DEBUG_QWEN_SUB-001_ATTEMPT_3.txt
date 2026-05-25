@@ -1,0 +1,98 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Responsive React Landing Page</title>
+  <style>
+    /* Add your CSS here */
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f9;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      width: 80%;
+      margin: 50px auto;
+      padding: 20px;
+      background-color: #fff;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    form {
+      display: flex;
+      flex-direction: column;
+    }
+    label {
+      margin-top: 10px;
+    }
+    input[type="email"] {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #007BFF;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="module">
+    import React from 'react';
+    import ReactDOM from 'react-dom';
+
+    function LandingPage({ productInfoContent, backendApiEndpoint }) {
+      const handleSubmit = async (event) => {
+        event.preventDefault();
+        const email = event.target.elements.email.value;
+        const response = await fetch(backendApiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email })
+        });
+        if (response.ok) {
+          alert('Email submitted successfully!');
+        } else {
+          alert('Failed to submit email. Please try again.');
+        }
+      };
+
+      return (
+        <div className="container">
+          <h1>Product Information</h1>
+          <div dangerouslySetInnerHTML={{ __html: productInfoContent }} />
+          <h2>Contact Us</h2>
+          <form onSubmit={handleSubmit}>
+            <label htmlFor="email">Email:</label>
+            <input type="email" id="email" name="email" required />
+            <button type="submit">Submit Email</button>
+          </form>
+        </div>
+      );
+    }
+
+    const productInfoContent = '<p>Check out our latest product!</p>';
+    const backendApiEndpoint = 'https://api.example.com/lead';
+
+    ReactDOM.render(
+      <LandingPage productInfoContent={productInfoContent} backendApiEndpoint={backendApiEndpoint} />,
+      document.getElementById('root')
+    );
+  </script>
+</body>
+</html>
+```

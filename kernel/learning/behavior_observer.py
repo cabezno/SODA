@@ -1,7 +1,7 @@
 """
 BehaviorObserver — captures AI behavior at every pipeline step.
 
-Records observations from all providers (Qwen, Claude, Gemini) across all roles
+Records observations from all providers (Qwen, Gemini, Gemini) across all roles
 (code_generator, global_architect, requirements_interviewer, etc.) and stores them
 as append-only JSONL files for subsequent knowledge base construction.
 
@@ -91,7 +91,7 @@ class BehaviorObserver:
         *,
         filepath: str,
         qwen_attempts: list[str],   # last error from each Qwen attempt
-        cloud_provider: str,         # "claude" | "gemini" | "claude_haiku"
+        cloud_provider: str,         # "gemini" | "gemini" | "gemini_haiku"
         cloud_response_snippet: str,
         cloud_validated: bool,
         failure_reason: str = "",

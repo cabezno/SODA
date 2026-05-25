@@ -29,10 +29,13 @@ class OpenAIDriver(BaseDriver):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         response_format: str = "text",
+        model: str | None = None,
         images: list | None = None,
         metadata: dict | None = None,
+        **kwargs,
     ) -> DriverResponse:
         t0 = perf_counter()
+        target_model = model or self.model
 
         if not self.api_key:
             return self._build_response(
@@ -40,12 +43,12 @@ class OpenAIDriver(BaseDriver):
                 system_prompt=system_prompt,
                 user_message=user_message,
                 latency_start=t0,
-                model_used=self.model,
+                model_used=target_model,
                 metadata=metadata,
             )
 
         payload = {
-            "model": self.model,
+            "model": target_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -80,7 +83,7 @@ class OpenAIDriver(BaseDriver):
                     system_prompt=system_prompt,
                     user_message=user_message,
                     latency_start=t0,
-                    model_used=self.model,
+                    model_used=target_model,
                     metadata=metadata,
                 )
 

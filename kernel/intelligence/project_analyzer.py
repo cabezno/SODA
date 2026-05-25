@@ -105,14 +105,25 @@ Respondé SOLO con este JSON exacto (sin texto adicional):
   ],
   "migration_targets": ["lenguajes recomendados para migrar, si aplica"],
   "complexity": "low|medium|high",
-  "estimated_effort": "descripción del esfuerzo para mejorar/completar"
-}}"""
+  "estimated_effort": "descripción del esfuerzo para mejorar/completar",
+  "questions": [
+    {{"id": "q1", "question": "pregunta específica basada en los problemas detectados", "type": "choice", "options": ["opción A", "opción B", "opción C", "Decidir automáticamente"]}},
+    {{"id": "q2", "question": "otra pregunta concreta sobre prioridades o alcance", "type": "choice", "options": ["opción A", "opción B", "Decidir automáticamente"]}}
+  ]
+}}
+
+REGLAS PARA "questions":
+- Generá entre 2 y 5 preguntas CONCRETAS basadas en los problemas reales que encontraste en ESTE proyecto.
+- NO hagas preguntas genéricas. Cada pregunta debe referenciar algo específico del código analizado.
+- Ejemplos buenos: "El módulo auth.py no tiene validación de tokens expirados. ¿Querés que SODA lo corrija automáticamente o lo revisás vos?", "Detecté 3 funciones duplicadas entre utils.py y helpers.py. ¿Las consolidamos en un módulo compartido?"
+- Siempre incluí "Decidir automáticamente" como última opción para que el usuario pueda delegar.
+- Si el proyecto está bien y no hay problemas claros, podés devolver "questions": []"""
 
 
 async def analyze_project(
     root: Path,
     extra_context: str = "",
-    prefer_claude: bool = True,
+    prefer_gemini: bool = True,
 ) -> dict:
     """Run full project analysis using AI. Returns the structured analysis dict."""
     files = collect_project_files(root)
@@ -132,9 +143,9 @@ async def analyze_project(
 
     raw = ""
     try:
-        if prefer_claude:
-            from kernel.drivers.claude_driver import ClaudeDriver
-            raw = await ClaudeDriver().prompt(system, prompt)
+        if prefer_gemini:
+            from kernel.drivers.gemini_driver import GeminiDriver
+            raw = await GeminiDriver().prompt(system, prompt)
         else:
             raise RuntimeError("skip")
     except Exception:

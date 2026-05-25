@@ -1,0 +1,30 @@
+```python
+def generate_contact_page(form_fields_config, site_style_guide):
+    # Generate HTML content
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact</title>
+    <link rel="stylesheet" href="{site_style_guide['css_file_path']}">
+</head>
+<body>
+    <div class="container">
+        <h1>Contact Us</h1>
+        <form action="/submit_contact" method="post">
+            {''.join([f'<label for="{field["name"]}">{field["label"]}</label><br><input type="{field["type"]}" id="{field["name"]}" name="{field["name"]}"><br>' for field in form_fields_config])}
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+    # Write HTML to file
+    with open(site_style_guide['html_file_path'], 'w') as html_file:
+        html_file.write(html_content)
+
+    return site_style_guide['html_file_path']
+```

@@ -1,0 +1,61 @@
+```cpp
+#include <windows.h>
+
+// Function to register the window class
+ATOM RegisterWindowClass(HINSTANCE hInstance) {
+    WNDCLASSEX wcex;
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.style          = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc    = DefWindowProc;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+    wcex.hInstance      = hInstance;
+    wcex.hIcon          = LoadIcon(NULL, IDI_APPLICATION);
+    wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
+    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
+    wcex.lpszMenuName   = NULL;
+    wcex.lpszClassName  = "MainAppClass";
+    wcex.hIconSm        = LoadIcon(NULL, IDI_APPLICATION);
+
+    return RegisterClassEx(&wcex);
+}
+
+// WinMain function
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    if (!RegisterWindowClass(hInstance)) {
+        MessageBox(NULL, "Failed to register window class", "Error", MB_OK | MB_ICONERROR);
+        return 0;
+    }
+
+    HWND hWnd = CreateWindowEx(
+        0,                              // Optional window styles.
+        "MainAppClass",                   // Window class
+        "My Application",               // Window text
+        WS_OVERLAPPEDWINDOW,            // Window style
+
+        // Size and position
+        CW_USEDEFAULT, CW_USEDEFAULT,    // Position (x, y)
+        CW_USEDEFAULT, CW_USEDEFAULT,    // Size (width, height)
+
+        NULL,       // Parent window    
+        NULL,       // Menu
+        hInstance,  // Instance handle
+        NULL        // Additional application data
+    );
+
+    if (hWnd == NULL) {
+        MessageBox(NULL, "Failed to create window", "Error", MB_OK | MB_ICONERROR);
+        return 0;
+    }
+
+    ShowWindow(hWnd, nCmdShow);
+
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    return (int) msg.wParam;
+}
+```

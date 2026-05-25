@@ -1,0 +1,52 @@
+```php
+<?php
+
+// Validate the recipient email address
+function validateEmail($email) {
+    return filter_var($email, FILTER_VALIDATE_EMAIL);
+}
+
+// Send the email
+function sendEmail($recipient, $formData) {
+    $to = $recipient;
+    $subject = "Form Submission";
+    $message = "Received form data:\n\n";
+    foreach ($formData as $key => $value) {
+        $message .= "$key: $value\n";
+    }
+    $headers = 'From: your_email@example.com' . "\r\n" .
+               'Reply-To: your_email@example.com' . "\r\n" .
+               'X-Mailer: PHP/' . phpversion();
+    
+    return mail($to, $subject, $message, $headers);
+}
+
+// Main function to handle the form submission
+function handleFormSubmission($recipient_email_address, $form_field_names) {
+    if (!validateEmail($recipient_email_address)) {
+        return json_encode(['status' => 'failure', 'message' => 'Invalid recipient email address']);
+    }
+    
+    // Get form data from POST request
+    $formData = [];
+    foreach ($form_field_names as $name) {
+        if (isset($_POST[$name])) {
+            $formData[$name] = $_POST[$name];
+        }
+    }
+    
+    // Send the email
+    if (sendEmail($recipient_email_address, $formData)) {
+        return json_encode(['status' => 'success', 'message' => 'Form data submitted successfully']);
+    } else {
+        return json_encode(['status' => 'failure', 'message' => 'Failed to send form data']);
+    }
+}
+
+// Example usage
+$recipient_email_address = $_POST['recipient_email_address'];
+$form_field_names = json_decode($_POST['form_field_names'], true);
+echo handleFormSubmission($recipient_email_address, $form_field_names);
+
+?>
+```
