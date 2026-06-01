@@ -1,5 +1,8 @@
 # Secrets
 .env
+.env.backup
+*.env.*
+soda_config.json
 
 # Python
 __pycache__/
@@ -16,33 +19,31 @@ build/
 .ruff_cache/
 .pytest_cache/
 
-# SODA runtime
-projects/*/chromadb/
-projects/*/logs/
-projects/*/backups/
+# SODA runtime and logs
+logs/
+debug/
+projects/
+OLLAMA/
+.soda_backups/
+.soda_archive/
+.webview_cache/
 .tmp.drivedownload/
 .tmp.driveupload/
 data/
 tasks.db
 .soda_memory/
-soda_config.json
 
-# IDEs
-.vscode/
-.idea/
-*.cursor-*
+# Backups and temp files
+*.backup
+*.bak
+*.tmp
 
 # OS
 .DS_Store
 Thumbs.db
-\
-# SODA runtime and logs
-.soda_backups/
-.soda_archive/
-.webview_cache/
-debug/
-projects/
-OLLAMA/
-SODA-PROJECT - copia/
+
+# Misc
+.vscode/
+.idea/
+*.cursor-*
 *.log
-*.bat\
