@@ -1,0 +1,28 @@
+```python
+class EventManager:
+    def __init__(self, action: str, event_details: dict):
+        self.action = action
+        self.event_details = event_details
+
+    def process_event(self):
+        if self.action == "create":
+            return self.create_event()
+        elif self.action == "edit":
+            return self.edit_event()
+        elif self.action == "delete":
+            return self.delete_event()
+        else:
+            raise ValueError("Invalid action")
+
+    def create_event(self):
+        # Logic to create an event
+        pass
+
+    def edit_event(self):
+        # Logic to edit an event
+        pass
+
+    def delete_event(self):
+        # Logic to delete an event
+        pass
+```

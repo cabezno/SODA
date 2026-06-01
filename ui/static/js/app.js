@@ -1014,60 +1014,67 @@
                 'COPILOT_APPLIED','COPILOT_REJECTED','USER_QUESTION','QUESTION_ANSWERED','OPEN_FILE']);
 
             ws.onmessage = (event) => {
-                const payload = JSON.parse(event.data);
-                const type = payload.event_type || 'LOG';
-                const msg  = payload.message || '';
-                const data = payload.data || {};
+                try {
+                    const payload = JSON.parse(event.data);
+                    const type = payload.event_type || 'LOG';
+                    const msg  = payload.message || '';
+                    const data = payload.data || {};
 
-                // Default log — only for types without a dedicated visual handler
-                if (!_SILENT_LOG.has(type)) log(msg, type, data);
+                    // console.log("WS Event:", type, payload); // Debug
 
-                switch (type) {
-                    case 'START':
-                        setStatus('running');
-                        currentProjectId = data.project_id || null;
-                        recursosInit();
-                        document.getElementById('file-list').innerHTML = '';
-                        document.getElementById('tree-wrap').innerHTML = '';
-                        document.getElementById('tree-section').classList.add('hidden');
-                        document.getElementById('wisdom-panel').innerHTML = '';
-                        document.getElementById('wisdom-panel').classList.add('hidden');
-                        _lockMutating();
-                        hideQuestion();
-                        files = {};
-                        phases.forEach(p => { const el = document.getElementById('ph-' + p); if(el) el.className = 'phase-step'; });
-                        resetProgress();
-                        startTimer();
-                        log(`Pipeline iniciado${data.project_name ? ' — ' + data.project_name : ''}`, 'START');
-                        break;
+                    // Default log — only for types without a dedicated visual handler
+                    if (!_SILENT_LOG.has(type)) log(msg, type, data);
 
-                    case 'ENV_CHECK': {
-                        const icon = data.available ? '✓' : '✗';
-                        const cls  = data.available ? 'DONE' : 'HEALTH_WARN';
-                        const ver  = data.available && data.version ? ` (${data.version})` : '';
-                        log(`${icon} ${data.required_for}${ver}`, cls);
-                        break;
-                    }
+                    switch (type) {
+                        case 'START':
+                            setStatus('running');
+                            currentProjectId = data.project_id || null;
+                            recursosInit();
+                            document.getElementById('file-list').innerHTML = '';
+                            document.getElementById('tree-wrap').innerHTML = '';
+                            const treeSection = document.getElementById('tree-section');
+                            if (treeSection) treeSection.classList.add('hidden');
+                            const wisdomPanel = document.getElementById('wisdom-panel');
+                            if (wisdomPanel) {
+                                wisdomPanel.innerHTML = '';
+                                wisdomPanel.classList.add('hidden');
+                            }
+                            _lockMutating();
+                            hideQuestion();
+                            files = {};
+                            phases.forEach(p => { const el = document.getElementById('ph-' + p); if(el) el.className = 'phase-step'; });
+                            resetProgress();
+                            startTimer();
+                            log(`Pipeline iniciado${data.project_name ? ' — ' + data.project_name : ''}`, 'START');
+                            break;
 
-                    case 'USER_QUESTION':
-                        showQuestion(data.question || msg);
-                        if (window._sodaTTS && (data.question || msg)) {
-                            window._sodaTTS.speak(data.question || msg);
+                        case 'ENV_CHECK': {
+                            const icon = data.available ? '✓' : '✗';
+                            const cls  = data.available ? 'DONE' : 'HEALTH_WARN';
+                            const ver  = data.available && data.version ? ` (${data.version})` : '';
+                            log(`${icon} ${data.required_for}${ver}`, cls);
+                            break;
                         }
-                        log(`[?] ${data.question || msg}`, 'CHECKPOINT');
-                        break;
 
-                    case 'QUESTION_ANSWERED':
-                        hideQuestion();
-                        break;
+                        case 'USER_QUESTION':
+                            showQuestion(data.question || msg);
+                            if (window._sodaTTS && (data.question || msg)) {
+                                window._sodaTTS.speak(data.question || msg);
+                            }
+                            log(`[?] ${data.question || msg}`, 'CHECKPOINT');
+                            break;
 
-                    case 'PHASE_START': {
-                        const phase = data.phase;
-                        if (phase && phase !== 'wisdom' && phase !== 'modification') setPhase(phase);
-                        if (PHASE_PCT[phase]) startPhaseProgress(phase);
-                        log(msg || `Fase: ${phase}`, 'PHASE_START');
-                        break;
-                    }
+                        case 'QUESTION_ANSWERED':
+                            hideQuestion();
+                            break;
+
+                        case 'PHASE_START': {
+                            const phase = data.phase;
+                            if (phase && phase !== 'wisdom' && phase !== 'modification') setPhase(phase);
+                            if (PHASE_PCT[phase]) startPhaseProgress(phase);
+                            log(msg || `Fase: ${phase}`, 'PHASE_START');
+                            break;
+                        }
 
                     case 'CAPABILITIES':
                         if (data.profile) {
@@ -1324,6 +1331,9 @@
                 }
                 // Dispatch generic DOM event so inline scripts can hook any WS event
                 document.dispatchEvent(new CustomEvent('SODA_WS_EVENT', { detail: payload }));
+                } catch (err) {
+                    console.error("Error processing WS message:", err);
+                }
             };
 
             ws.onopen = () => {
@@ -1848,16 +1858,27 @@
         // --- Top-level tab switching ---
         function switchTopTab(tabName) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => {
+                c.classList.remove('active');
+                c.style.display = 'none';
+            });
+            
             const btn = document.querySelector(`.tab[data-tab="${tabName}"]`);
-            const content = document.getElementById(tabName + '-tab');
+            let content = document.getElementById(tabName + '-tab');
+            if (!content) content = document.getElementById(tabName);
+            
             if (btn) btn.classList.add('active');
-            if (content) content.classList.add('active');
+            if (content) {
+                content.classList.add('active');
+                content.style.display = (tabName === 'main' || tabName === 'testui') ? 'flex' : 'block';
+            }
+            
             if (tabName === 'status') loadStatusTab();
             if (tabName === 'config') loadConfigTab();
             if (tabName === 'open') initOpenTab();
             if (tabName === 'codigo') initCodigoTab();
         }
+        window.switchTopTab = switchTopTab;
 
         // ── Import from Code ─────────────────────────────────────────────────
         let importEditor = null;

@@ -1,0 +1,83 @@
+class Object:
+    """Placeholder for generic Object type."""
+    pass
+
+class UserInterface:
+    """Placeholder for UserInterface abstract type."""
+    pass
+
+class SUB_005_Contract:
+    """
+    Implementación del contrato para 'Aplicación Móvil Android de Calendario'.
+
+    Desarrollo de la aplicación móvil nativa para Android (Kotlin) que permite a los usuarios
+    gestionar eventos, ver el calendario y recibir notificaciones. Se comunica con el
+    Backend API y el servicio de autenticación.
+    """
+
+    def __init__(self, user_input_events: Object, google_auth_token: str):
+        """
+        Inicializa el contrato con los inputs requeridos.
+
+        Args:
+            user_input_events (Object): Interacciones del usuario para crear, editar o eliminar
+                                        eventos desde la aplicación móvil.
+            google_auth_token (str): Token de autenticación de Google proporcionado por el usuario
+                                     para iniciar sesión en la aplicación móvil.
+        """
+        self.user_input_events = user_input_events
+        self.google_auth_token = google_auth_token
+
+    def execute(self) -> UserInterface:
+        """
+        Ejecuta la lógica del contrato para producir la interfaz de usuario del dashboard.
+
+        En una implementación real, este método contendría la lógica para procesar
+        los eventos del usuario, interactuar con APIs y generar la interfaz de usuario
+        del calendario.
+
+        Returns:
+            UserInterface: La interfaz de usuario móvil principal que muestra el calendario
+                           de eventos del usuario.
+        """
+        # Placeholder para la lógica de procesamiento.
+        # En un sistema real, esto implicaría:
+        # 1. Validar google_auth_token.
+        # 2. Procesar user_input_events (e.g., llamar a un Backend API para guardar/actualizar eventos).
+        # 3. Recuperar datos del calendario del usuario.
+        # 4. Construir y devolver la representación de la interfaz de usuario.
+
+        print(f"Processing user input events: {self.user_input_events}")
+        print(f"Using Google Auth Token: {self.google_auth_token}")
+
+        # Retorna una instancia de la interfaz de usuario como output.
+        return UserInterface()
+
+# Example Usage (for testing purposes, not part of the contract interface itself)
+if __name__ == "__main__":
+    # Define some dummy input objects
+    class UserEvent:
+        def __init__(self, type, details):
+            self.type = type
+            self.details = details
+        def __repr__(self):
+            return f"UserEvent(type='{self.type}', details={self.details})"
+
+    dummy_events = [
+        UserEvent("create", {"title": "Meeting", "date": "2023-10-27", "time": "10:00"}),
+        UserEvent("edit", {"id": "event-123", "title": "Updated Meeting"}),
+    ]
+    dummy_token = "some_google_auth_token_12345"
+
+    # Instantiate the contract
+    contract_instance = SUB_005_Contract(
+        user_input_events=dummy_events,
+        google_auth_token=dummy_token
+    )
+
+    # Execute the contract to get the output
+    dashboard = contract_instance.execute()
+
+    print(f"\nContract executed. Output type: {type(dashboard)}")
+    print(f"Dashboard object: {dashboard}")
+```

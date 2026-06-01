@@ -1,0 +1,1 @@
+ERROR:CONNECTION: Gemini — ningún modelo respondió. Verificá la API key y conexión

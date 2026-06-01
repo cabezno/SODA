@@ -1,0 +1,19 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplicación Web Frontend de Calendario</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <div id="app"></div>
+
+    <script src="/scripts/react.min.js"></script>
+    <script src="/scripts/react-dom.min.js"></script>
+    <script src="/scripts/typescript.min.js"></script>
+    <script src="/scripts/user_interface.js"></script>
+</body>
+</html>
+```

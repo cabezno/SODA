@@ -1,0 +1,53 @@
+```typescript
+interface BrowserStatus {
+    browserId: string;
+    status: string;
+}
+
+interface SystemStatus {
+    cpuUsage: number;
+    gpuUsage: number;
+    activeBrowserCount: number;
+    operationalLogs: string[];
+}
+
+interface Notification {
+    type: 'alert' | 'info';
+    message: string;
+}
+
+function generateSystemDashboardData(
+    current_cpu_usage: number,
+    current_gpu_usage: number,
+    active_browser_count: number,
+    resource_threshold_breached: boolean,
+    browser_instance_status: BrowserStatus[]
+): { system_dashboard_data: SystemStatus; user_alert?: Notification } {
+    const operationalLogs: string[] = []; // This should be populated with actual logs
+
+    if (resource_threshold_breached) {
+        operationalLogs.push('Resource threshold breached!');
+        return {
+            system_dashboard_data: {
+                cpuUsage: current_cpu_usage,
+                gpuUsage: current_gpu_usage,
+                activeBrowserCount: active_browser_count,
+                operationalLogs
+            },
+            user_alert: {
+                type: 'alert',
+                message: 'Resource threshold reached. Please monitor usage.'
+            }
+        };
+    }
+
+    return {
+        system_dashboard_data: {
+            cpuUsage: current_cpu_usage,
+            gpuUsage: current_gpu_usage,
+            activeBrowserCount: active_browser_count,
+            operationalLogs
+        }
+    };
+}
+```

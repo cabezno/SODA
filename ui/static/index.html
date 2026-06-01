@@ -806,12 +806,12 @@
     <body>
     <div id="tab-bar">
         <button id="sidebar-toggle" onclick="toggleMobileSidebar()" title="Mostrar/ocultar panel lateral"><i class="fa fa-bars"></i></button>
-        <button class="tab active" data-tab="main"><i class="fa fa-rocket"></i>Principal</button>
-        <button class="tab" data-tab="crear"><i class="fa fa-plus-circle"></i>Crear</button>
-        <button class="tab" data-tab="codigo"><i class="fa fa-code"></i>Código</button>
-        <button class="tab" data-tab="sistema"><i class="fa fa-cogs"></i>Sistema</button>
-        <button class="tab" data-tab="conectividad"><i class="fa fa-qrcode"></i>Conectividad</button>
-        <button class="tab" data-tab="testui"><i class="fa fa-desktop"></i>Test UI</button>
+        <button class="tab active" data-tab="main" onclick="switchTopTab('main')"><i class="fa fa-rocket"></i>Principal</button>
+        <button class="tab" data-tab="crear" onclick="switchTopTab('crear')"><i class="fa fa-plus-circle"></i>Crear</button>
+        <button class="tab" data-tab="codigo" onclick="switchTopTab('codigo')"><i class="fa fa-code"></i>Código</button>
+        <button class="tab" data-tab="sistema" onclick="switchTopTab('sistema')"><i class="fa fa-cogs"></i>Sistema</button>
+        <button class="tab" data-tab="conectividad" onclick="switchTopTab('conectividad')"><i class="fa fa-qrcode"></i>Conectividad</button>
+        <button class="tab" data-tab="testui" onclick="switchTopTab('testui')"><i class="fa fa-desktop"></i>Test UI</button>
         <div style="display:flex;align-items:center;margin-left:auto;height:100%;">
         <div id="model-selector-container" style="display:flex;align-items:center;gap:7px;padding:0 14px;border-left:1px solid rgba(255,255,255,.07);">
             <i class="fa fa-microchip" style="font-size:13px;color:#3b82f6;"></i>
@@ -1570,7 +1570,7 @@
     </div>
 
     <script src="/static/js/tts.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=soda_fusion"></script>
     <script>
     // ── Responsive UI patches ──────────────────────────────────────────────
 
@@ -1672,35 +1672,6 @@
             typeof loadCustomProviders === 'function' && loadCustomProviders();
         }
     }
-
-    // Override switchTopTab to handle legacy names → merged tabs
-    const _origSwitchTopTab = switchTopTab;
-    switchTopTab = function(tabName) {
-        const creatorMap = { 'new': 'nuevo', 'import': 'codigo', 'open': 'abrir' };
-        const sistemaMap = { 'status': 'estado', 'config': 'cfg' };
-
-        function _activateTab(name) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            const btn = document.querySelector('.tab[data-tab="' + name + '"]');
-            const content = document.getElementById(name + '-tab');
-            if (btn) btn.classList.add('active');
-            if (content) content.classList.add('active');
-        }
-
-        if (creatorMap[tabName]) {
-            _activateTab('crear');
-            switchCrear(creatorMap[tabName]);
-            return;
-        }
-        if (sistemaMap[tabName]) {
-            _activateTab('sistema');
-            switchSistema(sistemaMap[tabName]);
-            return;
-        }
-        // main / crear / sistema → original behavior
-        _activateTab(tabName);
-    };
 
     // Patch config-tab observer: watch sistema-cfg instead
     document.addEventListener('DOMContentLoaded', () => {
